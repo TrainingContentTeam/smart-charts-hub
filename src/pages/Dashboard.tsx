@@ -1,150 +1,215 @@
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { Clock, FolderOpen, TrendingUp, Award, Layers } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, Legend,
+} from "recharts";
+import { Clock, FolderOpen, TrendingUp, Award, Layers, CalendarDays } from "lucide-react";
 
 const COLORS = [
-  "hsl(230, 65%, 52%)",
-  "hsl(262, 60%, 55%)",
-  "hsl(173, 58%, 39%)",
-  "hsl(38, 92%, 50%)",
-  "hsl(0, 72%, 51%)",
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
   "hsl(200, 60%, 50%)",
   "hsl(320, 60%, 50%)",
   "hsl(150, 50%, 45%)",
 ];
 
-function buildGroupedBar(entries: any[], projects: any[], field: string) {
-  const projectMap = new Map(projects.map((p: any) => [p.id, p]));
-  const map: Record<string, number> = {};
-  entries.forEach((e: any) => {
-    const project = projectMap.get(e.project_id);
-    const val = project?.[field] || "Unknown";
-    if (val && val !== "Unknown") {
-      map[val] = (map[val] || 0) + Number(e.hours);
-    }
-  });
-  return Object.entries(map)
-    .map(([name, hours]) => ({ name: name.length > 20 ? name.slice(0, 20) + "…" : name, hours: Math.round(hours * 100) / 100 }))
-    .sort((a, b) => b.hours - a.hours);
-}
-
 export default function Dashboard() {
   const { data: entries = [], isLoading: entriesLoading } = useTimeEntries();
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
 
+  const isLoading = entriesLoading || projectsLoading;
+
+  // Build lookup maps
+  const projectMap = useMemo(
+    () => new Map(projects.map((p: any) => [p.id, p])),
+    [projects]
+  );
+
+  // --- KPI stats ---
   const stats = useMemo(() => {
-    const totalHours = entries.reduce((sum, e) => sum + Number(e.hours), 0);
+    const totalHours = entries.reduce((s, e) => s + Number(e.hours), 0);
+    const projectsWithTime = new Set(entries.map((e) => e.project_id).filter(Boolean));
     const phases = new Set(entries.map((e) => e.phase));
-    const projectHours: Record<string, number> = {};
+    const years = new Set(projects.map((p: any) => p.reporting_year).filter(Boolean));
+
+    // Top phase by total hours
+    const phaseHours: Record<string, number> = {};
     entries.forEach((e) => {
-      const name = (e.projects as any)?.name || "Unknown";
-      projectHours[name] = (projectHours[name] || 0) + Number(e.hours);
+      phaseHours[e.phase] = (phaseHours[e.phase] || 0) + Number(e.hours);
     });
-    const topProject = Object.entries(projectHours).sort((a, b) => b[1] - a[1])[0];
+    const topPhase = Object.entries(phaseHours).sort((a, b) => b[1] - a[1])[0];
 
     return {
       totalHours: Math.round(totalHours * 100) / 100,
-      projectCount: projects.length,
-      avgHours: projects.length ? Math.round((totalHours / projects.length) * 100) / 100 : 0,
-      topProject: topProject?.[0] || "N/A",
+      totalCourses: projects.length,
+      coursesWithTime: projectsWithTime.size,
+      avgHoursPerCourse: projectsWithTime.size
+        ? Math.round((totalHours / projectsWithTime.size) * 10) / 10
+        : 0,
       phaseCount: phases.size,
+      yearCount: years.size,
+      topPhase: topPhase?.[0] || "N/A",
     };
   }, [entries, projects]);
 
-  const hoursByProject = useMemo(() => {
+  // --- Courses per year ---
+  const coursesPerYear = useMemo(() => {
     const map: Record<string, number> = {};
-    entries.forEach((e) => {
-      const name = (e.projects as any)?.name || "Unknown";
-      map[name] = (map[name] || 0) + Number(e.hours);
+    projects.forEach((p: any) => {
+      const year = (p.reporting_year || "").replace(/\s*\(\d+\)$/, "").trim();
+      if (year) map[year] = (map[year] || 0) + 1;
     });
     return Object.entries(map)
-      .map(([name, hours]) => ({ name: name.length > 25 ? name.slice(0, 25) + "…" : name, hours: Math.round(hours * 100) / 100 }))
-      .sort((a, b) => b.hours - a.hours);
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [projects]);
+
+  // --- Average hours per phase (across all courses that have that phase) ---
+  const avgHoursPerPhase = useMemo(() => {
+    const phaseTotal: Record<string, number> = {};
+    const phaseProjects: Record<string, Set<string>> = {};
+    entries.forEach((e) => {
+      phaseTotal[e.phase] = (phaseTotal[e.phase] || 0) + Number(e.hours);
+      if (!phaseProjects[e.phase]) phaseProjects[e.phase] = new Set();
+      if (e.project_id) phaseProjects[e.phase].add(e.project_id);
+    });
+    return Object.entries(phaseTotal)
+      .map(([phase, total]) => ({
+        name: phase.length > 25 ? phase.slice(0, 25) + "…" : phase,
+        fullName: phase,
+        avgHours: Math.round((total / (phaseProjects[phase]?.size || 1)) * 10) / 10,
+        totalHours: Math.round(total * 10) / 10,
+        courseCount: phaseProjects[phase]?.size || 0,
+      }))
+      .sort((a, b) => b.avgHours - a.avgHours);
   }, [entries]);
 
-  const hoursByPhase = useMemo(() => {
+  // --- Average total hours per course by year ---
+  const avgHoursByYear = useMemo(() => {
+    // Sum hours per project
+    const projectHoursMap: Record<string, number> = {};
+    entries.forEach((e) => {
+      if (e.project_id) {
+        projectHoursMap[e.project_id] = (projectHoursMap[e.project_id] || 0) + Number(e.hours);
+      }
+    });
+    // Group by year
+    const yearTotals: Record<string, { sum: number; count: number }> = {};
+    Object.entries(projectHoursMap).forEach(([projectId, hours]) => {
+      const project = projectMap.get(projectId);
+      const year = (project?.reporting_year || "").replace(/\s*\(\d+\)$/, "").trim();
+      if (!year) return;
+      if (!yearTotals[year]) yearTotals[year] = { sum: 0, count: 0 };
+      yearTotals[year].sum += hours;
+      yearTotals[year].count += 1;
+    });
+    return Object.entries(yearTotals)
+      .map(([name, { sum, count }]) => ({
+        name,
+        avgHours: Math.round((sum / count) * 10) / 10,
+        courses: count,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [entries, projectMap]);
+
+  // --- Phase distribution pie ---
+  const phasePie = useMemo(() => {
     const map: Record<string, number> = {};
     entries.forEach((e) => {
       map[e.phase] = (map[e.phase] || 0) + Number(e.hours);
     });
     return Object.entries(map)
-      .map(([name, value]) => ({ name: name.length > 20 ? name.slice(0, 20) + "…" : name, value: Math.round(value * 100) / 100 }))
+      .map(([name, value]) => ({
+        name: name.length > 20 ? name.slice(0, 20) + "…" : name,
+        value: Math.round(value * 10) / 10,
+      }))
       .sort((a, b) => b.value - a.value);
   }, [entries]);
 
-  const hoursByQuarter = useMemo(() => {
-    const map: Record<string, number> = {};
+  // --- Hours by course type ---
+  const hoursByCourseType = useMemo(() => {
+    const map: Record<string, { total: number; count: number }> = {};
+    const projectHoursMap: Record<string, number> = {};
     entries.forEach((e) => {
-      const q = e.quarter || "Unknown";
-      map[q] = (map[q] || 0) + Number(e.hours);
+      if (e.project_id)
+        projectHoursMap[e.project_id] = (projectHoursMap[e.project_id] || 0) + Number(e.hours);
+    });
+    Object.entries(projectHoursMap).forEach(([projectId, hours]) => {
+      const project = projectMap.get(projectId);
+      const type = project?.course_type || "";
+      if (!type) return;
+      if (!map[type]) map[type] = { total: 0, count: 0 };
+      map[type].total += hours;
+      map[type].count += 1;
     });
     return Object.entries(map)
-      .map(([name, hours]) => ({ name, hours: Math.round(hours * 100) / 100 }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [entries]);
+      .map(([name, { total, count }]) => ({
+        name,
+        avgHours: Math.round((total / count) * 10) / 10,
+        courses: count,
+      }))
+      .sort((a, b) => b.avgHours - a.avgHours);
+  }, [entries, projectMap]);
 
-  // New metadata charts
-  const hoursByTool = useMemo(() => buildGroupedBar(entries, projects, "authoring_tool"), [entries, projects]);
-  const hoursByType = useMemo(() => buildGroupedBar(entries, projects, "course_type"), [entries, projects]);
-  const hoursByVertical = useMemo(() => buildGroupedBar(entries, projects, "vertical"), [entries, projects]);
-  const hoursByYear = useMemo(() => buildGroupedBar(entries, projects, "reporting_year"), [entries, projects]);
-  const hoursByPerson = useMemo(() => buildGroupedBar(entries, projects, "id_assigned"), [entries, projects]);
+  // --- Hours by authoring tool ---
+  const hoursByTool = useMemo(() => {
+    const map: Record<string, { total: number; count: number }> = {};
+    const projectHoursMap: Record<string, number> = {};
+    entries.forEach((e) => {
+      if (e.project_id)
+        projectHoursMap[e.project_id] = (projectHoursMap[e.project_id] || 0) + Number(e.hours);
+    });
+    Object.entries(projectHoursMap).forEach(([projectId, hours]) => {
+      const project = projectMap.get(projectId);
+      const tool = project?.authoring_tool || "";
+      if (!tool) return;
+      if (!map[tool]) map[tool] = { total: 0, count: 0 };
+      map[tool].total += hours;
+      map[tool].count += 1;
+    });
+    return Object.entries(map)
+      .map(([name, { total, count }]) => ({
+        name,
+        avgHours: Math.round((total / count) * 10) / 10,
+        courses: count,
+      }))
+      .sort((a, b) => b.avgHours - a.avgHours);
+  }, [entries, projectMap]);
 
-  const isLoading = entriesLoading || projectsLoading;
   const hasData = entries.length > 0;
-  const hasMetadata = hoursByTool.length > 0 || hoursByType.length > 0;
 
   const kpis = [
-    { label: "Total Hours", value: stats.totalHours, icon: Clock },
-    { label: "Projects", value: stats.projectCount, icon: FolderOpen },
-    { label: "Avg Hours/Project", value: stats.avgHours, icon: TrendingUp },
-    { label: "Top Project", value: stats.topProject, icon: Award, isText: true },
+    { label: "Total Courses", value: stats.totalCourses, icon: FolderOpen },
+    { label: "Total Hours", value: stats.totalHours.toLocaleString(), icon: Clock },
+    { label: "Avg Hours/Course", value: stats.avgHoursPerCourse, icon: TrendingUp },
     { label: "Phases Tracked", value: stats.phaseCount, icon: Layers },
+    { label: "Top Phase", value: stats.topPhase, icon: Award, isText: true },
+    { label: "Years Covered", value: stats.yearCount, icon: CalendarDays },
   ];
-
-  const MetaChart = ({ title, data }: { title: string; data: { name: string; hours: number }[] }) => {
-    if (data.length === 0) return null;
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{title}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" fontSize={11} angle={-30} textAnchor="end" height={60} />
-                <YAxis fontSize={12} />
-                <Tooltip />
-                <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your project time data</p>
+        <p className="text-muted-foreground">Course production analytics overview</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {kpis.map((kpi) => (
           <Card key={kpi.label}>
             <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{kpi.label}</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground">{kpi.label}</CardTitle>
               <kpi.icon className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className={`font-bold ${kpi.isText ? "text-sm" : "text-2xl"}`}>
+              <div className={`font-bold ${kpi.isText ? "text-sm truncate" : "text-2xl"}`}>
                 {isLoading ? "—" : kpi.value}
               </div>
             </CardContent>
@@ -156,85 +221,206 @@ export default function Dashboard() {
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             <p className="text-lg mb-2">No data yet</p>
-            <p>Upload a Wrike export file to get started with your analytics.</p>
+            <p>Upload your Course Data and Time Entries files to see analytics.</p>
           </CardContent>
         </Card>
       )}
 
       {hasData && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Hours by Project */}
+        <>
+          {/* Row 1: Courses per Year + Avg Hours per Course by Year */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Courses per Year</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={coursesPerYear}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" fontSize={11} angle={-20} textAnchor="end" height={50} />
+                      <YAxis fontSize={12} />
+                      <Tooltip />
+                      <Bar dataKey="count" name="Courses" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Avg Hours per Course by Year</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={avgHoursByYear}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" fontSize={11} angle={-20} textAnchor="end" height={50} />
+                      <YAxis fontSize={12} />
+                      <Tooltip
+                        formatter={(value: any, name: string) =>
+                          name === "avgHours" ? [`${value}h`, "Avg Hours"] : [value, name]
+                        }
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="avgHours"
+                        name="Avg Hours"
+                        stroke="hsl(var(--accent))"
+                        strokeWidth={2}
+                        dot={{ fill: "hsl(var(--accent))", r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Row 2: Average Hours per Phase + Phase Pie */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Avg Hours per Phase (per course)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[350px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={avgHoursPerPhase.slice(0, 15)} layout="vertical" margin={{ left: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis type="number" fontSize={12} />
+                      <YAxis type="category" dataKey="name" width={140} fontSize={10} />
+                      <Tooltip
+                        formatter={(value: any) => [`${value}h`, "Avg per course"]}
+                      />
+                      <Bar dataKey="avgHours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Total Hours by Phase</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[350px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={phasePie.slice(0, 8)}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={110}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        fontSize={10}
+                      >
+                        {phasePie.slice(0, 8).map((_, i) => (
+                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Row 3: Avg Hours by Course Type + Authoring Tool */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {hoursByCourseType.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Avg Hours by Course Type</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[280px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={hoursByCourseType}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="name" fontSize={11} angle={-20} textAnchor="end" height={50} />
+                        <YAxis fontSize={12} />
+                        <Tooltip
+                          formatter={(value: any, name: string) =>
+                            name === "avgHours"
+                              ? [`${value}h`, "Avg Hours"]
+                              : [value, name]
+                          }
+                        />
+                        <Bar dataKey="avgHours" name="Avg Hours" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {hoursByTool.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Avg Hours by Authoring Tool</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[280px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={hoursByTool}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="name" fontSize={11} angle={-20} textAnchor="end" height={50} />
+                        <YAxis fontSize={12} />
+                        <Tooltip
+                          formatter={(value: any, name: string) =>
+                            name === "avgHours"
+                              ? [`${value}h`, "Avg Hours"]
+                              : [value, name]
+                          }
+                        />
+                        <Bar dataKey="avgHours" name="Avg Hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Phase Summary Table */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Hours by Project</CardTitle>
+              <CardTitle className="text-base">Phase Summary</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={hoursByProject} layout="vertical" margin={{ left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis type="number" fontSize={12} />
-                    <YAxis type="category" dataKey="name" width={120} fontSize={11} />
-                    <Tooltip />
-                    <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="max-h-[400px] overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Phase</TableHead>
+                      <TableHead className="text-right">Total Hours</TableHead>
+                      <TableHead className="text-right">Courses</TableHead>
+                      <TableHead className="text-right">Avg Hours/Course</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {avgHoursPerPhase.map((p) => (
+                      <TableRow key={p.fullName}>
+                        <TableCell className="font-medium">{p.fullName}</TableCell>
+                        <TableCell className="text-right">{p.totalHours}</TableCell>
+                        <TableCell className="text-right">{p.courseCount}</TableCell>
+                        <TableCell className="text-right font-semibold">{p.avgHours}h</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             </CardContent>
           </Card>
-
-          {/* Phase Distribution */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Time by Phase</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={hoursByPhase} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} fontSize={11}>
-                      {hoursByPhase.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Hours by Quarter */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-base">Hours by Quarter</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={hoursByQuarter}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" fontSize={12} />
-                    <YAxis fontSize={12} />
-                    <Tooltip />
-                    <Bar dataKey="hours" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Metadata charts */}
-          {hasMetadata && (
-            <>
-              <MetaChart title="Hours by Authoring Tool" data={hoursByTool} />
-              <MetaChart title="Hours by Course Type" data={hoursByType} />
-              <MetaChart title="Hours by Vertical" data={hoursByVertical} />
-              <MetaChart title="Hours by Reporting Year" data={hoursByYear} />
-              <MetaChart title="Hours by Assigned Person" data={hoursByPerson} />
-            </>
-          )}
-        </div>
+        </>
       )}
     </div>
   );
