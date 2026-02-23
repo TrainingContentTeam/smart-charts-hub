@@ -1,123 +1,116 @@
 
 
-# Complete Implementation Plan: Two-File Upload, Data Synthesis, and AI Chatbot
+# Fix Projects Page: Parser Rewrite and Data Re-import
 
-This plan covers everything we've discussed: uploading two different Excel files, combining their data by project name, building richer visualizations, and adding an AI chatbot powered by your Google Gemini key (no Lovable AI credits used).
+## Problem
 
----
+The Projects tab shows cards with **0 hours** because the `time_entries` table is completely empty. The previous upload created 2,071 project rows but saved zero time entries. This happened because the **time entry CSV parser doesn't understand the hierarchical format** of your CSV file.
 
-## Phase 1: Store Your Google Gemini API Key
+### How Your Time CSV Actually Works
 
-Your API key will be stored securely as a backend secret called `GOOGLE_GEMINI_KEY`. It will only be accessible from backend functions -- never exposed in the browser.
+Your CSV has a 3-level hierarchy with only 2 columns:
 
----
+```text
+ProjectName (count), totalTime        <-- Level 1: Project header
+  PhaseName (count), phaseTime        <-- Level 2: Phase header
+  ProjectName, entryTime              <-- Level 3: Individual time entry
+  ProjectName, entryTime
+  AnotherPhase (count), phaseTime     <-- Next phase
+  ProjectName, entryTime
+NextProject (count), totalTime        <-- Next project
+```
 
-## Phase 2: Expand the Database
+The current parser assumes zero-time rows are project headers, but your project headers have total times. The pattern is:
+- **Project row**: name with `(N)` suffix, marks the start of a new project
+- **Phase row**: different name with `(N)` suffix under a project
+- **Entry row**: repeats the project name with individual time
 
-Add new columns to the `projects` table for course metadata:
+### Additional Issue: Reporting Year Cleanup
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| id_assigned | text | Who's assigned (e.g., "Devin Weiss") |
-| authoring_tool | text | Rise, Storyline, LMS |
-| vertical | text | EMS1A, P1A, FR1A, etc. |
-| course_length | text | Duration like "1:00" |
-| course_type | text | New, Revamp, Maintenance |
-| course_style | text | Full Length, Single Video |
-| reporting_year | text | "2022 Courses", "2023 Courses" |
-| interaction_count | integer | Course interaction count |
+The `reporting_year` values currently have counts appended (e.g., "2025 Courses (193)" instead of "2025 Courses"). The course data parser should strip those counts.
 
----
+## Plan
 
-## Phase 3: Two-File Upload System
+### Step 1: Rewrite `src/lib/parse-wrike.ts`
 
-Redesign the Upload page with two separate upload zones:
+Replace the parsing logic with a state machine that understands the hierarchy:
+- Detect **project headers**: rows where the task name has a `(N)` suffix AND the next non-header rows repeat that same name (without the suffix)
+- Detect **phase headers**: rows with `(N)` suffix that appear under a project, where the name differs from the current project
+- Detect **entry rows**: rows that match the current project name, belonging to the current phase
+- Each entry gets: `project` (current project name without count suffix), `phase` (current phase name without count suffix), `hours`, `quarter` (empty for CSV)
 
-- **Left panel**: "Course Data" -- for your Course_Data.xlsx (metadata)
-- **Right panel**: "Time Entries" -- for your Time_Spent.xlsx (hours)
+### Step 2: Fix `src/lib/parse-course-data.ts`
 
-After uploading both files:
-- A **match preview** shows how many courses were found in both files, how many are unmatched
-- A single **"Import All"** button processes both files together
-- You can also upload just one file at a time
+Strip the count suffix from `reporting_year` values. For example, "2024 Courses (98)" becomes "2024 Courses".
 
-### New Course Data Parser
-A new parser (`src/lib/parse-course-data.ts`) will:
-- Read all columns from Course_Data.xlsx (Title, [LCT] ID Assigned, [LCT] Authoring Tool, etc.)
-- Skip year-grouping header rows (e.g., "2022 Courses (45)")
-- Strip Wrike hyperlinks from the Title column to get clean course names
-- Return structured metadata objects
+### Step 3: Clear existing bad data and re-import
 
-### Import Logic
-1. Upsert projects from Course_Data (match by name, add/update metadata)
-2. Parse time entries from Time_Spent and link to matched projects
-3. Show a result summary: X courses imported, Y time entries, Z matched
+Write a database migration to:
+- Delete all existing `time_entries` (there are 0 anyway)
+- Delete all existing `projects` (2,071 rows, many are junk like dates and phase names that got incorrectly created as projects)
+- Delete `upload_history` records
 
----
+This gives a clean slate for the user to re-upload with the fixed parsers.
 
-## Phase 4: Enhanced Dashboard and Visualizations
+### Step 4: Support CSV files in parsers
 
-With combined data, the Dashboard gets new charts:
+Both parsers use XLSX library which already handles CSV, but the `parseCourseDataFile` column detection needs to handle the `[LCT]` prefixed headers (e.g., `[LCT] ID Assigned`). Verify and fix column matching patterns.
 
-- **Hours by Authoring Tool** (bar chart) -- Rise vs Storyline vs LMS
-- **Hours by Course Type** (bar chart) -- New vs Revamp vs Maintenance
-- **Hours by Vertical** (bar chart) -- EMS1A, P1A, FR1A, etc.
-- **Hours by Reporting Year** (bar chart) -- trend over years
-- **Hours by Assigned Person** (bar chart) -- who spent the most time
+## Technical Details
 
-### Updated Data Explorer
-- New sortable/searchable columns: Authoring Tool, Vertical, Course Type, Assigned To
-- CSV export includes all fields
+### `parse-wrike.ts` - New Algorithm
 
-### Updated Projects Page
-- Each project card shows metadata badges (authoring tool, vertical, course type)
-- Project detail view shows full metadata alongside time breakdowns
+```text
+for each row:
+  taskName = row["Task name"]
+  timeSpent = row["Time spent"]
+  
+  if taskName matches /^(.+?)\s*\(\d+\)$/:
+    baseName = match[1].trim()
+    if baseName != currentProject:
+      // This is a new project header
+      currentProject = baseName
+      currentPhase = ""
+    else:
+      // Same name as project with count = still project summary, skip
+    // Either way, if it's a different name than current project:
+    if baseName != currentProject (already set above):
+      currentPhase = baseName  // It's a phase header
+    continue  // Skip header rows (they contain totals, not individual entries)
+  
+  if taskName and timeSpent:
+    // This is an individual time entry
+    phase = currentPhase or "Uncategorized"
+    project = currentProject or "Unknown Project"
+    entries.push({ project, phase, hours, ... })
+```
 
----
+Actually, the simpler pattern visible in the data:
+- A row with `(N)` where the name is NEW = project header
+- A row with `(N)` where name differs from project = phase header  
+- A row WITHOUT `(N)` = individual entry belonging to currentProject + currentPhase
 
-## Phase 5: AI Chatbot (Google Gemini -- No Lovable Credits)
+### `parse-course-data.ts` - Reporting Year Fix
 
-### Backend Function
-Create a new backend function (`supabase/functions/chat/index.ts`) that:
-1. Receives your message and conversation history
-2. Queries the database for all projects (with metadata) and time entries
-3. Builds a system prompt with your data as context
-4. Calls the **Google Gemini API directly** using your own API key
-5. Streams the response back token-by-token
+Add a line to strip count suffixes:
+```typescript
+reportingYear: String(row[yearCol] || "")
+  .trim()
+  .replace(/\s*\(\d+\)$/, "")  // "2024 Courses (98)" -> "2024 Courses"
+```
 
-This uses your Google Gemini free tier -- no Lovable AI credits consumed.
+### Database Migration
 
-### AI Insights Page
-Replace the placeholder with a full chat interface:
-- Scrollable message area with markdown-rendered responses
-- Text input at the bottom with send button
-- Streaming responses (tokens appear as they're generated)
-- Suggested starter questions as clickable chips:
-  - "Which project took the most time?"
-  - "Compare hours across authoring tools"
-  - "What's the average time per course type?"
-  - "Summarize my project data"
-- Error handling for rate limits with friendly messages
+```sql
+DELETE FROM time_entries;
+DELETE FROM upload_history;
+DELETE FROM projects;
+```
 
-### Config Update
-Add the chat function to `supabase/config.toml` with `verify_jwt = false`.
+### Files Modified
+1. `src/lib/parse-wrike.ts` -- Complete rewrite of parsing logic
+2. `src/lib/parse-course-data.ts` -- Strip count from reporting year
+3. Database migration to clear bad data
 
----
-
-## Files Changed Summary
-
-| File | Change |
-|------|--------|
-| Database migration | Add 8 metadata columns to `projects` table |
-| `src/lib/parse-course-data.ts` | **New** -- parser for Course_Data.xlsx |
-| `src/lib/parse-wrike.ts` | Minor cleanup (no breaking changes) |
-| `src/pages/UploadData.tsx` | Redesign with two-panel upload + match preview |
-| `src/hooks/use-time-data.ts` | Update project query to include new fields |
-| `src/pages/Dashboard.tsx` | Add 5 new charts for metadata dimensions |
-| `src/pages/DataExplorer.tsx` | Add metadata columns to table |
-| `src/pages/Projects.tsx` | Show metadata on project cards |
-| `supabase/functions/chat/index.ts` | **New** -- Gemini-powered chat backend |
-| `supabase/config.toml` | Add chat function config |
-| `src/pages/AiInsights.tsx` | Rewrite with full chat UI + streaming |
-| `package.json` | Add `react-markdown` dependency |
+After these changes, you'll re-upload both CSV files and the data will be correctly parsed and correlated.
 
