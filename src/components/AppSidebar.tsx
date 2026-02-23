@@ -1,5 +1,6 @@
-import { BarChart3, Upload, FolderOpen, Table2, Sparkles } from "lucide-react";
+import { BarChart3, Upload, FolderOpen, Table2, Sparkles, LogOut } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Sidebar,
   SidebarContent,
@@ -10,6 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
+  SidebarFooter,
 } from "@/components/ui/sidebar";
 
 const navItems = [
@@ -21,6 +23,8 @@ const navItems = [
 ];
 
 export function AppSidebar() {
+  const { user, signOut } = useAuth();
+
   return (
     <Sidebar>
       <SidebarHeader className="p-4 border-b border-sidebar-border">
@@ -58,6 +62,20 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="p-4 border-t border-sidebar-border">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-sidebar-foreground/60 truncate max-w-[140px]">
+            {user?.email}
+          </p>
+          <button
+            onClick={signOut}
+            className="p-1.5 rounded-md hover:bg-sidebar-accent text-sidebar-foreground/60 hover:text-sidebar-foreground"
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }
