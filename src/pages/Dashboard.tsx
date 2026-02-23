@@ -15,6 +15,21 @@ const COLORS = [
   "hsl(150, 50%, 45%)",
 ];
 
+function buildGroupedBar(entries: any[], projects: any[], field: string) {
+  const projectMap = new Map(projects.map((p: any) => [p.id, p]));
+  const map: Record<string, number> = {};
+  entries.forEach((e: any) => {
+    const project = projectMap.get(e.project_id);
+    const val = project?.[field] || "Unknown";
+    if (val && val !== "Unknown") {
+      map[val] = (map[val] || 0) + Number(e.hours);
+    }
+  });
+  return Object.entries(map)
+    .map(([name, hours]) => ({ name: name.length > 20 ? name.slice(0, 20) + "…" : name, hours: Math.round(hours * 100) / 100 }))
+    .sort((a, b) => b.hours - a.hours);
+}
+
 export default function Dashboard() {
   const { data: entries = [], isLoading: entriesLoading } = useTimeEntries();
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
@@ -70,8 +85,16 @@ export default function Dashboard() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [entries]);
 
+  // New metadata charts
+  const hoursByTool = useMemo(() => buildGroupedBar(entries, projects, "authoring_tool"), [entries, projects]);
+  const hoursByType = useMemo(() => buildGroupedBar(entries, projects, "course_type"), [entries, projects]);
+  const hoursByVertical = useMemo(() => buildGroupedBar(entries, projects, "vertical"), [entries, projects]);
+  const hoursByYear = useMemo(() => buildGroupedBar(entries, projects, "reporting_year"), [entries, projects]);
+  const hoursByPerson = useMemo(() => buildGroupedBar(entries, projects, "id_assigned"), [entries, projects]);
+
   const isLoading = entriesLoading || projectsLoading;
   const hasData = entries.length > 0;
+  const hasMetadata = hoursByTool.length > 0 || hoursByType.length > 0;
 
   const kpis = [
     { label: "Total Hours", value: stats.totalHours, icon: Clock },
@@ -80,6 +103,30 @@ export default function Dashboard() {
     { label: "Top Project", value: stats.topProject, icon: Award, isText: true },
     { label: "Phases Tracked", value: stats.phaseCount, icon: Layers },
   ];
+
+  const MetaChart = ({ title, data }: { title: string; data: { name: string; hours: number }[] }) => {
+    if (data.length === 0) return null;
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{title}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[250px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="name" fontSize={11} angle={-30} textAnchor="end" height={60} />
+                <YAxis fontSize={12} />
+                <Tooltip />
+                <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -176,6 +223,17 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Metadata charts */}
+          {hasMetadata && (
+            <>
+              <MetaChart title="Hours by Authoring Tool" data={hoursByTool} />
+              <MetaChart title="Hours by Course Type" data={hoursByType} />
+              <MetaChart title="Hours by Vertical" data={hoursByVertical} />
+              <MetaChart title="Hours by Reporting Year" data={hoursByYear} />
+              <MetaChart title="Hours by Assigned Person" data={hoursByPerson} />
+            </>
+          )}
         </div>
       )}
     </div>
