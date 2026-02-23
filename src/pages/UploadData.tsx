@@ -7,6 +7,7 @@ import { parseWrikeFile, type ParsedEntry } from "@/lib/parse-wrike";
 import { parseCourseDataFile, type ParsedCourse } from "@/lib/parse-course-data";
 import { supabase } from "@/integrations/supabase/client";
 import { useUploadHistory } from "@/hooks/use-time-data";
+import { useAuth } from "@/hooks/use-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -73,6 +74,7 @@ export default function UploadData() {
   const [timeEntries, setTimeEntries] = useState<ParsedEntry[] | null>(null);
   const [importing, setImporting] = useState(false);
   const { data: history = [] } = useUploadHistory();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   const handleCourseFile = useCallback(async (file: File) => {
@@ -122,7 +124,7 @@ export default function UploadData() {
       // Upload history
       const { data: upload, error: uploadErr } = await supabase
         .from("upload_history")
-        .insert({ file_name: combinedFileName, row_count: totalRows })
+        .insert({ file_name: combinedFileName, row_count: totalRows, user_id: user!.id })
         .select()
         .single();
       if (uploadErr) throw uploadErr;
@@ -147,6 +149,7 @@ export default function UploadData() {
                 course_style: course.courseStyle || existing.course_style,
                 reporting_year: course.reportingYear || existing.reporting_year,
                 interaction_count: course.interactionCount ?? existing.interaction_count,
+                user_id: user!.id,
               })
               .eq("id", existing.id);
           } else {
@@ -162,6 +165,7 @@ export default function UploadData() {
                 course_style: course.courseStyle,
                 reporting_year: course.reportingYear,
                 interaction_count: course.interactionCount,
+                user_id: user!.id,
               })
               .select()
               .single();
@@ -184,7 +188,7 @@ export default function UploadData() {
         if (newTimeProjects.length > 0) {
           const { data: inserted } = await supabase
             .from("projects")
-            .insert(newTimeProjects.map((name) => ({ name })))
+            .insert(newTimeProjects.map((name) => ({ name, user_id: user!.id })))
             .select();
           inserted?.forEach((p: any) => projectMap.set(p.name.toLowerCase(), p.id));
         }
@@ -197,6 +201,7 @@ export default function UploadData() {
           raw_task_name: e.rawTaskName,
           raw_time_spent: e.rawTimeSpent,
           upload_id: upload.id,
+          user_id: user!.id,
         }));
 
         const { error: entryErr } = await supabase.from("time_entries").insert(entries);

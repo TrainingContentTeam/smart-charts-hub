@@ -12,6 +12,33 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Authenticate the user
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims) {
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const userId = claimsData.claims.sub;
+
     const { message, history = [] } = await req.json();
     if (!message) {
       return new Response(JSON.stringify({ error: "No message provided" }), {
@@ -28,14 +55,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Fetch data from DB
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
+    // Use the user's client (respects RLS) to fetch only their data
     const [projectsRes, entriesRes] = await Promise.all([
-      supabase.from("projects").select("*"),
-      supabase.from("time_entries").select("*, projects(name)").limit(500),
+      userClient.from("projects").select("*"),
+      userClient.from("time_entries").select("*, projects(name)").limit(500),
     ]);
 
     const projects = projectsRes.data || [];
@@ -49,7 +72,6 @@ Deno.serve(async (req) => {
       )
       .join("\n");
 
-    // Aggregate hours by project
     const hoursByProject: Record<string, number> = {};
     entries.forEach((e: any) => {
       const name = e.projects?.name || "Unknown";
@@ -76,7 +98,6 @@ ${hoursSummary || "No time entries yet."}
 
 Answer questions about this data concisely. Use specific numbers. If asked about trends or comparisons, reference the actual data. Format responses with markdown.`;
 
-    // Build Gemini messages
     const contents = [
       ...history.map((h: any) => ({
         role: h.role === "assistant" ? "model" : "user",
@@ -85,7 +106,6 @@ Answer questions about this data concisely. Use specific numbers. If asked about
       { role: "user", parts: [{ text: message }] },
     ];
 
-    // Call Gemini API with streaming
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${geminiKey}`;
 
     const geminiRes = await fetch(geminiUrl, {
@@ -104,13 +124,12 @@ Answer questions about this data concisely. Use specific numbers. If asked about
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error("Gemini error:", errText);
-      return new Response(JSON.stringify({ error: "AI service error", details: errText }), {
+      return new Response(JSON.stringify({ error: "AI service error" }), {
         status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Stream SSE response back
     return new Response(geminiRes.body, {
       headers: {
         ...corsHeaders,
@@ -120,7 +139,7 @@ Answer questions about this data concisely. Use specific numbers. If asked about
     });
   } catch (err) {
     console.error("Chat function error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
