@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 
@@ -13,9 +13,9 @@ export default function Projects() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   const projectSummaries = useMemo(() => {
-    const map: Record<string, { name: string; id: string; totalHours: number; phases: Record<string, number> }> = {};
-    projects.forEach((p) => {
-      map[p.id] = { name: p.name, id: p.id, totalHours: 0, phases: {} };
+    const map: Record<string, { name: string; id: string; totalHours: number; phases: Record<string, number>; meta: any }> = {};
+    projects.forEach((p: any) => {
+      map[p.id] = { name: p.name, id: p.id, totalHours: 0, phases: {}, meta: p };
     });
     entries.forEach((e) => {
       if (e.project_id && map[e.project_id]) {
@@ -36,6 +36,7 @@ export default function Projects() {
     : [];
 
   if (selected) {
+    const m = selected.meta;
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
@@ -46,6 +47,18 @@ export default function Projects() {
             <h1 className="text-3xl font-bold tracking-tight">{selected.name}</h1>
             <p className="text-muted-foreground">{Math.round(selected.totalHours * 100) / 100} total hours</p>
           </div>
+        </div>
+
+        {/* Metadata badges */}
+        <div className="flex flex-wrap gap-2">
+          {m.authoring_tool && <Badge variant="secondary">{m.authoring_tool}</Badge>}
+          {m.vertical && <Badge variant="outline">{m.vertical}</Badge>}
+          {m.course_type && <Badge variant="outline">{m.course_type}</Badge>}
+          {m.course_style && <Badge variant="outline">{m.course_style}</Badge>}
+          {m.id_assigned && <Badge variant="secondary">{m.id_assigned}</Badge>}
+          {m.reporting_year && <Badge variant="outline">{m.reporting_year}</Badge>}
+          {m.course_length && <Badge variant="outline">{m.course_length}</Badge>}
+          {m.interaction_count != null && <Badge variant="outline">{m.interaction_count} interactions</Badge>}
         </div>
 
         <Card>
@@ -107,23 +120,31 @@ export default function Projects() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projectSummaries.map((p) => (
-            <Card
-              key={p.id}
-              className="cursor-pointer hover:border-primary/50 transition-colors"
-              onClick={() => setSelectedProjectId(p.id)}
-            >
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium leading-tight">{p.name}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold">{Math.round(p.totalHours * 100) / 100}h</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {Object.keys(p.phases).length} phases
-                </p>
-              </CardContent>
-            </Card>
-          ))}
+          {projectSummaries.map((p) => {
+            const m = p.meta;
+            return (
+              <Card
+                key={p.id}
+                className="cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => setSelectedProjectId(p.id)}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium leading-tight">{p.name}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{Math.round(p.totalHours * 100) / 100}h</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {Object.keys(p.phases).length} phases
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {m.authoring_tool && <Badge variant="secondary" className="text-xs">{m.authoring_tool}</Badge>}
+                    {m.vertical && <Badge variant="outline" className="text-xs">{m.vertical}</Badge>}
+                    {m.course_type && <Badge variant="outline" className="text-xs">{m.course_type}</Badge>}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

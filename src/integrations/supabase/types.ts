@@ -16,22 +16,46 @@ export type Database = {
     Tables: {
       projects: {
         Row: {
+          authoring_tool: string | null
+          course_length: string | null
+          course_style: string | null
+          course_type: string | null
           created_at: string
           id: string
+          id_assigned: string | null
+          interaction_count: number | null
           name: string
+          reporting_year: string | null
           updated_at: string
+          vertical: string | null
         }
         Insert: {
+          authoring_tool?: string | null
+          course_length?: string | null
+          course_style?: string | null
+          course_type?: string | null
           created_at?: string
           id?: string
+          id_assigned?: string | null
+          interaction_count?: number | null
           name: string
+          reporting_year?: string | null
           updated_at?: string
+          vertical?: string | null
         }
         Update: {
+          authoring_tool?: string | null
+          course_length?: string | null
+          course_style?: string | null
+          course_type?: string | null
           created_at?: string
           id?: string
+          id_assigned?: string | null
+          interaction_count?: number | null
           name?: string
+          reporting_year?: string | null
           updated_at?: string
+          vertical?: string | null
         }
         Relationships: []
       }
