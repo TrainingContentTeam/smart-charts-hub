@@ -53,15 +53,15 @@ export function parseCourseDataFile(file: File): Promise<ParsedCourse[]> {
 
         // Detect columns dynamically
         const sample = rows[0];
-        const titleCol = findColumn(sample, ["title", "task name", "name"]);
-        const assignedCol = findColumn(sample, ["id assigned", "assigned"]);
-        const toolCol = findColumn(sample, ["authoring tool", "authoring"]);
-        const verticalCol = findColumn(sample, ["vertical"]);
-        const lengthCol = findColumn(sample, ["course length", "length"]);
-        const typeCol = findColumn(sample, ["course type", "type"]);
-        const styleCol = findColumn(sample, ["course style", "style"]);
-        const yearCol = findColumn(sample, ["reporting year", "year"]);
-        const interactionCol = findColumn(sample, ["interaction", "interactions"]);
+    const titleCol = findColumn(sample, ["title", "task name", "name"]);
+    const assignedCol = findColumn(sample, ["id assigned", "assigned", "lct"]);
+    const toolCol = findColumn(sample, ["authoring tool", "authoring"]);
+    const verticalCol = findColumn(sample, ["vertical"]);
+    const lengthCol = findColumn(sample, ["course length", "length"]);
+    const typeCol = findColumn(sample, ["course type", "type"]);
+    const styleCol = findColumn(sample, ["course style", "style"]);
+    const yearCol = findColumn(sample, ["reporting year", "year"]);
+    const interactionCol = findColumn(sample, ["interaction", "interactions"]);
 
         let currentYear = "";
         const courses: ParsedCourse[] = [];
@@ -88,7 +88,7 @@ export function parseCourseDataFile(file: File): Promise<ParsedCourse[]> {
             courseLength: String(row[lengthCol] || "").trim(),
             courseType: String(row[typeCol] || "").trim(),
             courseStyle: String(row[styleCol] || "").trim(),
-            reportingYear: String(row[yearCol] || currentYear || "").trim(),
+            reportingYear: String(row[yearCol] || currentYear || "").trim().replace(/\s*\(\d+\)$/, ""),
             interactionCount: isNaN(interactionCount as number) ? null : interactionCount,
           });
         }
