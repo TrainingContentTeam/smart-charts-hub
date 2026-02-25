@@ -6,7 +6,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@
 import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
 import { Download, Search, ArrowUpDown } from "lucide-react";
 
-type SortKey = "project" | "phase" | "hours" | "quarter" | "authoring_tool" | "vertical" | "course_type" | "id_assigned";
+type SortKey = "project" | "category" | "hours" | "date" | "user" | "authoring_tool" | "vertical" | "course_type";
 
 export default function DataExplorer() {
   const { data: entries = [] } = useTimeEntries();
@@ -20,38 +20,37 @@ export default function DataExplorer() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return entries
-      .map((e) => {
-        const project = projectMap.get(e.project_id) as any;
+      .map((e: any) => {
+        const project = projectMap.get(e.project_id);
         return {
           ...e,
-          projectName: project?.name || "Unknown",
-          authoring_tool: project?.authoring_tool || "",
-          vertical: project?.vertical || "",
-          course_type: project?.course_type || "",
-          id_assigned: project?.id_assigned || "",
+          projectName: (project as any)?.name || "Unknown",
+          authoring_tool: (project as any)?.authoring_tool || "",
+          vertical: (project as any)?.vertical || "",
+          course_type: (project as any)?.course_type || "",
         };
       })
       .filter(
-        (e) =>
+        (e: any) =>
           e.projectName.toLowerCase().includes(q) ||
-          e.phase.toLowerCase().includes(q) ||
-          (e.quarter || "").toLowerCase().includes(q) ||
+          (e.category || "").toLowerCase().includes(q) ||
+          (e.user_name || "").toLowerCase().includes(q) ||
+          (e.entry_date || "").includes(q) ||
           e.authoring_tool.toLowerCase().includes(q) ||
           e.vertical.toLowerCase().includes(q) ||
-          e.course_type.toLowerCase().includes(q) ||
-          e.id_assigned.toLowerCase().includes(q)
+          e.course_type.toLowerCase().includes(q)
       )
-      .sort((a, b) => {
+      .sort((a: any, b: any) => {
         let cmp = 0;
         switch (sortKey) {
           case "project": cmp = a.projectName.localeCompare(b.projectName); break;
-          case "phase": cmp = a.phase.localeCompare(b.phase); break;
+          case "category": cmp = (a.category || "").localeCompare(b.category || ""); break;
           case "hours": cmp = Number(a.hours) - Number(b.hours); break;
-          case "quarter": cmp = (a.quarter || "").localeCompare(b.quarter || ""); break;
+          case "date": cmp = (a.entry_date || "").localeCompare(b.entry_date || ""); break;
+          case "user": cmp = (a.user_name || "").localeCompare(b.user_name || ""); break;
           case "authoring_tool": cmp = a.authoring_tool.localeCompare(b.authoring_tool); break;
           case "vertical": cmp = a.vertical.localeCompare(b.vertical); break;
           case "course_type": cmp = a.course_type.localeCompare(b.course_type); break;
-          case "id_assigned": cmp = a.id_assigned.localeCompare(b.id_assigned); break;
         }
         return sortAsc ? cmp : -cmp;
       });
@@ -63,9 +62,9 @@ export default function DataExplorer() {
   };
 
   const exportCsv = () => {
-    const header = "Project,Phase,Hours,Quarter,Authoring Tool,Vertical,Course Type,Assigned To\n";
-    const rows = filtered.map((e) =>
-      `"${e.projectName}","${e.phase}",${e.hours},"${e.quarter || ""}","${e.authoring_tool}","${e.vertical}","${e.course_type}","${e.id_assigned}"`
+    const header = "Project,Category,Hours,Date,User,Authoring Tool,Vertical,Course Type\n";
+    const rows = filtered.map((e: any) =>
+      `"${e.projectName}","${e.category || ""}",${e.hours},"${e.entry_date || ""}","${e.user_name || ""}","${e.authoring_tool}","${e.vertical}","${e.course_type}"`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -101,7 +100,7 @@ export default function DataExplorer() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search by project, phase, quarter, tool, vertical…"
+              placeholder="Search by project, category, user, date…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
@@ -117,26 +116,26 @@ export default function DataExplorer() {
                 <TableHeader>
                   <TableRow>
                     <SortHeader label="Project" field="project" />
-                    <SortHeader label="Phase" field="phase" />
+                    <SortHeader label="Category" field="category" />
                     <SortHeader label="Hours" field="hours" />
-                    <SortHeader label="Quarter" field="quarter" />
+                    <SortHeader label="Date" field="date" />
+                    <SortHeader label="User" field="user" />
                     <SortHeader label="Tool" field="authoring_tool" />
                     <SortHeader label="Vertical" field="vertical" />
                     <SortHeader label="Type" field="course_type" />
-                    <SortHeader label="Assigned" field="id_assigned" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((e) => (
+                  {filtered.map((e: any) => (
                     <TableRow key={e.id}>
                       <TableCell className="font-medium">{e.projectName}</TableCell>
-                      <TableCell>{e.phase}</TableCell>
+                      <TableCell>{e.category || e.phase}</TableCell>
                       <TableCell>{e.hours}</TableCell>
-                      <TableCell>{e.quarter}</TableCell>
+                      <TableCell>{e.entry_date || ""}</TableCell>
+                      <TableCell>{e.user_name || ""}</TableCell>
                       <TableCell>{e.authoring_tool}</TableCell>
                       <TableCell>{e.vertical}</TableCell>
                       <TableCell>{e.course_type}</TableCell>
-                      <TableCell>{e.id_assigned}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

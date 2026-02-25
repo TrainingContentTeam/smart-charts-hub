@@ -21,11 +21,16 @@ export type Database = {
           course_style: string | null
           course_type: string | null
           created_at: string
+          data_source: string | null
           id: string
           id_assigned: string | null
           interaction_count: number | null
+          legal_reviewer: string | null
           name: string
           reporting_year: string | null
+          sme: string | null
+          status: string
+          total_hours: number | null
           updated_at: string
           user_id: string | null
           vertical: string | null
@@ -36,11 +41,16 @@ export type Database = {
           course_style?: string | null
           course_type?: string | null
           created_at?: string
+          data_source?: string | null
           id?: string
           id_assigned?: string | null
           interaction_count?: number | null
+          legal_reviewer?: string | null
           name: string
           reporting_year?: string | null
+          sme?: string | null
+          status?: string
+          total_hours?: number | null
           updated_at?: string
           user_id?: string | null
           vertical?: string | null
@@ -51,11 +61,16 @@ export type Database = {
           course_style?: string | null
           course_type?: string | null
           created_at?: string
+          data_source?: string | null
           id?: string
           id_assigned?: string | null
           interaction_count?: number | null
+          legal_reviewer?: string | null
           name?: string
           reporting_year?: string | null
+          sme?: string | null
+          status?: string
+          total_hours?: number | null
           updated_at?: string
           user_id?: string | null
           vertical?: string | null
@@ -64,7 +79,9 @@ export type Database = {
       }
       time_entries: {
         Row: {
+          category: string | null
           created_at: string
+          entry_date: string | null
           hours: number
           id: string
           phase: string
@@ -74,9 +91,12 @@ export type Database = {
           raw_time_spent: string | null
           upload_id: string | null
           user_id: string | null
+          user_name: string | null
         }
         Insert: {
+          category?: string | null
           created_at?: string
+          entry_date?: string | null
           hours?: number
           id?: string
           phase: string
@@ -86,9 +106,12 @@ export type Database = {
           raw_time_spent?: string | null
           upload_id?: string | null
           user_id?: string | null
+          user_name?: string | null
         }
         Update: {
+          category?: string | null
           created_at?: string
+          entry_date?: string | null
           hours?: number
           id?: string
           phase?: string
@@ -98,6 +121,7 @@ export type Database = {
           raw_time_spent?: string | null
           upload_id?: string | null
           user_id?: string | null
+          user_name?: string | null
         }
         Relationships: [
           {
