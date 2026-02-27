@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
-import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
+import { useProjects } from "@/hooks/use-time-data";
 import { YearPills } from "@/components/YearPills";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
+import { isCompletedProjectStatus } from "@/lib/project-status";
+import { ChartActions } from "@/components/ChartActions";
+import { ChartDataTable } from "@/components/ChartDataTable";
 import {
   BarChart,
   Bar,
@@ -21,7 +23,7 @@ import {
   Line,
   Legend,
 } from "recharts";
-import { Clock3, CircleCheckBig, CircleDashed, FolderOpen, Camera } from "lucide-react";
+import { Clock3, CircleCheckBig, CircleDashed, FolderOpen } from "lucide-react";
 
 const COLORS = [
   "hsl(142 71% 45%)",
@@ -35,9 +37,9 @@ function norm(s: string): string {
   return (s || "").trim();
 }
 
-function isCompletedStatus(status: unknown): boolean {
-  const s = String(status || "").toLowerCase();
-  return s === "completed" || s === "complete";
+function isMissingMeta(value: unknown): boolean {
+  const s = norm(String(value || "")).toLowerCase();
+  return !s || ["n/a", "na", "n.a.", "none", "unknown", "null", "-", "--"].includes(s);
 }
 
 function normalizeCourseType(value: unknown): string {
@@ -97,34 +99,51 @@ function byYears<T extends { reporting_year?: string }>(rows: T[], selectedYears
   return rows.filter((r) => selectedYears.includes(norm(String(r.reporting_year || ""))));
 }
 
-function ChartHeader({ title, containerId, filename }: { title: string; containerId: string; filename: string }) {
+function ChartHeader({
+  title,
+  containerId,
+  filename,
+  showData,
+  onToggleData,
+}: {
+  title: string;
+  containerId: string;
+  filename: string;
+  showData: boolean;
+  onToggleData: () => void;
+}) {
   return (
     <CardHeader className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <CardTitle className="text-base">{title}</CardTitle>
-        <Button variant="outline" size="sm" onClick={() => saveChartSnapshot(containerId, filename)}>
-          <Camera className="h-3.5 w-3.5 mr-1" /> Snapshot
-        </Button>
+        <ChartActions
+          showData={showData}
+          onToggleData={onToggleData}
+          onSnapshot={() => saveChartSnapshot(containerId, filename)}
+        />
       </div>
     </CardHeader>
   );
 }
 
 export default function Dashboard() {
-  const { data: entries = [], isLoading: entriesLoading } = useTimeEntries();
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
 
   const [coursesPerYearYears, setCoursesPerYearYears] = useState<string[]>([]);
   const [avgBreakdownMode, setAvgBreakdownMode] = useState<"style" | "type" | "tool">("tool");
   const [avgActiveKeys, setAvgActiveKeys] = useState<string[]>([]);
-  const [categoryYears, setCategoryYears] = useState<string[]>([]);
   const [statusYears, setStatusYears] = useState<string[]>([]);
   const [typeYears, setTypeYears] = useState<string[]>([]);
   const [toolYears, setToolYears] = useState<string[]>([]);
   const [stackedYears, setStackedYears] = useState<string[]>([]);
-  const [categoryTopN, setCategoryTopN] = useState<10 | 20 | 999>(20);
+  const [showChartData, setShowChartData] = useState<Record<string, boolean>>({});
 
-  const isLoading = entriesLoading || projectsLoading;
+  const isDataVisible = (key: string) => !!showChartData[key];
+  const toggleDataVisible = (key: string) => {
+    setShowChartData((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const isLoading = projectsLoading;
 
   const years = useMemo(() => {
     const set = new Set<string>();
@@ -134,10 +153,8 @@ export default function Dashboard() {
     return [...set].sort();
   }, [projects]);
 
-  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p])), [projects]);
-
   const totalCourses = projects.length;
-  const completeCourses = projects.filter((p: any) => isCompletedStatus(p.status)).length;
+  const completeCourses = projects.filter((p: any) => isCompletedProjectStatus(p.status)).length;
   const activeCourses = totalCourses - completeCourses;
   const totalHours = projects.reduce((sum: number, p: any) => sum + Number(p.total_hours || 0), 0);
 
@@ -256,35 +273,9 @@ export default function Dashboard() {
     setAvgActiveKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   };
 
-  const filteredEntriesForCategory = useMemo(() => {
-    return entries.filter((e: any) => {
-      const project = projectMap.get(e.project_id);
-      if (!project) return false;
-      if (!categoryYears.length) return true;
-      return categoryYears.includes(norm(String(project.reporting_year || "")));
-    });
-  }, [entries, projectMap, categoryYears]);
-
-  const hoursByCategory = useMemo(() => {
-    const map: Record<string, number> = {};
-    filteredEntriesForCategory.forEach((e: any) => {
-      const category = norm(String(e.category || e.phase || "Uncategorized"));
-      map[category] = (map[category] || 0) + Number(e.hours || 0);
-    });
-    const ranked = Object.entries(map)
-      .map(([name, hours]) => ({
-        name: name.length > 28 ? `${name.slice(0, 28)}...` : name,
-        fullName: name,
-        hours: Math.round(hours * 10) / 10,
-      }))
-      .sort((a, b) => b.hours - a.hours);
-    if (categoryTopN === 999) return ranked;
-    return ranked.slice(0, categoryTopN);
-  }, [filteredEntriesForCategory, categoryTopN]);
-
   const filteredProjectsForStatus = useMemo(() => byYears(projects as any[], statusYears), [projects, statusYears]);
   const statusDonut = useMemo(() => {
-    const complete = filteredProjectsForStatus.filter((p: any) => isCompletedStatus(p.status)).length;
+    const complete = filteredProjectsForStatus.filter((p: any) => isCompletedProjectStatus(p.status)).length;
     const active = filteredProjectsForStatus.length - complete;
     return [
       { name: "Completed", value: complete },
@@ -295,7 +286,7 @@ export default function Dashboard() {
   const filteredProjectsForType = useMemo(() => byYears(projects as any[], typeYears), [projects, typeYears]);
   const typeQuality = useMemo(() => {
     const total = filteredProjectsForType.length;
-    const missing = filteredProjectsForType.filter((p: any) => !norm(String(p.course_type || ""))).length;
+    const missing = filteredProjectsForType.filter((p: any) => isMissingMeta(p.course_type)).length;
     const complete = total - missing;
     const percent = total ? Math.round((complete / total) * 100) : 100;
     return { total, missing, complete, percent, ...qualityTone(percent) };
@@ -303,7 +294,7 @@ export default function Dashboard() {
   const avgByCourseType = useMemo(() => {
     const map: Record<string, { sum: number; count: number }> = {};
     filteredProjectsForType.forEach((p: any) => {
-      if (!norm(String(p.course_type || ""))) return;
+      if (isMissingMeta(p.course_type)) return;
       const type = normalizeCourseType(p.course_type);
       if (!map[type]) map[type] = { sum: 0, count: 0 };
       map[type].sum += Number(p.total_hours || 0);
@@ -357,7 +348,7 @@ export default function Dashboard() {
     byYears(projects as any[], stackedYears).forEach((p: any) => {
       const year = norm(String(p.reporting_year || "Unknown"));
       if (!map[year]) map[year] = { completed: 0, active: 0 };
-      if (isCompletedStatus(p.status)) map[year].completed += 1;
+      if (isCompletedProjectStatus(p.status)) map[year].completed += 1;
       else map[year].active += 1;
     });
     return Object.entries(map)
@@ -403,25 +394,42 @@ export default function Dashboard() {
       {hasData && (
         <>
           <Card>
-            <ChartHeader title="Courses Per Year" containerId="chart-courses-per-year" filename="courses-per-year" />
+            <ChartHeader
+              title="Courses Per Year"
+              containerId="chart-courses-per-year"
+              filename="courses-per-year"
+              showData={isDataVisible("courses-per-year")}
+              onToggleData={() => toggleDataVisible("courses-per-year")}
+            />
             <CardContent className="space-y-3">
               <YearPills years={years} selectedYears={coursesPerYearYears} onChange={setCoursesPerYearYears} />
-              <div id="chart-courses-per-year" className="h-[420px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={coursesPerYear}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" fontSize={11} />
-                    <YAxis fontSize={12} />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div id="chart-courses-per-year" className="space-y-3">
+                <div className="h-[420px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={coursesPerYear}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" fontSize={11} />
+                      <YAxis fontSize={12} />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {isDataVisible("courses-per-year") && (
+                  <ChartDataTable rows={coursesPerYear} columns={[{ key: "name", label: "Year" }, { key: "count", label: "Courses" }]} />
+                )}
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <ChartHeader title="Average Hours Spent Developing by Year" containerId="chart-avg-hours-year" filename="avg-hours-year" />
+            <ChartHeader
+              title="Average Hours Spent Developing by Year"
+              containerId="chart-avg-hours-year"
+              filename="avg-hours-year"
+              showData={isDataVisible("avg-hours-year")}
+              onToggleData={() => toggleDataVisible("avg-hours-year")}
+            />
             <CardContent className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 <Badge variant={avgBreakdownMode === "style" ? "default" : "outline"} className="cursor-pointer" onClick={() => setAvgBreakdownMode("style")}>
@@ -446,155 +454,180 @@ export default function Dashboard() {
                   </Badge>
                 ))}
               </div>
-              <div id="chart-avg-hours-year" className="h-[420px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={avgHoursByYear}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" fontSize={11} />
-                    <YAxis yAxisId="left" fontSize={12} />
-                    <YAxis yAxisId="right" orientation="right" fontSize={12} />
-                    <Tooltip />
-                    <Legend />
-                    {avgSeries[0] && (
-                      <Bar
-                        yAxisId="right"
-                        dataKey={avgSeries[0].countField}
-                        name={`${avgSeries[0].label} Count`}
-                        fill="hsl(var(--primary) / 0.18)"
-                        radius={[3, 3, 0, 0]}
-                      />
-                    )}
-                    {avgSeries.map((series) => (
-                      <Line
-                        key={series.avgField}
-                        yAxisId="left"
-                        type="monotone"
-                        dataKey={series.avgField}
-                        name={`${series.label} Avg Hours`}
-                        stroke={series.color}
-                        strokeWidth={2}
-                        dot={{ fill: series.color, r: 3.5 }}
-                      />
-                    ))}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <ChartHeader title="Hours Spent by Category" containerId="chart-hours-category" filename="hours-by-category" />
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <YearPills years={years} selectedYears={categoryYears} onChange={setCategoryYears} />
-                <div className="flex gap-2">
-                  <Badge variant={categoryTopN === 10 ? "default" : "outline"} className="cursor-pointer" onClick={() => setCategoryTopN(10)}>Top 10</Badge>
-                  <Badge variant={categoryTopN === 20 ? "default" : "outline"} className="cursor-pointer" onClick={() => setCategoryTopN(20)}>Top 20</Badge>
-                  <Badge variant={categoryTopN === 999 ? "default" : "outline"} className="cursor-pointer" onClick={() => setCategoryTopN(999)}>All</Badge>
+              <div id="chart-avg-hours-year" className="space-y-3">
+                <div className="h-[420px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={avgHoursByYear}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" fontSize={11} />
+                      <YAxis yAxisId="left" fontSize={12} />
+                      <YAxis yAxisId="right" orientation="right" fontSize={12} />
+                      <Tooltip />
+                      <Legend />
+                      {avgSeries[0] && (
+                        <Bar
+                          yAxisId="right"
+                          dataKey={avgSeries[0].countField}
+                          name={`${avgSeries[0].label} Count`}
+                          fill="hsl(var(--primary) / 0.18)"
+                          radius={[3, 3, 0, 0]}
+                        />
+                      )}
+                      {avgSeries.map((series) => (
+                        <Line
+                          key={series.avgField}
+                          yAxisId="left"
+                          type="monotone"
+                          dataKey={series.avgField}
+                          name={`${series.label} Avg Hours`}
+                          stroke={series.color}
+                          strokeWidth={2}
+                          dot={{ fill: series.color, r: 3.5 }}
+                        />
+                      ))}
+                    </ComposedChart>
+                  </ResponsiveContainer>
                 </div>
-              </div>
-              <div id="chart-hours-category" className="h-[460px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={hoursByCategory} layout="vertical" margin={{ left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis type="number" fontSize={12} />
-                    <YAxis type="category" dataKey="name" width={220} fontSize={10} />
-                    <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                    <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                {isDataVisible("avg-hours-year") && <ChartDataTable rows={avgHoursByYear} />}
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <ChartHeader title="Completed vs Not Complete" containerId="chart-status-donut" filename="status-donut" />
+            <ChartHeader
+              title="Completed vs Not Complete"
+              containerId="chart-status-donut"
+              filename="status-donut"
+              showData={isDataVisible("status-donut")}
+              onToggleData={() => toggleDataVisible("status-donut")}
+            />
             <CardContent className="space-y-3">
               <YearPills years={years} selectedYears={statusYears} onChange={setStatusYears} />
-              <div id="chart-status-donut" className="h-[440px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={statusDonut}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={90}
-                      outerRadius={155}
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    >
-                      {statusDonut.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+              <div id="chart-status-donut" className="space-y-3">
+                <div className="h-[440px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={statusDonut}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={90}
+                        outerRadius={155}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {statusDonut.map((_, i) => (
+                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                {isDataVisible("status-donut") && (
+                  <ChartDataTable rows={statusDonut} columns={[{ key: "name", label: "Status" }, { key: "value", label: "Courses" }]} />
+                )}
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <ChartHeader title="Average Hours by Course Type" containerId="chart-avg-type" filename="avg-hours-course-type" />
+            <ChartHeader
+              title="Average Hours by Course Type"
+              containerId="chart-avg-type"
+              filename="avg-hours-course-type"
+              showData={isDataVisible("avg-type")}
+              onToggleData={() => toggleDataVisible("avg-type")}
+            />
             <CardContent className="space-y-3">
               <YearPills years={years} selectedYears={typeYears} onChange={setTypeYears} />
               <div className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${typeQuality.border} ${typeQuality.bg} ${typeQuality.text}`}>
                 <span className={`h-2.5 w-2.5 rounded-full ${typeQuality.dot}`} />
                 Data Accuracy {typeQuality.percent}% ({typeQuality.label}) · Missing Course Type: {typeQuality.missing}
               </div>
-              <div id="chart-avg-type" className="h-[420px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={avgByCourseType}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" fontSize={11} />
-                    <YAxis fontSize={12} />
-                    <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
-                    <Bar dataKey="avgHours" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div id="chart-avg-type" className="space-y-3">
+                <div className="h-[420px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={avgByCourseType}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" fontSize={11} />
+                      <YAxis fontSize={12} />
+                      <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
+                      <Bar dataKey="avgHours" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {isDataVisible("avg-type") && <ChartDataTable rows={avgByCourseType} columns={[{ key: "name", label: "Course Type" }, { key: "avgHours", label: "Avg Hours" }]} />}
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <ChartHeader title="Average Hours by Authoring Tool" containerId="chart-avg-tool" filename="avg-hours-tool" />
+            <ChartHeader
+              title="Average Hours by Authoring Tool"
+              containerId="chart-avg-tool"
+              filename="avg-hours-tool"
+              showData={isDataVisible("avg-tool")}
+              onToggleData={() => toggleDataVisible("avg-tool")}
+            />
             <CardContent className="space-y-3">
               <YearPills years={years} selectedYears={toolYears} onChange={setToolYears} />
               <div className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${toolQuality.border} ${toolQuality.bg} ${toolQuality.text}`}>
                 <span className={`h-2.5 w-2.5 rounded-full ${toolQuality.dot}`} />
                 Data Accuracy {toolQuality.percent}% ({toolQuality.label}) · Missing Authoring Tool: {toolQuality.missing}
               </div>
-              <div id="chart-avg-tool" className="h-[420px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={avgByTool}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" fontSize={11} />
-                    <YAxis fontSize={12} />
-                    <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
-                    <Bar dataKey="avgHours" fill="hsl(var(--chart-5))" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div id="chart-avg-tool" className="space-y-3">
+                <div className="h-[420px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={avgByTool}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" fontSize={11} />
+                      <YAxis fontSize={12} />
+                      <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
+                      <Bar dataKey="avgHours" fill="hsl(var(--chart-5))" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {isDataVisible("avg-tool") && <ChartDataTable rows={avgByTool} columns={[{ key: "name", label: "Tool" }, { key: "avgHours", label: "Avg Hours" }]} />}
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <ChartHeader title="Yearly Course Volume: Completed vs Active" containerId="chart-stacked-status" filename="yearly-completed-active" />
+            <ChartHeader
+              title="Yearly Course Volume: Completed vs Active"
+              containerId="chart-stacked-status"
+              filename="yearly-completed-active"
+              showData={isDataVisible("stacked-status")}
+              onToggleData={() => toggleDataVisible("stacked-status")}
+            />
             <CardContent className="space-y-3">
               <YearPills years={years} selectedYears={stackedYears} onChange={setStackedYears} />
-              <div id="chart-stacked-status" className="h-[440px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={completedVsActiveByYear}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" fontSize={11} />
-                    <YAxis fontSize={12} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="completed" name="Completed" stackId="a" fill="hsl(142 71% 45%)" />
-                    <Bar dataKey="active" name="Not Complete" stackId="a" fill="hsl(35 92% 52%)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div id="chart-stacked-status" className="space-y-3">
+                <div className="h-[440px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={completedVsActiveByYear}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" fontSize={11} />
+                      <YAxis fontSize={12} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="completed" name="Completed" stackId="a" fill="hsl(142 71% 45%)" />
+                      <Bar dataKey="active" name="Not Complete" stackId="a" fill="hsl(35 92% 52%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {isDataVisible("stacked-status") && (
+                  <ChartDataTable
+                    rows={completedVsActiveByYear}
+                    columns={[
+                      { key: "name", label: "Year" },
+                      { key: "completed", label: "Completed" },
+                      { key: "active", label: "Not Complete" },
+                    ]}
+                  />
+                )}
               </div>
             </CardContent>
           </Card>

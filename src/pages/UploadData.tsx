@@ -9,6 +9,7 @@ import { parseLegacyCourseFile, type LegacyCourse } from "@/lib/parse-legacy-cou
 import { parseModernCourseFile, type ModernCourse } from "@/lib/parse-modern-course";
 import { parseTimeSpentFile, type TimeSpentEntry } from "@/lib/parse-time-spent";
 import { makeId, readLocalStore, writeLocalStore } from "@/lib/local-data-store";
+import { normalizeProjectStatus } from "@/lib/project-status";
 import { supabase } from "@/integrations/supabase/client";
 import { useUploadHistory } from "@/hooks/use-time-data";
 import { useAuth } from "@/hooks/use-auth";
@@ -279,28 +280,11 @@ export default function UploadData() {
         const modernMap = new Map<string, ModernCourse>();
         (modernData || []).forEach(c => modernMap.set(courseKey(c.courseName, c.reportingYear), c));
 
-        const timeAggByName = new Map<string, number>();
-        (timeData || []).forEach(e => {
-          const k = normKey(e.courseName);
-          timeAggByName.set(k, (timeAggByName.get(k) || 0) + e.hours);
-        });
-
-        const courseNameKeys = new Set<string>([
-          ...(legacyData || []).map(c => normKey(c.courseName)),
-          ...(modernData || []).map(c => normKey(c.courseName)),
-        ]);
-        const timeOnlyCourseKeys = new Set<string>(
-          [...timeAggByName.keys()]
-            .filter((nameKey) => !courseNameKeys.has(nameKey))
-            .map((nameKey) => `${nameKey}::`)
-        );
-
         const projectIdMap = new Map<string, string>();
         const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
         const allCourseKeys = new Set([
           ...legacyMap.keys(),
           ...modernMap.keys(),
-          ...timeOnlyCourseKeys,
         ]);
 
         for (const key of allCourseKeys) {
@@ -314,7 +298,7 @@ export default function UploadData() {
           let meta: any = {};
 
           if (legacy) {
-            status = "Completed";
+            status = normalizeProjectStatus(legacy.status, existing ? String((existing as any).status || "") : "In Progress");
             totalHours = legacy.totalHours;
             dataSource = "legacy";
             meta = {
@@ -330,7 +314,7 @@ export default function UploadData() {
               reporting_year: legacy.reportingYear,
             };
           } else if (modern) {
-            status = "Completed";
+            status = normalizeProjectStatus(modern.status, existing ? String((existing as any).status || "") : "In Progress");
             totalHours = modern.totalHours;
             dataSource = "modern";
             meta = {
@@ -346,10 +330,7 @@ export default function UploadData() {
               reporting_year: modern.reportingYear,
             };
           } else {
-            status = "In Progress";
-            const nameOnlyKey = key.split("::")[0];
-            totalHours = timeAggByName.get(nameOnlyKey) || 0;
-            dataSource = "time_only";
+            continue;
           }
 
           const nameOnlyKey = key.split("::")[0];
@@ -484,24 +465,6 @@ export default function UploadData() {
       const modernMap = new Map<string, ModernCourse>();
       (modernData || []).forEach(c => modernMap.set(courseKey(c.courseName, c.reportingYear), c));
 
-      // Aggregate category-file time by course name (detail file, partial categories only)
-      const timeAggByName = new Map<string, number>();
-      (timeData || []).forEach(e => {
-        const k = normKey(e.courseName);
-        timeAggByName.set(k, (timeAggByName.get(k) || 0) + e.hours);
-      });
-
-      // Create time-only keys for names not present in legacy/modern exports
-      const courseNameKeys = new Set<string>([
-        ...(legacyData || []).map(c => normKey(c.courseName)),
-        ...(modernData || []).map(c => normKey(c.courseName)),
-      ]);
-      const timeOnlyCourseKeys = new Set<string>(
-        [...timeAggByName.keys()]
-          .filter((nameKey) => !courseNameKeys.has(nameKey))
-          .map((nameKey) => `${nameKey}::`)
-      );
-
       // Get existing projects keyed the same way (Course Name + reporting_year)
       const existingProjects = (await supabase.from("projects").select("*")).data || [];
       const existingMap = new Map(existingProjects.map((p: any) => [courseKey(p.name, p.reporting_year), p]));
@@ -512,7 +475,6 @@ export default function UploadData() {
       const allCourseKeys = new Set([
         ...legacyMap.keys(),
         ...modernMap.keys(),
-        ...timeOnlyCourseKeys,
       ]);
 
       for (const key of allCourseKeys) {
@@ -526,7 +488,7 @@ export default function UploadData() {
         let meta: any = {};
 
         if (legacy) {
-          status = "Completed";
+          status = normalizeProjectStatus(legacy.status, existing ? String(existing.status || "") : "In Progress");
           totalHours = legacy.totalHours;
           dataSource = "legacy";
           meta = {
@@ -542,7 +504,7 @@ export default function UploadData() {
             reporting_year: legacy.reportingYear,
           };
         } else if (modern) {
-          status = "Completed";
+          status = normalizeProjectStatus(modern.status, existing ? String(existing.status || "") : "In Progress");
           totalHours = modern.totalHours;
           dataSource = "modern";
           meta = {
@@ -558,10 +520,7 @@ export default function UploadData() {
             reporting_year: modern.reportingYear,
           };
         } else {
-          status = "In Progress";
-          const nameOnlyKey = key.split("::")[0];
-          totalHours = timeAggByName.get(nameOnlyKey) || 0;
-          dataSource = "time_only";
+          continue;
         }
 
         const nameOnlyKey = key.split("::")[0];

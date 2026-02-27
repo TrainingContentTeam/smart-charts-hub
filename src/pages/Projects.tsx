@@ -3,12 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
+import { isCompletedProjectStatus } from "@/lib/project-status";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Search, ArrowUpDown, BookOpen, Video, Clock3, CalendarDays, Ruler, Camera } from "lucide-react";
+import { ArrowLeft, Search, ArrowUpDown, BookOpen, Video, Clock3, CalendarDays, Ruler } from "lucide-react";
 import { CollaborationSurveyComingSoon } from "@/components/CollaborationSurveyComingSoon";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
+import { ChartActions } from "@/components/ChartActions";
+import { ChartDataTable } from "@/components/ChartDataTable";
 
 function text(v: unknown): string {
   return String(v || "").trim();
@@ -33,6 +36,7 @@ export default function Projects() {
   const [search, setSearch] = useState("");
   const [detailSortKey, setDetailSortKey] = useState<"category" | "hours" | "date" | "user">("date");
   const [detailSortAsc, setDetailSortAsc] = useState(false);
+  const [showCategoryChartData, setShowCategoryChartData] = useState(false);
 
   const projectsWithRelativePosition = useMemo(() => {
     const withMetrics = projects.map((p: any) => {
@@ -228,22 +232,27 @@ export default function Projects() {
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
               <CardTitle className="text-base">Time Spent by Category</CardTitle>
-              <Button variant="outline" size="sm" onClick={() => saveChartSnapshot("chart-project-category", `project-${m.id}-category-hours`)}>
-                <Camera className="h-3.5 w-3.5 mr-1" /> Snapshot
-              </Button>
+              <ChartActions
+                showData={showCategoryChartData}
+                onToggleData={() => setShowCategoryChartData((v) => !v)}
+                onSnapshot={() => saveChartSnapshot("chart-project-category", `project-${m.id}-category-hours`)}
+              />
             </div>
           </CardHeader>
           <CardContent>
-            <div id="chart-project-category" className="h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={categoryBreakdown} layout="vertical" margin={{ left: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis type="number" fontSize={12} />
-                  <YAxis type="category" dataKey="name" width={180} fontSize={11} />
-                  <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                  <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div id="chart-project-category" className="space-y-3">
+              <div className="h-[320px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={categoryBreakdown} layout="vertical" margin={{ left: 16 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis type="number" fontSize={12} />
+                    <YAxis type="category" dataKey="name" width={180} fontSize={11} />
+                    <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
+                    <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {showCategoryChartData && <ChartDataTable rows={categoryBreakdown} columns={[{ key: "name", label: "Category" }, { key: "hours", label: "Hours" }]} />}
             </div>
           </CardContent>
         </Card>
@@ -319,7 +328,7 @@ export default function Projects() {
                     </div>
                     <CardTitle className="text-sm leading-tight">{p.name}</CardTitle>
                   </div>
-                  <Badge variant={text(p.status).toLowerCase() === "completed" ? "default" : "secondary"} className="shrink-0 text-xs">
+                  <Badge variant={isCompletedProjectStatus(p.status) ? "default" : "secondary"} className="shrink-0 text-xs">
                     {text(p.status) || "Unknown"}
                   </Badge>
                 </div>

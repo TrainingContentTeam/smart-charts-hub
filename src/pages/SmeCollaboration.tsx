@@ -3,11 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useProjects } from "@/hooks/use-time-data";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ComposedChart, Line } from "recharts";
-import { Camera } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { YearPills } from "@/components/YearPills";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { CollaborationSurveyComingSoon } from "@/components/CollaborationSurveyComingSoon";
+import { ChartActions } from "@/components/ChartActions";
+import { ChartDataTable } from "@/components/ChartDataTable";
 
 function text(v: unknown): string {
   return String(v || "").trim();
@@ -22,6 +22,9 @@ export default function SmeCollaboration() {
   const { data: projects = [] } = useProjects();
   const [chartYears, setChartYears] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showChartData, setShowChartData] = useState<Record<string, boolean>>({});
+  const isDataVisible = (key: string) => !!showChartData[key];
+  const toggleDataVisible = (key: string) => setShowChartData((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const years = useMemo(() => {
     const set = new Set<string>();
@@ -87,25 +90,6 @@ export default function SmeCollaboration() {
     [filteredForSmeSummary, selectedIds]
   );
 
-  // Graphic replacing previous table: by Assigned ID, show courses and authored hours
-  const assignedIdGraphic = useMemo(() => {
-    const map: Record<string, { courses: number; authoredHours: number }> = {};
-    idFocusedCourses.forEach((p: any) => {
-      const id = text(p.id_assigned) || "(Missing ID)";
-      if (!map[id]) map[id] = { courses: 0, authoredHours: 0 };
-      map[id].courses += 1;
-      map[id].authoredHours += toNumber(p.total_hours);
-    });
-    return Object.entries(map)
-      .map(([id, data]) => ({
-        id,
-        courses: data.courses,
-        authoredHours: Math.round(data.authoredHours * 10) / 10,
-      }))
-      .sort((a, b) => b.authoredHours - a.authoredHours)
-      .slice(0, 20);
-  }, [idFocusedCourses]);
-
   const smeGraphicForSelectedIds = useMemo(() => {
     const map: Record<string, { courses: number; authoredHours: number }> = {};
     idFocusedCourses.forEach((p: any) => {
@@ -158,26 +142,31 @@ export default function SmeCollaboration() {
         <CardHeader className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-base">SME Authored Hours and Course Count</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => saveChartSnapshot("chart-sme-authored", "sme-authored-hours")}> 
-              <Camera className="h-3.5 w-3.5 mr-1" /> Snapshot
-            </Button>
+            <ChartActions
+              showData={isDataVisible("sme-authored")}
+              onToggleData={() => toggleDataVisible("sme-authored")}
+              onSnapshot={() => saveChartSnapshot("chart-sme-authored", "sme-authored-hours")}
+            />
           </div>
           <YearPills years={years} selectedYears={chartYears} onChange={setChartYears} />
         </CardHeader>
         <CardContent>
-          <div id="chart-sme-authored" className="h-[560px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={smeAuthoredSummary} layout="vertical" margin={{ left: 12, right: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis type="number" xAxisId="left" />
-                <XAxis type="number" xAxisId="right" hide />
-                <YAxis type="category" dataKey="sme" width={230} interval={0} yAxisId="cat" />
-                <Tooltip />
-                <Legend />
-                <Bar xAxisId="left" yAxisId="cat" dataKey="authoredHours" name="Authored Hours" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
-                <Line xAxisId="right" yAxisId="cat" type="monotone" dataKey="courses" name="Courses" stroke="hsl(var(--chart-4))" strokeWidth={2} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
+          <div id="chart-sme-authored" className="space-y-3">
+            <div className="h-[560px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={smeAuthoredSummary} layout="vertical" margin={{ left: 12, right: 24 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis type="number" xAxisId="left" />
+                  <XAxis type="number" xAxisId="right" hide />
+                  <YAxis type="category" dataKey="sme" width={230} interval={0} yAxisId="cat" />
+                  <Tooltip />
+                  <Legend />
+                  <Bar xAxisId="left" yAxisId="cat" dataKey="authoredHours" name="Authored Hours" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
+                  <Line xAxisId="right" yAxisId="cat" type="monotone" dataKey="courses" name="Courses" stroke="hsl(var(--chart-4))" strokeWidth={2} dot={{ r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            {isDataVisible("sme-authored") && <ChartDataTable rows={smeAuthoredSummary} columns={[{ key: "sme", label: "SME" }, { key: "authoredHours", label: "Authored Hours" }, { key: "courses", label: "Courses" }]} />}
           </div>
         </CardContent>
       </Card>
@@ -185,10 +174,12 @@ export default function SmeCollaboration() {
       <Card>
         <CardHeader className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-base">Assigned ID Focus</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => saveChartSnapshot("chart-assigned-id-focus", "assigned-id-focus")}> 
-              <Camera className="h-3.5 w-3.5 mr-1" /> Snapshot
-            </Button>
+            <CardTitle className="text-base">SME Focus by Assigned ID</CardTitle>
+            <ChartActions
+              showData={isDataVisible("assigned-id-focus")}
+              onToggleData={() => toggleDataVisible("assigned-id-focus")}
+              onSnapshot={() => saveChartSnapshot("chart-assigned-id-focus", "assigned-id-focus")}
+            />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge
@@ -211,31 +202,21 @@ export default function SmeCollaboration() {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div id="chart-assigned-id-focus" className="h-[420px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={assignedIdGraphic}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="id" interval={0} angle={-20} textAnchor="end" height={80} />
-                <YAxis yAxisId="left" />
-                <YAxis yAxisId="right" orientation="right" />
-                <Tooltip />
-                <Legend />
-                <Bar yAxisId="left" dataKey="authoredHours" name="Authored Hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
-                <Line yAxisId="right" type="monotone" dataKey="courses" name="Courses" stroke="hsl(var(--chart-5))" strokeWidth={2} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="h-[420px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={smeGraphicForSelectedIds} layout="vertical" margin={{ left: 12, right: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis type="number" />
-                <YAxis type="category" dataKey="sme" width={230} interval={0} />
-                <Tooltip formatter={(v: any, n: any) => [v, n]} />
-                <Bar dataKey="authoredHours" name="Authored Hours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div id="chart-assigned-id-focus" className="space-y-3">
+            <div className="h-[420px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={smeGraphicForSelectedIds} layout="vertical" margin={{ left: 12, right: 24 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis type="number" />
+                  <YAxis type="category" dataKey="sme" width={230} interval={0} />
+                  <Tooltip formatter={(v: any, n: any) => (n === "authoredHours" ? [`${v}h`, "Course Duration Hours"] : [v, n])} />
+                  <Bar dataKey="authoredHours" name="Course Duration Hours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {isDataVisible("assigned-id-focus") && (
+              <ChartDataTable rows={smeGraphicForSelectedIds} columns={[{ key: "sme", label: "SME" }, { key: "authoredHours", label: "Course Duration Hours" }, { key: "courses", label: "Courses" }]} />
+            )}
           </div>
         </CardContent>
       </Card>

@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useProjects, useTimeEntries } from "@/hooks/use-time-data";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
-import { ArrowUpDown, Camera } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ArrowUpDown } from "lucide-react";
 import { YearPills } from "@/components/YearPills";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
+import { ChartActions } from "@/components/ChartActions";
+import { ChartDataTable } from "@/components/ChartDataTable";
 
 function clean(v: unknown): string {
   return String(v || "").trim();
@@ -53,6 +54,7 @@ function TeamSection({ title, rows, color, years }: { title: string; rows: TeamR
   const [topSortAsc, setTopSortAsc] = useState(false);
   const [detailSortKey, setDetailSortKey] = useState<"project" | "year" | "category" | "user" | "hours">("year");
   const [detailSortAsc, setDetailSortAsc] = useState(false);
+  const [showChartData, setShowChartData] = useState(false);
   const filteredRows = useMemo(
     () => (selectedYears.length ? rows.filter((r) => selectedYears.includes(r.year)) : rows),
     [rows, selectedYears]
@@ -142,22 +144,27 @@ function TeamSection({ title, rows, color, years }: { title: string; rows: TeamR
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="text-base">Hours by Year</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => saveChartSnapshot(`chart-${title.toLowerCase().replace(/\\s+/g, "-")}-hours`, `${title.toLowerCase().replace(/\\s+/g, "-")}-hours-by-year`)}>
-                  <Camera className="h-3.5 w-3.5 mr-1" /> Snapshot
-                </Button>
+                <ChartActions
+                  showData={showChartData}
+                  onToggleData={() => setShowChartData((v) => !v)}
+                  onSnapshot={() => saveChartSnapshot(`chart-${title.toLowerCase().replace(/\s+/g, "-")}-hours`, `${title.toLowerCase().replace(/\s+/g, "-")}-hours-by-year`)}
+                />
               </div>
             </CardHeader>
             <CardContent>
-              <div id={`chart-${title.toLowerCase().replace(/\\s+/g, "-")}-hours`} className="h-[360px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={hoursByYear}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="year" />
-                    <YAxis />
-                    <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                    <Bar dataKey="hours" fill={color} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div id={`chart-${title.toLowerCase().replace(/\s+/g, "-")}-hours`} className="space-y-3">
+                <div className="h-[360px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={hoursByYear}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="year" />
+                      <YAxis />
+                      <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
+                      <Bar dataKey="hours" fill={color} radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {showChartData && <ChartDataTable rows={hoursByYear} columns={[{ key: "year", label: "Year" }, { key: "hours", label: "Hours" }]} />}
               </div>
             </CardContent>
           </Card>

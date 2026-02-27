@@ -4,6 +4,7 @@ import { parseDurationHours, toReportingYear } from "@/lib/parse-duration";
 export interface LegacyCourse {
   courseName: string;
   totalHours: number;
+  status: string;
   reportingYear: string;
   idAssigned: string;
   sme: string;
@@ -35,6 +36,7 @@ export async function parseLegacyCourseFile(file: File): Promise<LegacyCourse[]>
     results.push({
       courseName,
       totalHours: parseDurationHours(row["Time spent"]),
+      status: normalize(row["Status"] || row["[LCT] Status (L)"]),
       reportingYear: toReportingYear(row["[LCT] Reporting (L)"]),
       idAssigned: normalize(row["[LCT] ID Assigned (L)"]),
       sme: normalize(row["[LCT] SME (L)"]),

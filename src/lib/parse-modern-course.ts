@@ -4,6 +4,7 @@ import { parseDurationHours, toReportingYear } from "@/lib/parse-duration";
 export interface ModernCourse {
   courseName: string;
   totalHours: number; // authoritative course total from the Modern export
+  status: string;
   reportingYear: string;
   idAssigned: string;
   sme: string;
@@ -35,6 +36,7 @@ export async function parseModernCourseFile(file: File): Promise<ModernCourse[]>
     results.push({
       courseName,
       totalHours: parseDurationHours(row["Time spent"]),
+      status: normalize(row["Status"] || row["[LCT] Status (M)"]),
       reportingYear: toReportingYear(row["[LCT] Reporting (M)"]),
       idAssigned: normalize(row["[LCT] ID Assigned (M)"]),
       sme: normalize(row["[LCT] SME (M)"]),

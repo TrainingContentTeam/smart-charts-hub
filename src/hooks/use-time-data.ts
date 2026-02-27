@@ -10,9 +10,15 @@ export function useProjects() {
     queryFn: async () => {
       if (DEV_BYPASS_AUTH) {
         const local = readLocalStore();
-        return [...local.projects].sort((a, b) => a.name.localeCompare(b.name));
+        return [...local.projects]
+          .filter((p) => String((p as any).data_source || "").toLowerCase() !== "time_only")
+          .sort((a, b) => a.name.localeCompare(b.name));
       }
-      const { data, error } = await supabase.from("projects").select("*").order("name");
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*")
+        .neq("data_source", "time_only")
+        .order("name");
       if (error) throw error;
       return data;
     },
