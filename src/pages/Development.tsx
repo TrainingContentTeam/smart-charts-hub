@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useProjects, useTimeEntries } from "@/hooks/use-time-data";
-import { YearPills } from "@/components/YearPills";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { isCompletedProjectStatus } from "@/lib/project-status";
 import { ChartActions } from "@/components/ChartActions";
@@ -15,7 +15,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  LineChart,
   Line,
   ComposedChart,
   Legend,
@@ -52,39 +51,44 @@ function personKey(v: unknown): string {
   return clean(v).toLowerCase().replace(/\s+/g, " ");
 }
 
-function filterProjectsByYears(projects: any[], selectedYears: string[]) {
-  if (!selectedYears.length) return projects;
-  return projects.filter((p) => selectedYears.includes(clean(p.reporting_year)));
+function normalizeMetaLabel(v: unknown): string {
+  if (isMissingMeta(v)) return "Unknown";
+  return clean(v);
 }
+
+const TREND_TOOL_OPTIONS = ["Rise", "Storyline", "LMS"] as const;
+const TREND_TYPE_OPTIONS = ["New", "Revamp", "Maintenance"] as const;
+const TREND_VERTICAL_OPTIONS = ["P1A", "EMS1", "FR1A", "D1A", "C1A", "LGU", "Wellness", "Other"] as const;
+type ChartFilters = {
+  type: string;
+  tool: string;
+  vertical: string;
+  assignedId: string;
+};
+
+const DEFAULT_CHART_FILTERS: ChartFilters = {
+  type: "all",
+  tool: "all",
+  vertical: "all",
+  assignedId: "all",
+};
 
 export default function Development() {
   const { data: projects = [] } = useProjects();
   const { data: entries = [] } = useTimeEntries();
 
-  const [statusYears, setStatusYears] = useState<string[]>([]);
-  const [trendYears, setTrendYears] = useState<string[]>([]);
-  const [typeYears, setTypeYears] = useState<string[]>([]);
-  const [categoryYears, setCategoryYears] = useState<string[]>([]);
-  const [assignedYears, setAssignedYears] = useState<string[]>([]);
-  const [topYears, setTopYears] = useState<string[]>([]);
-  const [typeStatusFilter, setTypeStatusFilter] = useState<"all" | "completed" | "not_complete">("all");
-  const [typeToolFilter, setTypeToolFilter] = useState<string[]>([]);
-  const [typeMinCourses, setTypeMinCourses] = useState<1 | 2 | 3>(1);
-  const [includeMissingType, setIncludeMissingType] = useState(false);
+  const [statusFilters, setStatusFilters] = useState<ChartFilters>({ ...DEFAULT_CHART_FILTERS });
+  const [trendFilters, setTrendFilters] = useState<ChartFilters>({ ...DEFAULT_CHART_FILTERS });
+  const [categoryFilters, setCategoryFilters] = useState<ChartFilters>({ ...DEFAULT_CHART_FILTERS });
+  const [assignedFocusFilters, setAssignedFocusFilters] = useState<ChartFilters>({ ...DEFAULT_CHART_FILTERS });
+  const [topProjectsFilters, setTopProjectsFilters] = useState<ChartFilters>({ ...DEFAULT_CHART_FILTERS });
+  const [expandedTopProjectKey, setExpandedTopProjectKey] = useState<string | null>(null);
   const [showChartData, setShowChartData] = useState<Record<string, boolean>>({});
 
   const isDataVisible = (key: string) => !!showChartData[key];
   const toggleDataVisible = (key: string) => setShowChartData((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p])), [projects]);
-
-  const years = useMemo(() => {
-    const set = new Set<string>();
-    projects.forEach((p: any) => {
-      if (p.reporting_year) set.add(clean(p.reporting_year));
-    });
-    return [...set].sort();
-  }, [projects]);
 
   const baseKpis = useMemo(() => {
     const totalHours = projects.reduce((sum: number, p: any) => sum + Number(p.total_hours || 0), 0);
@@ -96,71 +100,95 @@ export default function Development() {
     };
   }, [projects]);
 
-  const statusMix = useMemo(() => {
-    const rows = filterProjectsByYears(projects as any[], statusYears);
-    const completed = rows.filter((p: any) => isCompletedProjectStatus(p.status)).length;
-    const notComplete = rows.length - completed;
-    return [
-      { name: "Completed", count: completed },
-      { name: "Not Complete", count: notComplete },
-    ];
-  }, [projects, statusYears]);
+  const activeBacklogByYear = useMemo(() => {
+    const rows = (projects as any[]).filter((p: any) => matchesFilters(p, statusFilters));
+    const activeRows = rows.filter((p: any) => !isCompletedProjectStatus(p.status));
+    const numericYears = activeRows
+      .map((p: any) => Number.parseInt(clean(p.reporting_year), 10))
+      .filter((y) => Number.isFinite(y));
+    const currentYear = numericYears.length ? Math.max(...numericYears) : null;
+    const priorYear = currentYear ? currentYear - 1 : null;
+
+    const byType: Record<string, { current: number; carryover: number }> = {};
+    TREND_TYPE_OPTIONS.forEach((type) => {
+      byType[type] = { current: 0, carryover: 0 };
+    });
+
+    activeRows.forEach((p: any) => {
+      const type = normalizeCourseType(p.course_type);
+      if (!(type in byType)) return;
+      const year = Number.parseInt(clean(p.reporting_year), 10);
+      if (!Number.isFinite(year)) return;
+      if (currentYear && year === currentYear) byType[type].current += 1;
+      else if (priorYear && year === priorYear) byType[type].carryover += 1;
+    });
+
+    const data = TREND_TYPE_OPTIONS.map((type) => {
+      const current = byType[type].current;
+      const carryover = byType[type].carryover;
+      return {
+        category: type,
+        current,
+        carryover,
+        total: current + carryover,
+      };
+    }).filter((row) => row.total > 0);
+
+    return {
+      currentYear,
+      priorYear,
+      data,
+    };
+  }, [projects, statusFilters]);
+
+  function matchesFilters(project: any, filters: ChartFilters): boolean {
+    const tool = normalizeTool(project.authoring_tool);
+    const courseType = normalizeCourseType(project.course_type);
+
+    if (filters.tool !== "all" && tool !== filters.tool) return false;
+    if (filters.type !== "all" && courseType !== filters.type) return false;
+    if (filters.vertical !== "all") {
+      const verticalText = clean(project.vertical).toLowerCase();
+      if (!verticalText.includes(filters.vertical.toLowerCase())) return false;
+    }
+    if (filters.assignedId !== "all" && normalizeMetaLabel(project.id_assigned) !== filters.assignedId) return false;
+    return true;
+  }
 
   const hoursTrend = useMemo(() => {
-    const rows = filterProjectsByYears(projects as any[], trendYears);
-    const map: Record<string, number> = {};
-    rows.forEach((p: any) => {
+    const yearlyHours: Record<string, number> = {};
+    const yearlyCourses: Record<string, number> = {};
+
+    projects.forEach((p: any) => {
       const year = clean(p.reporting_year || "Unknown");
-      map[year] = (map[year] || 0) + Number(p.total_hours || 0);
-    });
-    return Object.entries(map)
-      .map(([year, hours]) => ({ year, hours: Math.round(hours * 10) / 10 }))
-      .sort((a, b) => a.year.localeCompare(b.year));
-  }, [projects, trendYears]);
+      if (!matchesFilters(p, trendFilters)) return;
 
-  const typeToolOptions = useMemo(() => {
-    const rows = filterProjectsByYears(projects as any[], typeYears);
-    const set = new Set<string>();
-    rows.forEach((p: any) => set.add(normalizeTool(p.authoring_tool)));
-    return [...set].sort();
-  }, [projects, typeYears]);
-
-  const avgByType = useMemo(() => {
-    const rows = filterProjectsByYears(projects as any[], typeYears).filter((p: any) => {
-      if (typeStatusFilter === "completed" && !isCompletedProjectStatus(p.status)) return false;
-      if (typeStatusFilter === "not_complete" && isCompletedProjectStatus(p.status)) return false;
-      if (typeToolFilter.length) {
-        const tool = normalizeTool(p.authoring_tool);
-        if (!typeToolFilter.includes(tool)) return false;
-      }
-      return true;
+      yearlyCourses[year] = (yearlyCourses[year] || 0) + 1;
+      yearlyHours[year] = (yearlyHours[year] || 0) + Number(p.total_hours || 0);
     });
 
-    const map: Record<string, { sum: number; count: number }> = {};
-    rows.forEach((p: any) => {
-      if (!includeMissingType && isMissingMeta(p.course_type)) return;
-      const type = normalizeCourseType(p.course_type);
-      if (!map[type]) map[type] = { sum: 0, count: 0 };
-      map[type].sum += Number(p.total_hours || 0);
-      map[type].count += 1;
-    });
-
-    return Object.entries(map)
-      .map(([name, v]) => ({
-        name,
-        avgHours: Math.round((v.sum / Math.max(v.count, 1)) * 10) / 10,
-        courses: v.count,
+    const yearsSet = new Set<string>([...Object.keys(yearlyHours), ...Object.keys(yearlyCourses)]);
+    return [...yearsSet]
+      .map((year) => ({
+        year,
+        hours: Math.round((yearlyHours[year] || 0) * 10) / 10,
+        courses: yearlyCourses[year] || 0,
       }))
-      .filter((row) => row.courses >= typeMinCourses)
-      .sort((a, b) => b.avgHours - a.avgHours);
-  }, [projects, typeYears, typeStatusFilter, typeToolFilter, typeMinCourses, includeMissingType]);
+      .sort((a, b) => a.year.localeCompare(b.year));
+  }, [projects, trendFilters]);
+
+  const trendAssignedIdOptions = useMemo(() => {
+    const set = new Set<string>();
+    projects.forEach((p: any) => set.add(normalizeMetaLabel(p.id_assigned)));
+    return [...set].sort();
+  }, [projects]);
 
   const categoryHours = useMemo(() => {
     const map: Record<string, number> = {};
     entries.forEach((e: any) => {
       const project = projectMap.get(e.project_id);
       if (!project) return;
-      if (categoryYears.length && !categoryYears.includes(clean(project.reporting_year))) return;
+      if (!matchesFilters(project, categoryFilters)) return;
       const category = clean(e.category || e.phase || "Uncategorized");
       map[category] = (map[category] || 0) + Number(e.hours || 0);
     });
@@ -168,18 +196,29 @@ export default function Development() {
       .map(([name, hours]) => ({ name, hours: Math.round(hours * 10) / 10 }))
       .sort((a, b) => b.hours - a.hours)
       .slice(0, 14);
-  }, [entries, projectMap, categoryYears]);
+  }, [entries, projectMap, categoryFilters]);
 
   const topProjects = useMemo(() => {
-    const rows = filterProjectsByYears(projects as any[], topYears);
+    const rows = (projects as any[]).filter((p: any) => matchesFilters(p, topProjectsFilters));
     return [...rows]
       .sort((a: any, b: any) => Number(b.total_hours || 0) - Number(a.total_hours || 0))
       .slice(0, 12)
-      .map((p: any) => ({ name: p.name, hours: Math.round(Number(p.total_hours || 0) * 10) / 10 }));
-  }, [projects, topYears]);
+      .map((p: any, idx: number) => ({
+        key: clean(p.id) || `${clean(p.name)}-${idx}`,
+        name: clean(p.name) || "Untitled Course",
+        hours: Math.round(Number(p.total_hours || 0) * 10) / 10,
+        assignedId: normalizeMetaLabel(p.id_assigned),
+        vertical: normalizeMetaLabel(p.vertical),
+        type: normalizeCourseType(p.course_type),
+        style: normalizeMetaLabel(p.course_style),
+        courseLength: normalizeMetaLabel(p.course_length),
+        tool: normalizeTool(p.authoring_tool),
+        sme: normalizeMetaLabel(p.sme),
+      }));
+  }, [projects, topProjectsFilters]);
 
   const assignedIdFocus = useMemo(() => {
-    const rows = filterProjectsByYears(projects as any[], assignedYears);
+    const rows = (projects as any[]).filter((p: any) => matchesFilters(p, assignedFocusFilters));
     const projectToId = new Map<string, string>();
     const projectToIdKey = new Map<string, string>();
     const byId: Record<string, { courses: number; entryHours: number }> = {};
@@ -211,7 +250,94 @@ export default function Development() {
       }))
       .sort((a, b) => b.entryHours - a.entryHours || b.courses - a.courses)
       .slice(0, 20);
-  }, [projects, entries, assignedYears]);
+  }, [projects, entries, assignedFocusFilters]);
+
+  const renderFilterControls = (
+    filters: ChartFilters,
+    setFilters: Dispatch<SetStateAction<ChartFilters>>
+  ) => (
+    <div className="flex items-center gap-3 overflow-x-auto overflow-y-visible whitespace-nowrap py-1">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Course Type</span>
+        <Badge
+          variant={filters.type === "all" ? "default" : "outline"}
+          className="cursor-pointer"
+          onClick={() => setFilters((prev) => ({ ...prev, type: "all" }))}
+        >
+          All Types
+        </Badge>
+        {TREND_TYPE_OPTIONS.map((value) => (
+          <Badge
+            key={value}
+            variant={filters.type === value ? "default" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setFilters((prev) => ({ ...prev, type: value }))}
+          >
+            {value}
+          </Badge>
+        ))}
+      </div>
+      <div className="h-6 w-px bg-border" />
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Authoring Tool</span>
+        <Badge
+          variant={filters.tool === "all" ? "default" : "outline"}
+          className="cursor-pointer"
+          onClick={() => setFilters((prev) => ({ ...prev, tool: "all" }))}
+        >
+          All Tools
+        </Badge>
+        {TREND_TOOL_OPTIONS.map((value) => (
+          <Badge
+            key={value}
+            variant={filters.tool === value ? "default" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setFilters((prev) => ({ ...prev, tool: value }))}
+          >
+            {value}
+          </Badge>
+        ))}
+      </div>
+      <div className="h-6 w-px bg-border" />
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Vertical</span>
+        <div className="min-w-[180px]">
+          <Select value={filters.vertical} onValueChange={(value) => setFilters((prev) => ({ ...prev, vertical: value }))}>
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="All Verticals" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Verticals</SelectItem>
+              {TREND_VERTICAL_OPTIONS.map((vertical) => (
+                <SelectItem key={vertical} value={vertical}>
+                  {vertical}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="h-6 w-px bg-border" />
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Assigned ID</span>
+        <div className="min-w-[220px]">
+          <Select value={filters.assignedId} onValueChange={(value) => setFilters((prev) => ({ ...prev, assignedId: value }))}>
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="All IDs" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All IDs</SelectItem>
+              {trendAssignedIdOptions.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -238,30 +364,70 @@ export default function Development() {
       <Card>
         <CardHeader className="space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-base">Completed vs Not Complete</CardTitle>
+            <CardTitle className="text-base">Active Backlog by Course Type</CardTitle>
             <ChartActions
               showData={isDataVisible("dev-status")}
               onToggleData={() => toggleDataVisible("dev-status")}
-              onSnapshot={() => saveChartSnapshot("chart-dev-status", "development-status-mix")}
+              onSnapshot={() => saveChartSnapshot("chart-dev-status", "development-active-backlog")}
             />
           </div>
-          <YearPills years={years} selectedYears={statusYears} onChange={setStatusYears} />
+          <p className="text-xs text-muted-foreground">
+            Includes only courses whose Status is not Completed/Published. Bars are stacked by current-year active and prior-year carryover.
+          </p>
+          {renderFilterControls(statusFilters, setStatusFilters)}
         </CardHeader>
         <CardContent>
           <div id="chart-dev-status" className="space-y-3">
-            <div className="h-[380px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={statusMix}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {activeBacklogByYear.data.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No active courses found for the selected filters.</p>
+            ) : (
+              <div className="h-[380px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={activeBacklogByYear.data}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="category" />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip
+                      formatter={(v: any, _n: any, item: any) =>
+                        item?.dataKey === "carryover"
+                          ? [v, `${activeBacklogByYear.priorYear ?? "Prior Year"} Carryover`]
+                          : [v, `${activeBacklogByYear.currentYear ?? "Current Year"} Active`]
+                      }
+                    />
+                    <Legend />
+                    <Bar
+                      dataKey="current"
+                      name={`${activeBacklogByYear.currentYear ?? "Current Year"} Active`}
+                      stackId="active-stack"
+                      fill="hsl(var(--chart-1))"
+                      radius={[4, 4, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="carryover"
+                      name={`${activeBacklogByYear.priorYear ?? "Prior Year"} Carryover`}
+                      stackId="active-stack"
+                      fill="hsl(var(--chart-4))"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
             {isDataVisible("dev-status") && (
-              <ChartDataTable rows={statusMix} columns={[{ key: "name", label: "Status" }, { key: "count", label: "Courses" }]} />
+              <ChartDataTable
+                rows={activeBacklogByYear.data}
+                columns={[
+                  { key: "category", label: "Category" },
+                  { key: "current", label: `${activeBacklogByYear.currentYear ?? "Current Year"} Active` },
+                  { key: "carryover", label: `${activeBacklogByYear.priorYear ?? "Prior Year"} Carryover` },
+                  { key: "total", label: "Total Active" },
+                ]}
+              />
+            )}
+            {activeBacklogByYear.data.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Carryover indicates active courses from {activeBacklogByYear.priorYear ?? "the prior year"}.
+              </p>
             )}
           </div>
         </CardContent>
@@ -277,98 +443,60 @@ export default function Development() {
               onSnapshot={() => saveChartSnapshot("chart-dev-trend", "development-hours-trend")}
             />
           </div>
-          <YearPills years={years} selectedYears={trendYears} onChange={setTrendYears} />
+          {renderFilterControls(trendFilters, setTrendFilters)}
         </CardHeader>
         <CardContent>
           <div id="chart-dev-trend" className="space-y-3">
-            <div className="h-[420px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={hoursTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="year" />
-                  <YAxis />
-                  <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                  <Line type="monotone" dataKey="hours" stroke="hsl(var(--chart-2))" strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            {isDataVisible("dev-trend") && <ChartDataTable rows={hoursTrend} columns={[{ key: "year", label: "Year" }, { key: "hours", label: "Hours" }]} />}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-base">Average Hours by Course Type</CardTitle>
-            <ChartActions
-              showData={isDataVisible("dev-type")}
-              onToggleData={() => toggleDataVisible("dev-type")}
-              onSnapshot={() => saveChartSnapshot("chart-dev-type", "development-avg-by-type")}
-            />
-          </div>
-          <YearPills years={years} selectedYears={typeYears} onChange={setTypeYears} />
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={typeStatusFilter === "all" ? "default" : "outline"} className="cursor-pointer" onClick={() => setTypeStatusFilter("all")}>
-                All Statuses
-              </Badge>
-              <Badge variant={typeStatusFilter === "completed" ? "default" : "outline"} className="cursor-pointer" onClick={() => setTypeStatusFilter("completed")}>
-                Completed/Published
-              </Badge>
-              <Badge variant={typeStatusFilter === "not_complete" ? "default" : "outline"} className="cursor-pointer" onClick={() => setTypeStatusFilter("not_complete")}>
-                Not Complete
-              </Badge>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={typeMinCourses === 1 ? "default" : "outline"} className="cursor-pointer" onClick={() => setTypeMinCourses(1)}>
-                Min 1 Course
-              </Badge>
-              <Badge variant={typeMinCourses === 2 ? "default" : "outline"} className="cursor-pointer" onClick={() => setTypeMinCourses(2)}>
-                Min 2 Courses
-              </Badge>
-              <Badge variant={typeMinCourses === 3 ? "default" : "outline"} className="cursor-pointer" onClick={() => setTypeMinCourses(3)}>
-                Min 3 Courses
-              </Badge>
-              <Badge variant={includeMissingType ? "default" : "outline"} className="cursor-pointer" onClick={() => setIncludeMissingType((v) => !v)}>
-                Include Missing Type
-              </Badge>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={typeToolFilter.length === 0 ? "default" : "outline"} className="cursor-pointer" onClick={() => setTypeToolFilter([])}>
-                All Tools
-              </Badge>
-              {typeToolOptions.map((tool) => (
-                <Badge
-                  key={tool}
-                  variant={typeToolFilter.includes(tool) ? "default" : "outline"}
-                  className="cursor-pointer"
-                  onClick={() =>
-                    setTypeToolFilter((prev) =>
-                      prev.includes(tool) ? prev.filter((x) => x !== tool) : [...prev, tool]
-                    )
-                  }
-                >
-                  {tool}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div id="chart-dev-type" className="space-y-3">
-            <div className="h-[420px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={avgByType}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip formatter={(v: any, n: any, item: any) => (n === "courses" ? [v, "Courses"] : [`${v}h`, "Avg Hours"])} />
-                  <Bar dataKey="avgHours" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            {isDataVisible("dev-type") && <ChartDataTable rows={avgByType} columns={[{ key: "name", label: "Type" }, { key: "avgHours", label: "Avg Hours" }, { key: "courses", label: "Courses" }]} />}
+            {hoursTrend.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No entries match the current filter selection.
+              </p>
+            ) : (
+              <div className="h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={hoursTrend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="year" />
+                    <YAxis yAxisId="left" allowDecimals={false} />
+                    <YAxis yAxisId="right" orientation="right" tickFormatter={(v: any) => `${v}h`} />
+                    <Tooltip
+                      formatter={(v: any, _n: any, item: any) =>
+                        item?.dataKey === "courses"
+                          ? [v, "Course Count"]
+                          : [`${v}h`, "Development Hours"]
+                      }
+                    />
+                    <Legend />
+                    <Bar
+                      yAxisId="left"
+                      dataKey="courses"
+                      name="Course Count"
+                      fill="hsl(var(--chart-3))"
+                      opacity={0.35}
+                      radius={[4, 4, 0, 0]}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="hours"
+                      name="Development Hours"
+                      stroke="hsl(var(--chart-2))"
+                      strokeWidth={2}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {isDataVisible("dev-trend") && (
+              <ChartDataTable
+                rows={hoursTrend}
+                columns={[
+                  { key: "year", label: "Year" },
+                  { key: "courses", label: "Course Count" },
+                  { key: "hours", label: "Development Hours" },
+                ]}
+              />
+            )}
           </div>
         </CardContent>
       </Card>
@@ -383,21 +511,25 @@ export default function Development() {
               onSnapshot={() => saveChartSnapshot("chart-dev-category", "development-hours-by-category")}
             />
           </div>
-          <YearPills years={years} selectedYears={categoryYears} onChange={setCategoryYears} />
+          {renderFilterControls(categoryFilters, setCategoryFilters)}
         </CardHeader>
         <CardContent>
           <div id="chart-dev-category" className="space-y-3">
-            <div className="h-[460px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={categoryHours} layout="vertical" margin={{ left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis type="number" />
-                  <YAxis type="category" dataKey="name" width={220} />
-                  <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                  <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {categoryHours.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No entries match the current filter selection.</p>
+            ) : (
+              <div className="h-[460px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={categoryHours} layout="vertical" margin={{ left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis type="number" />
+                    <YAxis type="category" dataKey="name" width={220} />
+                    <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
+                    <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
             {isDataVisible("dev-category") && <ChartDataTable rows={categoryHours} columns={[{ key: "name", label: "Category" }, { key: "hours", label: "Hours" }]} />}
           </div>
         </CardContent>
@@ -416,7 +548,7 @@ export default function Development() {
           <p className="text-xs text-muted-foreground">
             Uses time-entry hours only from projects assigned to each ID.
           </p>
-          <YearPills years={years} selectedYears={assignedYears} onChange={setAssignedYears} />
+          {renderFilterControls(assignedFocusFilters, setAssignedFocusFilters)}
         </CardHeader>
         <CardContent>
           <div id="chart-dev-assigned-id" className="space-y-3">
@@ -455,16 +587,39 @@ export default function Development() {
       <Card>
         <CardHeader className="space-y-3">
           <CardTitle className="text-base">Top Projects by Total Hours</CardTitle>
-          <YearPills years={years} selectedYears={topYears} onChange={setTopYears} />
+          {renderFilterControls(topProjectsFilters, setTopProjectsFilters)}
         </CardHeader>
         <CardContent className="space-y-2">
           {topProjects.length === 0 ? (
             <p className="text-sm text-muted-foreground">No projects available for the selected years.</p>
           ) : (
             topProjects.map((project, idx) => (
-              <div key={project.name} className="flex items-center justify-between border-b pb-2 text-sm">
-                <span className="truncate pr-4">{idx + 1}. {project.name}</span>
-                <span className="font-semibold">{project.hours}h</span>
+              <div
+                key={project.key}
+                className={`rounded-md border text-sm transition-all ${expandedTopProjectKey === project.key ? "bg-muted/40 shadow-sm" : "bg-background"}`}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-left"
+                  onClick={() =>
+                    setExpandedTopProjectKey((prev) => (prev === project.key ? null : project.key))
+                  }
+                >
+                  <span className="truncate pr-4">{idx + 1}. {project.name}</span>
+                  <span className="font-semibold">{project.hours}h</span>
+                </button>
+                {expandedTopProjectKey === project.key && (
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-1 px-3 pb-3 pt-1 text-xs text-muted-foreground sm:grid-cols-2">
+                    <p><span className="font-medium text-foreground">Course:</span> {project.name}</p>
+                    <p><span className="font-medium text-foreground">ID:</span> {project.assignedId}</p>
+                    <p><span className="font-medium text-foreground">Vertical:</span> {project.vertical}</p>
+                    <p><span className="font-medium text-foreground">Type:</span> {project.type}</p>
+                    <p><span className="font-medium text-foreground">Style:</span> {project.style}</p>
+                    <p><span className="font-medium text-foreground">Course Length:</span> {project.courseLength}</p>
+                    <p><span className="font-medium text-foreground">Tool:</span> {project.tool}</p>
+                    <p><span className="font-medium text-foreground">SME:</span> {project.sme}</p>
+                  </div>
+                )}
               </div>
             ))
           )}
