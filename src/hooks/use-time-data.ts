@@ -1,10 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { readLocalStore } from "@/lib/local-data-store";
+
+const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
 
 export function useProjects() {
   return useQuery({
     queryKey: ["projects"],
     queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = readLocalStore();
+        return [...local.projects].sort((a, b) => a.name.localeCompare(b.name));
+      }
       const { data, error } = await supabase.from("projects").select("*").order("name");
       if (error) throw error;
       return data;
@@ -16,6 +23,10 @@ export function useTimeEntries() {
   return useQuery({
     queryKey: ["time_entries"],
     queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = readLocalStore();
+        return [...local.time_entries].sort((a, b) => b.created_at.localeCompare(a.created_at));
+      }
       // Fetch all time entries (may exceed 1000 rows)
       let allData: any[] = [];
       let from = 0;
@@ -41,6 +52,10 @@ export function useUploadHistory() {
   return useQuery({
     queryKey: ["upload_history"],
     queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = readLocalStore();
+        return [...local.upload_history].sort((a, b) => b.created_at.localeCompare(a.created_at));
+      }
       const { data, error } = await supabase
         .from("upload_history")
         .select("*")

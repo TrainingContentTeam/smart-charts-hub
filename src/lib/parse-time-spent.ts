@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { parseDurationHours } from "@/lib/parse-duration";
 
 export interface TimeSpentEntry {
   courseName: string;
@@ -6,15 +7,6 @@ export interface TimeSpentEntry {
   date: string; // ISO date string
   hours: number;
   userName: string;
-}
-
-function parseHHMM(raw: string): number {
-  if (!raw) return 0;
-  const str = String(raw).trim();
-  const match = str.match(/^(\d+):(\d{2})$/);
-  if (match) return parseInt(match[1], 10) + parseInt(match[2], 10) / 60;
-  const num = parseFloat(str);
-  return isNaN(num) ? 0 : num;
 }
 
 function normalize(s: string | undefined | null): string {
@@ -58,7 +50,7 @@ export async function parseTimeSpentFile(file: File): Promise<TimeSpentEntry[]> 
       courseName,
       category: normalize(row["Category"]),
       date: parseDate(row["Date"]),
-      hours: parseHHMM(row["Time spent"]),
+      hours: parseDurationHours(row["Time spent"]),
       userName: normalize(row["User"]),
     });
   }

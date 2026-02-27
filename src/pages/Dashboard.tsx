@@ -1,49 +1,112 @@
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
+import { YearPills } from "@/components/YearPills";
+import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  ComposedChart,
+  Line,
+  Legend,
 } from "recharts";
-import { Clock, FolderOpen, TrendingUp, Award, Layers, CalendarDays, Users, Search } from "lucide-react";
+import { Clock3, CircleCheckBig, CircleDashed, FolderOpen, Camera } from "lucide-react";
 
 const COLORS = [
-  "hsl(var(--chart-1))",
-  "hsl(var(--chart-2))",
+  "hsl(142 71% 45%)",
+  "hsl(35 92% 52%)",
   "hsl(var(--chart-3))",
   "hsl(var(--chart-4))",
   "hsl(var(--chart-5))",
-  "hsl(200, 60%, 50%)",
-  "hsl(320, 60%, 50%)",
-  "hsl(150, 50%, 45%)",
 ];
 
-function MultiSelect({ label, options, selected, onChange }: {
-  label: string;
-  options: string[];
-  selected: string[];
-  onChange: (v: string[]) => void;
-}) {
-  if (options.length === 0) return null;
+function norm(s: string): string {
+  return (s || "").trim();
+}
+
+function isCompletedStatus(status: unknown): boolean {
+  const s = String(status || "").toLowerCase();
+  return s === "completed" || s === "complete";
+}
+
+function normalizeCourseType(value: unknown): string {
+  const s = String(value || "").trim().toLowerCase();
+  if (!s) return "Unknown";
+  if (s.startsWith("new")) return "New";
+  if (s.startsWith("revamp")) return "Revamp";
+  if (s.startsWith("maint")) return "Maintenance";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function normalizeTool(value: unknown): string {
+  const s = String(value || "").trim().toLowerCase();
+  if (!s) return "Unknown";
+  if (s.includes("storyline")) return "Storyline";
+  if (s === "rise" || s.includes("articulate rise")) return "Rise";
+  if (s.includes("lms")) return "LMS";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function normalizeStyle(value: unknown): string {
+  const s = String(value || "").trim();
+  if (!s) return "Unknown";
+  return s;
+}
+
+function qualityTone(percent: number) {
+  if (percent >= 90) {
+    return {
+      label: "High",
+      dot: "bg-emerald-500",
+      border: "border-emerald-300",
+      bg: "bg-emerald-50",
+      text: "text-emerald-700",
+    };
+  }
+  if (percent >= 70) {
+    return {
+      label: "Medium",
+      dot: "bg-amber-500",
+      border: "border-amber-300",
+      bg: "bg-amber-50",
+      text: "text-amber-700",
+    };
+  }
+  return {
+    label: "Low",
+    dot: "bg-red-500",
+    border: "border-red-300",
+    bg: "bg-red-50",
+    text: "text-red-700",
+  };
+}
+
+function byYears<T extends { reporting_year?: string }>(rows: T[], selectedYears: string[]): T[] {
+  if (!selectedYears.length) return rows;
+  return rows.filter((r) => selectedYears.includes(norm(String(r.reporting_year || ""))));
+}
+
+function ChartHeader({ title, containerId, filename }: { title: string; containerId: string; filename: string }) {
   return (
-    <div className="space-y-1">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <div className="flex flex-wrap gap-1">
-        {options.map(o => (
-          <Badge
-            key={o}
-            variant={selected.includes(o) ? "default" : "outline"}
-            className="cursor-pointer text-xs"
-            onClick={() => onChange(selected.includes(o) ? selected.filter(s => s !== o) : [...selected, o])}
-          >
-            {o}
-          </Badge>
-        ))}
+    <CardHeader className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <CardTitle className="text-base">{title}</CardTitle>
+        <Button variant="outline" size="sm" onClick={() => saveChartSnapshot(containerId, filename)}>
+          <Camera className="h-3.5 w-3.5 mr-1" /> Snapshot
+        </Button>
       </div>
-    </div>
+    </CardHeader>
   );
 }
 
@@ -51,250 +114,279 @@ export default function Dashboard() {
   const { data: entries = [], isLoading: entriesLoading } = useTimeEntries();
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
 
-  const [searchText, setSearchText] = useState("");
-  const [selYears, setSelYears] = useState<string[]>([]);
-  const [selStatus, setSelStatus] = useState<string[]>([]);
-  const [selType, setSelType] = useState<string[]>([]);
-  const [selTool, setSelTool] = useState<string[]>([]);
-  const [selVertical, setSelVertical] = useState<string[]>([]);
-  const [selCategory, setSelCategory] = useState<string[]>([]);
+  const [coursesPerYearYears, setCoursesPerYearYears] = useState<string[]>([]);
+  const [avgBreakdownMode, setAvgBreakdownMode] = useState<"style" | "type" | "tool">("tool");
+  const [avgActiveKeys, setAvgActiveKeys] = useState<string[]>([]);
+  const [categoryYears, setCategoryYears] = useState<string[]>([]);
+  const [statusYears, setStatusYears] = useState<string[]>([]);
+  const [typeYears, setTypeYears] = useState<string[]>([]);
+  const [toolYears, setToolYears] = useState<string[]>([]);
+  const [stackedYears, setStackedYears] = useState<string[]>([]);
+  const [categoryTopN, setCategoryTopN] = useState<10 | 20 | 999>(20);
 
   const isLoading = entriesLoading || projectsLoading;
 
-  // Filter options
-  const filterOptions = useMemo(() => {
-    const years = new Set<string>();
-    const statuses = new Set<string>();
-    const types = new Set<string>();
-    const tools = new Set<string>();
-    const verticals = new Set<string>();
-    const categories = new Set<string>();
+  const years = useMemo(() => {
+    const set = new Set<string>();
     projects.forEach((p: any) => {
-      if (p.reporting_year) years.add(p.reporting_year);
-      if (p.status) statuses.add(p.status);
-      if (p.course_type) types.add(p.course_type);
-      if (p.authoring_tool) tools.add(p.authoring_tool);
-      if (p.vertical) verticals.add(p.vertical);
+      if (p.reporting_year) set.add(norm(String(p.reporting_year)));
     });
-    entries.forEach((e: any) => {
-      if (e.category) categories.add(e.category);
-    });
-    return {
-      years: [...years].sort(),
-      statuses: [...statuses].sort(),
-      types: [...types].sort(),
-      tools: [...tools].sort(),
-      verticals: [...verticals].sort(),
-      categories: [...categories].sort(),
-    };
-  }, [projects, entries]);
+    return [...set].sort();
+  }, [projects]);
 
-  // Filtered projects
-  const filteredProjects = useMemo(() => {
-    const q = searchText.toLowerCase();
-    return projects.filter((p: any) => {
-      if (q && !p.name.toLowerCase().includes(q)) return false;
-      if (selYears.length && !selYears.includes(p.reporting_year)) return false;
-      if (selStatus.length && !selStatus.includes(p.status)) return false;
-      if (selType.length && !selType.includes(p.course_type)) return false;
-      if (selTool.length && !selTool.includes(p.authoring_tool)) return false;
-      if (selVertical.length && !selVertical.includes(p.vertical)) return false;
-      return true;
-    });
-  }, [projects, searchText, selYears, selStatus, selType, selTool, selVertical]);
+  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p])), [projects]);
 
-  const filteredProjectIds = useMemo(() => new Set(filteredProjects.map((p: any) => p.id)), [filteredProjects]);
+  const totalCourses = projects.length;
+  const completeCourses = projects.filter((p: any) => isCompletedStatus(p.status)).length;
+  const activeCourses = totalCourses - completeCourses;
+  const totalHours = projects.reduce((sum: number, p: any) => sum + Number(p.total_hours || 0), 0);
 
-  // Filtered entries
-  const filteredEntries = useMemo(() => {
-    return entries.filter((e: any) => {
-      if (!filteredProjectIds.has(e.project_id)) return false;
-      if (selCategory.length && !selCategory.includes(e.category)) return false;
-      return true;
-    });
-  }, [entries, filteredProjectIds, selCategory]);
+  const maxHours = Math.max(1, ...projects.map((p: any) => Number(p.total_hours || 0)));
+  const avgProjectHours = projects.length ? totalHours / projects.length : 0;
 
-  // KPI stats
-  const stats = useMemo(() => {
-    const totalHours = filteredProjects.reduce((s: number, p: any) => s + Number(p.total_hours || 0), 0);
-    const completed = filteredProjects.filter((p: any) => p.status === "Completed").length;
-    const inProgress = filteredProjects.filter((p: any) => p.status === "In Progress").length;
-    const categories = new Set(filteredEntries.map((e: any) => e.category).filter(Boolean));
-    const users = new Set(filteredEntries.map((e: any) => e.user_name).filter(Boolean));
-    const years = new Set(filteredProjects.map((p: any) => p.reporting_year).filter(Boolean));
+  const gaugeCards = [
+    {
+      label: "Courses",
+      value: totalCourses,
+      icon: FolderOpen,
+      percent: 100,
+      sub: `${years.length} reporting year(s)`,
+    },
+    {
+      label: "Development Hours",
+      value: Math.round(totalHours * 100) / 100,
+      icon: Clock3,
+      percent: Math.min(100, (avgProjectHours / maxHours) * 100),
+      sub: `Avg ${Math.round(avgProjectHours * 10) / 10}h / course`,
+    },
+    {
+      label: "Completed",
+      value: completeCourses,
+      icon: CircleCheckBig,
+      percent: totalCourses ? (completeCourses / totalCourses) * 100 : 0,
+      sub: totalCourses ? `${Math.round((completeCourses / totalCourses) * 100)}% complete` : "No data",
+    },
+    {
+      label: "Not Complete",
+      value: activeCourses,
+      icon: CircleDashed,
+      percent: totalCourses ? (activeCourses / totalCourses) * 100 : 0,
+      sub: totalCourses ? `${Math.round((activeCourses / totalCourses) * 100)}% not complete` : "No data",
+    },
+  ];
 
-    return {
-      totalCourses: filteredProjects.length,
-      completed,
-      inProgress,
-      totalHours: Math.round(totalHours * 100) / 100,
-      avgHoursPerCourse: filteredProjects.length ? Math.round((totalHours / filteredProjects.length) * 10) / 10 : 0,
-      categoryCount: categories.size,
-      userCount: users.size,
-      yearCount: years.size,
-    };
-  }, [filteredProjects, filteredEntries]);
-
-  // Courses per year
   const coursesPerYear = useMemo(() => {
     const map: Record<string, number> = {};
-    filteredProjects.forEach((p: any) => {
-      const year = p.reporting_year || "";
-      if (year) map[year] = (map[year] || 0) + 1;
-    });
-    return Object.entries(map).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [filteredProjects]);
-
-  // Avg hours per course by year
-  const avgHoursByYear = useMemo(() => {
-    const map: Record<string, { sum: number; count: number }> = {};
-    filteredProjects.forEach((p: any) => {
-      const year = p.reporting_year || "";
+    byYears(projects as any[], coursesPerYearYears).forEach((p: any) => {
+      const year = norm(String(p.reporting_year || ""));
       if (!year) return;
-      if (!map[year]) map[year] = { sum: 0, count: 0 };
-      map[year].sum += Number(p.total_hours || 0);
-      map[year].count += 1;
+      map[year] = (map[year] || 0) + 1;
     });
     return Object.entries(map)
-      .map(([name, { sum, count }]) => ({ name, avgHours: Math.round((sum / count) * 10) / 10 }))
+      .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [filteredProjects]);
+  }, [projects, coursesPerYearYears]);
 
-  // Total hours by category
+  const avgDimensionOptions = useMemo(() => {
+    const set = new Set<string>();
+    projects.forEach((p: any) => {
+      const label =
+        avgBreakdownMode === "style"
+          ? normalizeStyle(p.course_style)
+          : avgBreakdownMode === "type"
+            ? normalizeCourseType(p.course_type)
+            : normalizeTool(p.authoring_tool);
+      set.add(label);
+    });
+    return [...set].sort();
+  }, [projects, avgBreakdownMode]);
+
+  const effectiveAvgKeys = useMemo(() => {
+    const filtered = avgActiveKeys.filter((k) => avgDimensionOptions.includes(k));
+    if (filtered.length > 0) return filtered;
+    return avgDimensionOptions.slice(0, 3);
+  }, [avgActiveKeys, avgDimensionOptions]);
+
+  const avgSeries = useMemo(
+    () =>
+      effectiveAvgKeys.map((label, i) => ({
+        label,
+        avgField: `avg_${i}`,
+        countField: `count_${i}`,
+        color: COLORS[i % COLORS.length],
+      })),
+    [effectiveAvgKeys]
+  );
+
+  const avgHoursByYear = useMemo(() => {
+    const byYear = new Map<string, any>();
+    const keyIndex = new Map(effectiveAvgKeys.map((k, i) => [k, i]));
+
+    projects.forEach((p: any) => {
+      const year = norm(String(p.reporting_year || ""));
+      if (!year) return;
+      const label =
+        avgBreakdownMode === "style"
+          ? normalizeStyle(p.course_style)
+          : avgBreakdownMode === "type"
+            ? normalizeCourseType(p.course_type)
+            : normalizeTool(p.authoring_tool);
+      const idx = keyIndex.get(label);
+      if (idx === undefined) return;
+
+      if (!byYear.has(year)) byYear.set(year, { name: year });
+      const row = byYear.get(year);
+      row[`sum_${idx}`] = (row[`sum_${idx}`] || 0) + Number(p.total_hours || 0);
+      row[`n_${idx}`] = (row[`n_${idx}`] || 0) + 1;
+    });
+
+    const rows = [...byYear.values()].sort((a, b) => a.name.localeCompare(b.name));
+    rows.forEach((row) => {
+      effectiveAvgKeys.forEach((_, idx) => {
+        const n = Number(row[`n_${idx}`] || 0);
+        const sum = Number(row[`sum_${idx}`] || 0);
+        row[`avg_${idx}`] = n ? Math.round((sum / n) * 10) / 10 : null;
+        row[`count_${idx}`] = n;
+      });
+    });
+    return rows;
+  }, [projects, avgBreakdownMode, effectiveAvgKeys]);
+
+  const toggleAvgKey = (key: string) => {
+    setAvgActiveKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  };
+
+  const filteredEntriesForCategory = useMemo(() => {
+    return entries.filter((e: any) => {
+      const project = projectMap.get(e.project_id);
+      if (!project) return false;
+      if (!categoryYears.length) return true;
+      return categoryYears.includes(norm(String(project.reporting_year || "")));
+    });
+  }, [entries, projectMap, categoryYears]);
+
   const hoursByCategory = useMemo(() => {
     const map: Record<string, number> = {};
-    filteredEntries.forEach((e: any) => {
-      const cat = e.category || "Uncategorized";
-      map[cat] = (map[cat] || 0) + Number(e.hours);
+    filteredEntriesForCategory.forEach((e: any) => {
+      const category = norm(String(e.category || e.phase || "Uncategorized"));
+      map[category] = (map[category] || 0) + Number(e.hours || 0);
     });
-    return Object.entries(map)
-      .map(([name, hours]) => ({ name: name.length > 25 ? name.slice(0, 25) + "…" : name, fullName: name, hours: Math.round(hours * 10) / 10 }))
+    const ranked = Object.entries(map)
+      .map(([name, hours]) => ({
+        name: name.length > 28 ? `${name.slice(0, 28)}...` : name,
+        fullName: name,
+        hours: Math.round(hours * 10) / 10,
+      }))
       .sort((a, b) => b.hours - a.hours);
-  }, [filteredEntries]);
+    if (categoryTopN === 999) return ranked;
+    return ranked.slice(0, categoryTopN);
+  }, [filteredEntriesForCategory, categoryTopN]);
 
-  // Completion status pie
-  const statusPie = useMemo(() => {
+  const filteredProjectsForStatus = useMemo(() => byYears(projects as any[], statusYears), [projects, statusYears]);
+  const statusDonut = useMemo(() => {
+    const complete = filteredProjectsForStatus.filter((p: any) => isCompletedStatus(p.status)).length;
+    const active = filteredProjectsForStatus.length - complete;
     return [
-      { name: "Completed", value: stats.completed },
-      { name: "In Progress", value: stats.inProgress },
-    ].filter(d => d.value > 0);
-  }, [stats]);
+      { name: "Completed", value: complete },
+      { name: "Not Complete", value: active },
+    ].filter((x) => x.value > 0);
+  }, [filteredProjectsForStatus]);
 
-  // Avg hours by course type
-  const hoursByCourseType = useMemo(() => {
-    const map: Record<string, { total: number; count: number }> = {};
-    filteredProjects.forEach((p: any) => {
-      const type = p.course_type || "";
-      if (!type) return;
-      if (!map[type]) map[type] = { total: 0, count: 0 };
-      map[type].total += Number(p.total_hours || 0);
+  const filteredProjectsForType = useMemo(() => byYears(projects as any[], typeYears), [projects, typeYears]);
+  const typeQuality = useMemo(() => {
+    const total = filteredProjectsForType.length;
+    const missing = filteredProjectsForType.filter((p: any) => !norm(String(p.course_type || ""))).length;
+    const complete = total - missing;
+    const percent = total ? Math.round((complete / total) * 100) : 100;
+    return { total, missing, complete, percent, ...qualityTone(percent) };
+  }, [filteredProjectsForType]);
+  const avgByCourseType = useMemo(() => {
+    const map: Record<string, { sum: number; count: number }> = {};
+    filteredProjectsForType.forEach((p: any) => {
+      if (!norm(String(p.course_type || ""))) return;
+      const type = normalizeCourseType(p.course_type);
+      if (!map[type]) map[type] = { sum: 0, count: 0 };
+      map[type].sum += Number(p.total_hours || 0);
       map[type].count += 1;
     });
-    return Object.entries(map)
-      .map(([name, { total, count }]) => ({ name, avgHours: Math.round((total / count) * 10) / 10 }))
-      .sort((a, b) => b.avgHours - a.avgHours);
-  }, [filteredProjects]);
+    const ranked = Object.entries(map)
+      .map(([name, v]) => ({ name, avgHours: Math.round((v.sum / Math.max(v.count, 1)) * 10) / 10 }));
+    const order = ["New", "Revamp", "Maintenance"];
+    return ranked.sort((a, b) => {
+      const ai = order.indexOf(a.name);
+      const bi = order.indexOf(b.name);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return b.avgHours - a.avgHours;
+    });
+  }, [filteredProjectsForType]);
 
-  // Avg hours by authoring tool
-  const hoursByTool = useMemo(() => {
-    const map: Record<string, { total: number; count: number }> = {};
-    filteredProjects.forEach((p: any) => {
-      const tool = p.authoring_tool || "";
-      if (!tool) return;
-      if (!map[tool]) map[tool] = { total: 0, count: 0 };
-      map[tool].total += Number(p.total_hours || 0);
+  const filteredProjectsForTool = useMemo(() => byYears(projects as any[], toolYears), [projects, toolYears]);
+  const toolQuality = useMemo(() => {
+    const total = filteredProjectsForTool.length;
+    const missing = filteredProjectsForTool.filter((p: any) => !norm(String(p.authoring_tool || ""))).length;
+    const complete = total - missing;
+    const percent = total ? Math.round((complete / total) * 100) : 100;
+    return { total, missing, complete, percent, ...qualityTone(percent) };
+  }, [filteredProjectsForTool]);
+  const avgByTool = useMemo(() => {
+    const map: Record<string, { sum: number; count: number }> = {};
+    filteredProjectsForTool.forEach((p: any) => {
+      if (!norm(String(p.authoring_tool || ""))) return;
+      const tool = normalizeTool(p.authoring_tool);
+      if (!map[tool]) map[tool] = { sum: 0, count: 0 };
+      map[tool].sum += Number(p.total_hours || 0);
       map[tool].count += 1;
     });
-    return Object.entries(map)
-      .map(([name, { total, count }]) => ({ name, avgHours: Math.round((total / count) * 10) / 10 }))
-      .sort((a, b) => b.avgHours - a.avgHours);
-  }, [filteredProjects]);
+    const ranked = Object.entries(map)
+      .map(([name, v]) => ({ name, avgHours: Math.round((v.sum / Math.max(v.count, 1)) * 10) / 10 }));
+    const order = ["Storyline", "Rise", "LMS"];
+    return ranked.sort((a, b) => {
+      const ai = order.indexOf(a.name);
+      const bi = order.indexOf(b.name);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return b.avgHours - a.avgHours;
+    });
+  }, [filteredProjectsForTool]);
 
-  // Legacy vs Modern trend
-  const legacyModernTrend = useMemo(() => {
-    const map: Record<string, { legacy: number; modern: number; inProgress: number }> = {};
-    filteredProjects.forEach((p: any) => {
-      const year = p.reporting_year || "Unknown";
-      if (!map[year]) map[year] = { legacy: 0, modern: 0, inProgress: 0 };
-      if (p.data_source === "legacy") map[year].legacy += 1;
-      else if (p.data_source === "modern") map[year].modern += 1;
-      else map[year].inProgress += 1;
+  const completedVsActiveByYear = useMemo(() => {
+    const map: Record<string, { completed: number; active: number }> = {};
+    byYears(projects as any[], stackedYears).forEach((p: any) => {
+      const year = norm(String(p.reporting_year || "Unknown"));
+      if (!map[year]) map[year] = { completed: 0, active: 0 };
+      if (isCompletedStatus(p.status)) map[year].completed += 1;
+      else map[year].active += 1;
     });
     return Object.entries(map)
-      .map(([name, data]) => ({ name, ...data }))
+      .map(([name, v]) => ({ name, completed: v.completed, active: v.active }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [filteredProjects]);
-
-  // Category summary table
-  const categorySummary = useMemo(() => {
-    const map: Record<string, { hours: number; courses: Set<string>; users: Set<string> }> = {};
-    filteredEntries.forEach((e: any) => {
-      const cat = e.category || "Uncategorized";
-      if (!map[cat]) map[cat] = { hours: 0, courses: new Set(), users: new Set() };
-      map[cat].hours += Number(e.hours);
-      if (e.project_id) map[cat].courses.add(e.project_id);
-      if (e.user_name) map[cat].users.add(e.user_name);
-    });
-    return Object.entries(map)
-      .map(([name, { hours, courses, users }]) => ({
-        name,
-        totalHours: Math.round(hours * 10) / 10,
-        courseCount: courses.size,
-        avgHours: courses.size ? Math.round((hours / courses.size) * 10) / 10 : 0,
-        userCount: users.size,
-      }))
-      .sort((a, b) => b.totalHours - a.totalHours);
-  }, [filteredEntries]);
+  }, [projects, stackedYears]);
 
   const hasData = projects.length > 0;
-
-  const kpis = [
-    { label: "Total Courses", value: `${stats.totalCourses}`, sub: `${stats.completed}✓ ${stats.inProgress}⏳`, icon: FolderOpen },
-    { label: "Total Hours", value: stats.totalHours.toLocaleString(), icon: Clock },
-    { label: "Avg Hours/Course", value: stats.avgHoursPerCourse, icon: TrendingUp },
-    { label: "Categories", value: stats.categoryCount, icon: Layers },
-    { label: "Users Tracked", value: stats.userCount, icon: Users },
-    { label: "Years Covered", value: stats.yearCount, icon: CalendarDays },
-  ];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Course production analytics overview</p>
+        <p className="text-muted-foreground">Program-level production and delivery signals</p>
       </div>
 
-      {/* Filter Bar */}
-      {hasData && (
-        <Card>
-          <CardContent className="pt-4 space-y-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search courses…" value={searchText} onChange={e => setSearchText(e.target.value)} className="pl-9" />
-            </div>
-            <div className="flex flex-wrap gap-4">
-              <MultiSelect label="Year" options={filterOptions.years} selected={selYears} onChange={setSelYears} />
-              <MultiSelect label="Status" options={filterOptions.statuses} selected={selStatus} onChange={setSelStatus} />
-              <MultiSelect label="Type" options={filterOptions.types} selected={selType} onChange={setSelType} />
-              <MultiSelect label="Tool" options={filterOptions.tools} selected={selTool} onChange={setSelTool} />
-              <MultiSelect label="Vertical" options={filterOptions.verticals} selected={selVertical} onChange={setSelVertical} />
-              <MultiSelect label="Category" options={filterOptions.categories} selected={selCategory} onChange={setSelCategory} />
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        {kpis.map((kpi) => (
-          <Card key={kpi.label}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-              <CardTitle className="text-xs font-medium text-muted-foreground">{kpi.label}</CardTitle>
-              <kpi.icon className="h-4 w-4 text-muted-foreground" />
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        {gaugeCards.map((g) => (
+          <Card key={g.label}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-muted-foreground flex items-center justify-between">
+                {g.label}
+                <g.icon className="h-4 w-4" />
+              </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{isLoading ? "—" : kpi.value}</div>
-              {"sub" in kpi && kpi.sub && <p className="text-xs text-muted-foreground">{kpi.sub}</p>}
+            <CardContent className="space-y-3">
+              <p className="text-3xl font-bold">{isLoading ? "—" : g.value}</p>
+              <Progress value={g.percent} className="h-2" />
+              <p className="text-xs text-muted-foreground">{g.sub}</p>
             </CardContent>
           </Card>
         ))}
@@ -303,182 +395,209 @@ export default function Dashboard() {
       {!hasData && !isLoading && (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            <p className="text-lg mb-2">No data yet</p>
-            <p>Upload your CSV files to see analytics.</p>
+            Upload Legacy, Modern, and Time Spent files to populate the dashboard.
           </CardContent>
         </Card>
       )}
 
       {hasData && (
         <>
-          {/* Row 1: Courses per Year + Avg Hours by Year */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader><CardTitle className="text-base">Courses per Year</CardTitle></CardHeader>
-              <CardContent>
-                <div className="h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={coursesPerYear}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="name" fontSize={11} />
-                      <YAxis fontSize={12} />
-                      <Tooltip />
-                      <Bar dataKey="count" name="Courses" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+          <Card>
+            <ChartHeader title="Courses Per Year" containerId="chart-courses-per-year" filename="courses-per-year" />
+            <CardContent className="space-y-3">
+              <YearPills years={years} selectedYears={coursesPerYearYears} onChange={setCoursesPerYearYears} />
+              <div id="chart-courses-per-year" className="h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={coursesPerYear}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="name" fontSize={11} />
+                    <YAxis fontSize={12} />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <ChartHeader title="Average Hours Spent Developing by Year" containerId="chart-avg-hours-year" filename="avg-hours-year" />
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={avgBreakdownMode === "style" ? "default" : "outline"} className="cursor-pointer" onClick={() => setAvgBreakdownMode("style")}>
+                  Course Style
+                </Badge>
+                <Badge variant={avgBreakdownMode === "type" ? "default" : "outline"} className="cursor-pointer" onClick={() => setAvgBreakdownMode("type")}>
+                  Course Type
+                </Badge>
+                <Badge variant={avgBreakdownMode === "tool" ? "default" : "outline"} className="cursor-pointer" onClick={() => setAvgBreakdownMode("tool")}>
+                  Development Tool
+                </Badge>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {avgDimensionOptions.map((key) => (
+                  <Badge
+                    key={key}
+                    variant={effectiveAvgKeys.includes(key) ? "default" : "outline"}
+                    className="cursor-pointer"
+                    onClick={() => toggleAvgKey(key)}
+                  >
+                    {key}
+                  </Badge>
+                ))}
+              </div>
+              <div id="chart-avg-hours-year" className="h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={avgHoursByYear}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="name" fontSize={11} />
+                    <YAxis yAxisId="left" fontSize={12} />
+                    <YAxis yAxisId="right" orientation="right" fontSize={12} />
+                    <Tooltip />
+                    <Legend />
+                    {avgSeries[0] && (
+                      <Bar
+                        yAxisId="right"
+                        dataKey={avgSeries[0].countField}
+                        name={`${avgSeries[0].label} Count`}
+                        fill="hsl(var(--primary) / 0.18)"
+                        radius={[3, 3, 0, 0]}
+                      />
+                    )}
+                    {avgSeries.map((series) => (
+                      <Line
+                        key={series.avgField}
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey={series.avgField}
+                        name={`${series.label} Avg Hours`}
+                        stroke={series.color}
+                        strokeWidth={2}
+                        dot={{ fill: series.color, r: 3.5 }}
+                      />
+                    ))}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <ChartHeader title="Hours Spent by Category" containerId="chart-hours-category" filename="hours-by-category" />
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <YearPills years={years} selectedYears={categoryYears} onChange={setCategoryYears} />
+                <div className="flex gap-2">
+                  <Badge variant={categoryTopN === 10 ? "default" : "outline"} className="cursor-pointer" onClick={() => setCategoryTopN(10)}>Top 10</Badge>
+                  <Badge variant={categoryTopN === 20 ? "default" : "outline"} className="cursor-pointer" onClick={() => setCategoryTopN(20)}>Top 20</Badge>
+                  <Badge variant={categoryTopN === 999 ? "default" : "outline"} className="cursor-pointer" onClick={() => setCategoryTopN(999)}>All</Badge>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+              <div id="chart-hours-category" className="h-[460px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={hoursByCategory} layout="vertical" margin={{ left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis type="number" fontSize={12} />
+                    <YAxis type="category" dataKey="name" width={220} fontSize={10} />
+                    <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
+                    <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader><CardTitle className="text-base">Avg Hours per Course by Year</CardTitle></CardHeader>
-              <CardContent>
-                <div className="h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={avgHoursByYear}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="name" fontSize={11} />
-                      <YAxis fontSize={12} />
-                      <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
-                      <Line type="monotone" dataKey="avgHours" stroke="hsl(var(--accent))" strokeWidth={2} dot={{ fill: "hsl(var(--accent))", r: 4 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Row 2: Hours by Category + Completion Status */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader><CardTitle className="text-base">Total Hours by Category</CardTitle></CardHeader>
-              <CardContent>
-                <div className="h-[350px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hoursByCategory.slice(0, 15)} layout="vertical" margin={{ left: 10 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis type="number" fontSize={12} />
-                      <YAxis type="category" dataKey="name" width={140} fontSize={10} />
-                      <Tooltip formatter={(v: any) => [`${v}h`, "Total Hours"]} />
-                      <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader><CardTitle className="text-base">Completion Status</CardTitle></CardHeader>
-              <CardContent>
-                <div className="h-[350px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={statusPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={110} innerRadius={60} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} fontSize={11}>
-                        {statusPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Row 3: Course Type + Authoring Tool */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {hoursByCourseType.length > 0 && (
-              <Card>
-                <CardHeader><CardTitle className="text-base">Avg Hours by Course Type</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="h-[280px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={hoursByCourseType}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="name" fontSize={11} />
-                        <YAxis fontSize={12} />
-                        <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
-                        <Bar dataKey="avgHours" name="Avg Hours" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-            {hoursByTool.length > 0 && (
-              <Card>
-                <CardHeader><CardTitle className="text-base">Avg Hours by Authoring Tool</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="h-[280px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={hoursByTool}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="name" fontSize={11} />
-                        <YAxis fontSize={12} />
-                        <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
-                        <Bar dataKey="avgHours" name="Avg Hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Row 4: Legacy vs Modern Trend */}
-          {legacyModernTrend.length > 0 && (
-            <Card>
-              <CardHeader><CardTitle className="text-base">Legacy vs Modern Trend</CardTitle></CardHeader>
-              <CardContent>
-                <div className="h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={legacyModernTrend}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="name" fontSize={11} />
-                      <YAxis fontSize={12} />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="legacy" name="Legacy" fill="hsl(var(--chart-1))" stackId="a" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="modern" name="Modern" fill="hsl(var(--chart-3))" stackId="a" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="inProgress" name="In Progress" fill="hsl(var(--chart-4))" stackId="a" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Category Summary Table */}
-          {categorySummary.length > 0 && (
-            <Card>
-              <CardHeader><CardTitle className="text-base">Category Summary</CardTitle></CardHeader>
-              <CardContent>
-                <div className="max-h-[400px] overflow-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Category</TableHead>
-                        <TableHead className="text-right">Total Hours</TableHead>
-                        <TableHead className="text-right">Courses</TableHead>
-                        <TableHead className="text-right">Avg Hours</TableHead>
-                        <TableHead className="text-right">Users</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {categorySummary.map(c => (
-                        <TableRow key={c.name}>
-                          <TableCell className="font-medium">{c.name}</TableCell>
-                          <TableCell className="text-right">{c.totalHours}</TableCell>
-                          <TableCell className="text-right">{c.courseCount}</TableCell>
-                          <TableCell className="text-right font-semibold">{c.avgHours}h</TableCell>
-                          <TableCell className="text-right">{c.userCount}</TableCell>
-                        </TableRow>
+          <Card>
+            <ChartHeader title="Completed vs Not Complete" containerId="chart-status-donut" filename="status-donut" />
+            <CardContent className="space-y-3">
+              <YearPills years={years} selectedYears={statusYears} onChange={setStatusYears} />
+              <div id="chart-status-donut" className="h-[440px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statusDonut}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={90}
+                      outerRadius={155}
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {statusDonut.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
                       ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <ChartHeader title="Average Hours by Course Type" containerId="chart-avg-type" filename="avg-hours-course-type" />
+            <CardContent className="space-y-3">
+              <YearPills years={years} selectedYears={typeYears} onChange={setTypeYears} />
+              <div className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${typeQuality.border} ${typeQuality.bg} ${typeQuality.text}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${typeQuality.dot}`} />
+                Data Accuracy {typeQuality.percent}% ({typeQuality.label}) · Missing Course Type: {typeQuality.missing}
+              </div>
+              <div id="chart-avg-type" className="h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={avgByCourseType}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="name" fontSize={11} />
+                    <YAxis fontSize={12} />
+                    <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
+                    <Bar dataKey="avgHours" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <ChartHeader title="Average Hours by Authoring Tool" containerId="chart-avg-tool" filename="avg-hours-tool" />
+            <CardContent className="space-y-3">
+              <YearPills years={years} selectedYears={toolYears} onChange={setToolYears} />
+              <div className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${toolQuality.border} ${toolQuality.bg} ${toolQuality.text}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${toolQuality.dot}`} />
+                Data Accuracy {toolQuality.percent}% ({toolQuality.label}) · Missing Authoring Tool: {toolQuality.missing}
+              </div>
+              <div id="chart-avg-tool" className="h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={avgByTool}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="name" fontSize={11} />
+                    <YAxis fontSize={12} />
+                    <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
+                    <Bar dataKey="avgHours" fill="hsl(var(--chart-5))" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <ChartHeader title="Yearly Course Volume: Completed vs Active" containerId="chart-stacked-status" filename="yearly-completed-active" />
+            <CardContent className="space-y-3">
+              <YearPills years={years} selectedYears={stackedYears} onChange={setStackedYears} />
+              <div id="chart-stacked-status" className="h-[440px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={completedVsActiveByYear}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="name" fontSize={11} />
+                    <YAxis fontSize={12} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="completed" name="Completed" stackId="a" fill="hsl(142 71% 45%)" />
+                    <Bar dataKey="active" name="Not Complete" stackId="a" fill="hsl(35 92% 52%)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
         </>
       )}
     </div>

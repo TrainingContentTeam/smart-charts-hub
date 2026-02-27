@@ -6,13 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles } from "lucide-react";
 
+const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
+
 export default function Auth() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.onAuthStateChange((event, session) => {
+    if (DEV_BYPASS_AUTH) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    supabase.auth.onAuthStateChange((_event, session) => {
       if (session) navigate("/", { replace: true });
     });
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -21,6 +28,11 @@ export default function Auth() {
   }, [navigate]);
 
   const signInWithGoogle = async () => {
+    if (DEV_BYPASS_AUTH) {
+      navigate("/", { replace: true });
+      return;
+    }
+
     setLoading(true);
     setError(null);
     const { error } = await lovable.auth.signInWithOAuth("google", {

@@ -2,12 +2,13 @@ import { useState, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Link2, ChevronDown } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Link2, ChevronDown, ArrowUpDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { parseLegacyCourseFile, type LegacyCourse } from "@/lib/parse-legacy-course";
 import { parseModernCourseFile, type ModernCourse } from "@/lib/parse-modern-course";
 import { parseTimeSpentFile, type TimeSpentEntry } from "@/lib/parse-time-spent";
+import { makeId, readLocalStore, writeLocalStore } from "@/lib/local-data-store";
 import { supabase } from "@/integrations/supabase/client";
 import { useUploadHistory } from "@/hooks/use-time-data";
 import { useAuth } from "@/hooks/use-auth";
@@ -74,7 +75,61 @@ function normKey(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function courseKey(courseName: string, reportingYear?: string): string {
+  return `${normKey(courseName)}::${normKey(reportingYear || "")}`;
+}
+
+function parseEntryYear(entryDate: string): number | null {
+  if (!entryDate) return null;
+  const match = entryDate.match(/^(\d{4})-/);
+  if (!match) return null;
+  const year = Number.parseInt(match[1], 10);
+  return Number.isFinite(year) ? year : null;
+}
+
+type ProjectCandidate = {
+  key: string;
+  id: string;
+  reportingYear: string;
+  dataSource: string;
+};
+
+type ResolveReason =
+  | "no_candidate"
+  | "single"
+  | "exact_year"
+  | "source_hint"
+  | "fallback_latest";
+
+type ResolveResult = {
+  key: string | null;
+  reason: ResolveReason;
+};
+
+function resolveProjectKeyForTimeEntry(entry: TimeSpentEntry, byName: Map<string, ProjectCandidate[]>): ResolveResult {
+  const nameKey = normKey(entry.courseName);
+  const candidates = byName.get(nameKey) || [];
+  if (candidates.length === 0) return { key: null, reason: "no_candidate" };
+  if (candidates.length === 1) return { key: candidates[0].key, reason: "single" };
+
+  const entryYear = parseEntryYear(entry.date);
+  if (entryYear !== null) {
+    const exactYear = candidates.filter((c) => c.reportingYear === String(entryYear));
+    if (exactYear.length > 0) return { key: exactYear[0].key, reason: "exact_year" };
+
+    const preferredSource = entryYear <= 2025 ? "legacy" : "modern";
+    const sourceMatch = candidates.filter((c) => c.dataSource === preferredSource);
+    if (sourceMatch.length > 0) return { key: sourceMatch[0].key, reason: "source_hint" };
+  }
+
+  return {
+    key: [...candidates].sort((a, b) => b.reportingYear.localeCompare(a.reportingYear))[0].key,
+    reason: "fallback_latest",
+  };
+}
+
 export default function UploadData() {
+  const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
   const [legacyFile, setLegacyFile] = useState("");
   const [modernFile, setModernFile] = useState("");
   const [timeFile, setTimeFile] = useState("");
@@ -83,6 +138,16 @@ export default function UploadData() {
   const [timeData, setTimeData] = useState<TimeSpentEntry[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [legacySortKey, setLegacySortKey] = useState<"course" | "hours" | "year" | "tool" | "vertical">("course");
+  const [legacySortAsc, setLegacySortAsc] = useState(true);
+  const [modernSortKey, setModernSortKey] = useState<"course" | "year" | "tool" | "vertical" | "type">("course");
+  const [modernSortAsc, setModernSortAsc] = useState(true);
+  const [timeSortKey, setTimeSortKey] = useState<"course" | "category" | "date" | "hours" | "user">("date");
+  const [timeSortAsc, setTimeSortAsc] = useState(false);
+  const [historySortKey, setHistorySortKey] = useState<"file" | "rows" | "status" | "date">("date");
+  const [historySortAsc, setHistorySortAsc] = useState(false);
+  const [ambigSortKey, setAmbigSortKey] = useState<"course" | "variants" | "timeRows" | "undated" | "years">("timeRows");
+  const [ambigSortAsc, setAmbigSortAsc] = useState(false);
   const { data: history = [] } = useUploadHistory();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -142,12 +207,267 @@ export default function UploadData() {
     };
   }, [legacyData, modernData, timeData]);
 
+  const ambiguityDiagnostics = useMemo(() => {
+    const byName = new Map<string, { name: string; source: string; reportingYear: string }[]>();
+
+    (legacyData || []).forEach((c) => {
+      const key = normKey(c.courseName);
+      const list = byName.get(key) || [];
+      list.push({ name: c.courseName, source: "legacy", reportingYear: c.reportingYear || "" });
+      byName.set(key, list);
+    });
+
+    (modernData || []).forEach((c) => {
+      const key = normKey(c.courseName);
+      const list = byName.get(key) || [];
+      list.push({ name: c.courseName, source: "modern", reportingYear: c.reportingYear || "" });
+      byName.set(key, list);
+    });
+
+    const rows = [...byName.entries()]
+      .filter(([, variants]) => variants.length > 1)
+      .map(([nameKey, variants]) => {
+        const entriesForName = (timeData || []).filter((e) => normKey(e.courseName) === nameKey);
+        let undatedRows = 0;
+        const years = new Set<string>();
+        entriesForName.forEach((e) => {
+          const y = parseEntryYear(e.date);
+          if (y === null) undatedRows += 1;
+          else years.add(String(y));
+        });
+
+        const variantSummary = variants
+          .map((v) => `${v.source}:${v.reportingYear || "unknown"}`)
+          .join(", ");
+
+        return {
+          courseName: variants[0].name,
+          variantSummary,
+          variantCount: variants.length,
+          timeRows: entriesForName.length,
+          undatedRows,
+          years: [...years].sort().join(", "),
+        };
+      })
+      .sort((a, b) => b.timeRows - a.timeRows || a.courseName.localeCompare(b.courseName));
+
+    return {
+      totalAmbiguousTitles: rows.length,
+      totalUndatedRows: rows.reduce((s, r) => s + r.undatedRows, 0),
+      rows,
+    };
+  }, [legacyData, modernData, timeData]);
+
   const importData = async () => {
     if (!legacyData && !modernData && !timeData) return;
     setImporting(true);
     try {
       const totalRows = (legacyData?.length || 0) + (modernData?.length || 0) + (timeData?.length || 0);
       const combinedFileName = [legacyFile, modernFile, timeFile].filter(Boolean).join(" + ");
+
+      if (DEV_BYPASS_AUTH) {
+        const now = new Date().toISOString();
+        const uploadId = makeId();
+        const local = readLocalStore();
+        const existingProjects = [...local.projects];
+        const existingMap = new Map(existingProjects.map((p) => [courseKey(p.name, p.reporting_year), p]));
+
+        // Build course index with composite key: Course Name + Reporting Year
+        const legacyMap = new Map<string, LegacyCourse>();
+        (legacyData || []).forEach(c => legacyMap.set(courseKey(c.courseName, c.reportingYear), c));
+
+        const modernMap = new Map<string, ModernCourse>();
+        (modernData || []).forEach(c => modernMap.set(courseKey(c.courseName, c.reportingYear), c));
+
+        const timeAggByName = new Map<string, number>();
+        (timeData || []).forEach(e => {
+          const k = normKey(e.courseName);
+          timeAggByName.set(k, (timeAggByName.get(k) || 0) + e.hours);
+        });
+
+        const courseNameKeys = new Set<string>([
+          ...(legacyData || []).map(c => normKey(c.courseName)),
+          ...(modernData || []).map(c => normKey(c.courseName)),
+        ]);
+        const timeOnlyCourseKeys = new Set<string>(
+          [...timeAggByName.keys()]
+            .filter((nameKey) => !courseNameKeys.has(nameKey))
+            .map((nameKey) => `${nameKey}::`)
+        );
+
+        const projectIdMap = new Map<string, string>();
+        const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
+        const allCourseKeys = new Set([
+          ...legacyMap.keys(),
+          ...modernMap.keys(),
+          ...timeOnlyCourseKeys,
+        ]);
+
+        for (const key of allCourseKeys) {
+          const legacy = legacyMap.get(key);
+          const modern = modernMap.get(key);
+          const existing = existingMap.get(key);
+
+          let status: string;
+          let totalHours: number;
+          let dataSource: string;
+          let meta: any = {};
+
+          if (legacy) {
+            status = "Completed";
+            totalHours = legacy.totalHours;
+            dataSource = "legacy";
+            meta = {
+              id_assigned: legacy.idAssigned,
+              sme: legacy.sme,
+              legal_reviewer: legacy.legalReviewer,
+              vertical: legacy.vertical,
+              course_type: legacy.courseType,
+              authoring_tool: legacy.authoringTool,
+              course_style: legacy.courseStyle,
+              course_length: legacy.courseLength,
+              interaction_count: legacy.interactionCount,
+              reporting_year: legacy.reportingYear,
+            };
+          } else if (modern) {
+            status = "Completed";
+            totalHours = modern.totalHours;
+            dataSource = "modern";
+            meta = {
+              id_assigned: modern.idAssigned,
+              sme: modern.sme,
+              legal_reviewer: modern.legalReviewer,
+              vertical: modern.vertical,
+              course_type: modern.courseType,
+              authoring_tool: modern.authoringTool,
+              course_style: modern.courseStyle,
+              course_length: modern.courseLength,
+              interaction_count: modern.interactionCount,
+              reporting_year: modern.reportingYear,
+            };
+          } else {
+            status = "In Progress";
+            const nameOnlyKey = key.split("::")[0];
+            totalHours = timeAggByName.get(nameOnlyKey) || 0;
+            dataSource = "time_only";
+          }
+
+          const nameOnlyKey = key.split("::")[0];
+          const displayName = legacy?.courseName || modern?.courseName ||
+            (timeData || []).find(e => normKey(e.courseName) === nameOnlyKey)?.courseName || nameOnlyKey;
+
+          if (existing) {
+            const idx = existingProjects.findIndex((p) => p.id === existing.id);
+            const updated = {
+              ...existing,
+              name: displayName,
+              status,
+              total_hours: totalHours,
+              data_source: dataSource,
+              user_id: user?.id,
+              updated_at: now,
+              ...meta,
+            };
+            if (idx >= 0) existingProjects[idx] = updated as any;
+            projectIdMap.set(key, existing.id);
+            const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
+            candidates.push({
+              key,
+              id: existing.id,
+              reportingYear: String((meta.reporting_year || (existing as any).reporting_year || "")).trim(),
+              dataSource,
+            });
+            projectCandidatesByName.set(nameOnlyKey, candidates);
+          } else {
+            const insertedId = makeId();
+            const inserted: any = {
+              id: insertedId,
+              name: displayName,
+              status,
+              total_hours: totalHours,
+              data_source: dataSource,
+              user_id: user?.id,
+              created_at: now,
+              updated_at: now,
+              ...meta,
+            };
+            existingProjects.push(inserted);
+            existingMap.set(key, inserted);
+            projectIdMap.set(key, insertedId);
+            const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
+            candidates.push({
+              key,
+              id: insertedId,
+              reportingYear: String(inserted.reporting_year || "").trim(),
+              dataSource,
+            });
+            projectCandidatesByName.set(nameOnlyKey, candidates);
+          }
+        }
+
+        let timeCount = 0;
+        let unresolvedCount = 0;
+        let fallbackCount = 0;
+        let sourceHintCount = 0;
+        const localTimeEntries = [...local.time_entries];
+        if (timeData && timeData.length > 0) {
+          for (const e of timeData) {
+            const resolved = resolveProjectKeyForTimeEntry(e, projectCandidatesByName);
+            if (!resolved.key) unresolvedCount += 1;
+            if (resolved.reason === "fallback_latest") fallbackCount += 1;
+            if (resolved.reason === "source_hint") sourceHintCount += 1;
+            localTimeEntries.push({
+              id: makeId(),
+              project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
+              phase: e.category || "Uncategorized",
+              hours: e.hours,
+              category: e.category,
+              entry_date: e.date || null,
+              user_name: e.userName,
+              upload_id: uploadId,
+              user_id: user?.id,
+              created_at: now,
+            } as any);
+            timeCount += 1;
+          }
+        }
+
+        const uploadHistory = [
+          {
+            id: uploadId,
+            file_name: combinedFileName,
+            row_count: totalRows,
+            status: "completed",
+            user_id: user?.id,
+            created_at: now,
+          },
+          ...local.upload_history,
+        ];
+
+        writeLocalStore({
+          projects: existingProjects as any,
+          time_entries: localTimeEntries as any,
+          upload_history: uploadHistory as any,
+        });
+
+        toast.success(`Imported ${allCourseKeys.size} courses, ${timeCount} category time entries.`);
+        if (unresolvedCount > 0) {
+          toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
+        }
+        if (fallbackCount > 0) {
+          toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
+        }
+        if (sourceHintCount > 0) {
+          toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
+        }
+        setLegacyData(null); setModernData(null); setTimeData(null);
+        setLegacyFile(""); setModernFile(""); setTimeFile("");
+        setWarnings([]);
+        queryClient.invalidateQueries({ queryKey: ["time_entries"] });
+        queryClient.invalidateQueries({ queryKey: ["projects"] });
+        queryClient.invalidateQueries({ queryKey: ["upload_history"] });
+        return;
+      }
 
       // Upload history
       const { data: upload, error: uploadErr } = await supabase
@@ -157,31 +477,45 @@ export default function UploadData() {
         .single();
       if (uploadErr) throw uploadErr;
 
-      // Build course index
+      // Build course index with composite key: Course Name + Reporting Year
       const legacyMap = new Map<string, LegacyCourse>();
-      (legacyData || []).forEach(c => legacyMap.set(normKey(c.courseName), c));
+      (legacyData || []).forEach(c => legacyMap.set(courseKey(c.courseName, c.reportingYear), c));
 
       const modernMap = new Map<string, ModernCourse>();
-      (modernData || []).forEach(c => modernMap.set(normKey(c.courseName), c));
+      (modernData || []).forEach(c => modernMap.set(courseKey(c.courseName, c.reportingYear), c));
 
-      // Aggregate time spent per course
-      const timeAgg = new Map<string, number>();
+      // Aggregate category-file time by course name (detail file, partial categories only)
+      const timeAggByName = new Map<string, number>();
       (timeData || []).forEach(e => {
         const k = normKey(e.courseName);
-        timeAgg.set(k, (timeAgg.get(k) || 0) + e.hours);
+        timeAggByName.set(k, (timeAggByName.get(k) || 0) + e.hours);
       });
 
-      // All unique course names
-      const allNames = new Set([...legacyMap.keys(), ...modernMap.keys(), ...timeAgg.keys()]);
+      // Create time-only keys for names not present in legacy/modern exports
+      const courseNameKeys = new Set<string>([
+        ...(legacyData || []).map(c => normKey(c.courseName)),
+        ...(modernData || []).map(c => normKey(c.courseName)),
+      ]);
+      const timeOnlyCourseKeys = new Set<string>(
+        [...timeAggByName.keys()]
+          .filter((nameKey) => !courseNameKeys.has(nameKey))
+          .map((nameKey) => `${nameKey}::`)
+      );
 
-      // Get existing projects
+      // Get existing projects keyed the same way (Course Name + reporting_year)
       const existingProjects = (await supabase.from("projects").select("*")).data || [];
-      const existingMap = new Map(existingProjects.map((p: any) => [normKey(p.name), p]));
+      const existingMap = new Map(existingProjects.map((p: any) => [courseKey(p.name, p.reporting_year), p]));
 
       // Upsert projects
       const projectIdMap = new Map<string, string>();
+      const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
+      const allCourseKeys = new Set([
+        ...legacyMap.keys(),
+        ...modernMap.keys(),
+        ...timeOnlyCourseKeys,
+      ]);
 
-      for (const key of allNames) {
+      for (const key of allCourseKeys) {
         const legacy = legacyMap.get(key);
         const modern = modernMap.get(key);
         const existing = existingMap.get(key);
@@ -192,7 +526,6 @@ export default function UploadData() {
         let meta: any = {};
 
         if (legacy) {
-          // Case A: Legacy
           status = "Completed";
           totalHours = legacy.totalHours;
           dataSource = "legacy";
@@ -209,9 +542,8 @@ export default function UploadData() {
             reporting_year: legacy.reportingYear,
           };
         } else if (modern) {
-          // Case B: Modern
           status = "Completed";
-          totalHours = timeAgg.get(key) || 0;
+          totalHours = modern.totalHours;
           dataSource = "modern";
           meta = {
             id_assigned: modern.idAssigned,
@@ -226,15 +558,15 @@ export default function UploadData() {
             reporting_year: modern.reportingYear,
           };
         } else {
-          // Case C: In Progress
           status = "In Progress";
-          totalHours = timeAgg.get(key) || 0;
+          const nameOnlyKey = key.split("::")[0];
+          totalHours = timeAggByName.get(nameOnlyKey) || 0;
           dataSource = "time_only";
         }
 
-        // Get display name from original data
+        const nameOnlyKey = key.split("::")[0];
         const displayName = legacy?.courseName || modern?.courseName ||
-          (timeData || []).find(e => normKey(e.courseName) === key)?.courseName || key;
+          (timeData || []).find(e => normKey(e.courseName) === nameOnlyKey)?.courseName || nameOnlyKey;
 
         if (existing) {
           await supabase
@@ -242,6 +574,14 @@ export default function UploadData() {
             .update({ status, total_hours: totalHours, data_source: dataSource, user_id: user!.id, ...meta } as any)
             .eq("id", existing.id);
           projectIdMap.set(key, existing.id);
+          const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
+          candidates.push({
+            key,
+            id: existing.id,
+            reportingYear: String((meta.reporting_year || existing.reporting_year || "")).trim(),
+            dataSource,
+          });
+          projectCandidatesByName.set(nameOnlyKey, candidates);
         } else {
           const { data: inserted } = await supabase
             .from("projects")
@@ -251,17 +591,33 @@ export default function UploadData() {
           if (inserted) {
             projectIdMap.set(key, inserted.id);
             existingMap.set(key, inserted);
+            const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
+            candidates.push({
+              key,
+              id: inserted.id,
+              reportingYear: String((inserted as any).reporting_year || "").trim(),
+              dataSource,
+            });
+            projectCandidatesByName.set(nameOnlyKey, candidates);
           }
         }
       }
 
       // Insert time entries from Time Spent file
       let timeCount = 0;
+      let unresolvedCount = 0;
+      let fallbackCount = 0;
+      let sourceHintCount = 0;
       if (timeData && timeData.length > 0) {
         const batchSize = 500;
         for (let i = 0; i < timeData.length; i += batchSize) {
-          const batch = timeData.slice(i, i + batchSize).map(e => ({
-            project_id: projectIdMap.get(normKey(e.courseName)) || null,
+          const batch = timeData.slice(i, i + batchSize).map(e => {
+            const resolved = resolveProjectKeyForTimeEntry(e, projectCandidatesByName);
+            if (!resolved.key) unresolvedCount += 1;
+            if (resolved.reason === "fallback_latest") fallbackCount += 1;
+            if (resolved.reason === "source_hint") sourceHintCount += 1;
+            return {
+            project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
             phase: e.category || "Uncategorized",
             hours: e.hours,
             category: e.category,
@@ -269,32 +625,25 @@ export default function UploadData() {
             user_name: e.userName,
             upload_id: upload.id,
             user_id: user!.id,
-          }));
+          };});
           const { error: entryErr } = await supabase.from("time_entries").insert(batch as any);
           if (entryErr) throw entryErr;
           timeCount += batch.length;
         }
       }
 
-      // For Legacy courses, insert a single summary time_entry
-      if (legacyData && legacyData.length > 0) {
-        const legacySummaries = legacyData.map(c => ({
-          project_id: projectIdMap.get(normKey(c.courseName)) || null,
-          phase: "Total",
-          hours: c.totalHours,
-          category: "Total",
-          upload_id: upload.id,
-          user_id: user!.id,
-        }));
-        const batchSize = 500;
-        for (let i = 0; i < legacySummaries.length; i += batchSize) {
-          await supabase.from("time_entries").insert(legacySummaries.slice(i, i + batchSize) as any);
-        }
-      }
-
       toast.success(
-        `Imported ${matchInfo?.totalUnique || 0} courses, ${timeCount} time entries.`
+        `Imported ${allCourseKeys.size} courses, ${timeCount} category time entries.`
       );
+      if (unresolvedCount > 0) {
+        toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
+      }
+      if (fallbackCount > 0) {
+        toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
+      }
+      if (sourceHintCount > 0) {
+        toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
+      }
       setLegacyData(null); setModernData(null); setTimeData(null);
       setLegacyFile(""); setModernFile(""); setTimeFile("");
       setWarnings([]);
@@ -309,6 +658,85 @@ export default function UploadData() {
   };
 
   const hasAnything = legacyData || modernData || timeData;
+
+  const sortedLegacyData = useMemo(() => {
+    const rows = [...(legacyData || [])];
+    rows.sort((a, b) => {
+      let cmp = 0;
+      switch (legacySortKey) {
+        case "course": cmp = a.courseName.localeCompare(b.courseName); break;
+        case "hours": cmp = a.totalHours - b.totalHours; break;
+        case "year": cmp = a.reportingYear.localeCompare(b.reportingYear); break;
+        case "tool": cmp = a.authoringTool.localeCompare(b.authoringTool); break;
+        case "vertical": cmp = a.vertical.localeCompare(b.vertical); break;
+      }
+      return legacySortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [legacyData, legacySortKey, legacySortAsc]);
+
+  const sortedModernData = useMemo(() => {
+    const rows = [...(modernData || [])];
+    rows.sort((a, b) => {
+      let cmp = 0;
+      switch (modernSortKey) {
+        case "course": cmp = a.courseName.localeCompare(b.courseName); break;
+        case "year": cmp = a.reportingYear.localeCompare(b.reportingYear); break;
+        case "tool": cmp = a.authoringTool.localeCompare(b.authoringTool); break;
+        case "vertical": cmp = a.vertical.localeCompare(b.vertical); break;
+        case "type": cmp = a.courseType.localeCompare(b.courseType); break;
+      }
+      return modernSortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [modernData, modernSortKey, modernSortAsc]);
+
+  const sortedTimeData = useMemo(() => {
+    const rows = [...(timeData || [])];
+    rows.sort((a, b) => {
+      let cmp = 0;
+      switch (timeSortKey) {
+        case "course": cmp = a.courseName.localeCompare(b.courseName); break;
+        case "category": cmp = a.category.localeCompare(b.category); break;
+        case "date": cmp = a.date.localeCompare(b.date); break;
+        case "hours": cmp = a.hours - b.hours; break;
+        case "user": cmp = a.userName.localeCompare(b.userName); break;
+      }
+      return timeSortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [timeData, timeSortKey, timeSortAsc]);
+
+  const sortedHistory = useMemo(() => {
+    const rows = [...history];
+    rows.sort((a: any, b: any) => {
+      let cmp = 0;
+      switch (historySortKey) {
+        case "file": cmp = String(a.file_name || "").localeCompare(String(b.file_name || "")); break;
+        case "rows": cmp = Number(a.row_count || 0) - Number(b.row_count || 0); break;
+        case "status": cmp = String(a.status || "").localeCompare(String(b.status || "")); break;
+        case "date": cmp = String(a.created_at || "").localeCompare(String(b.created_at || "")); break;
+      }
+      return historySortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [history, historySortKey, historySortAsc]);
+
+  const sortedAmbiguityRows = useMemo(() => {
+    const rows = [...ambiguityDiagnostics.rows];
+    rows.sort((a, b) => {
+      let cmp = 0;
+      switch (ambigSortKey) {
+        case "course": cmp = a.courseName.localeCompare(b.courseName); break;
+        case "variants": cmp = a.variantSummary.localeCompare(b.variantSummary); break;
+        case "timeRows": cmp = a.timeRows - b.timeRows; break;
+        case "undated": cmp = a.undatedRows - b.undatedRows; break;
+        case "years": cmp = a.years.localeCompare(b.years); break;
+      }
+      return ambigSortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [ambiguityDiagnostics.rows, ambigSortKey, ambigSortAsc]);
 
   return (
     <div className="space-y-6">
@@ -378,6 +806,60 @@ export default function UploadData() {
                 </CollapsibleContent>
               </Collapsible>
             )}
+
+            {ambiguityDiagnostics.totalAmbiguousTitles > 0 && (
+              <Collapsible>
+                <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+                  <AlertCircle className="h-4 w-4" />
+                  {ambiguityDiagnostics.totalAmbiguousTitles} duplicate title group(s) detected
+                  <ChevronDown className="h-3 w-3" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Undated rows inside duplicate title groups: {ambiguityDiagnostics.totalUndatedRows}
+                  </p>
+                  <div className="max-h-[220px] overflow-auto border rounded-md">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="cursor-pointer select-none" onClick={() => {
+                            if (ambigSortKey === "course") setAmbigSortAsc((v) => !v);
+                            else { setAmbigSortKey("course"); setAmbigSortAsc(true); }
+                          }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                          <TableHead className="cursor-pointer select-none" onClick={() => {
+                            if (ambigSortKey === "variants") setAmbigSortAsc((v) => !v);
+                            else { setAmbigSortKey("variants"); setAmbigSortAsc(true); }
+                          }}><span className="flex items-center gap-1">Variants <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                          <TableHead className="cursor-pointer select-none" onClick={() => {
+                            if (ambigSortKey === "timeRows") setAmbigSortAsc((v) => !v);
+                            else { setAmbigSortKey("timeRows"); setAmbigSortAsc(true); }
+                          }}><span className="flex items-center gap-1">Time Rows <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                          <TableHead className="cursor-pointer select-none" onClick={() => {
+                            if (ambigSortKey === "undated") setAmbigSortAsc((v) => !v);
+                            else { setAmbigSortKey("undated"); setAmbigSortAsc(true); }
+                          }}><span className="flex items-center gap-1">Undated <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                          <TableHead className="cursor-pointer select-none" onClick={() => {
+                            if (ambigSortKey === "years") setAmbigSortAsc((v) => !v);
+                            else { setAmbigSortKey("years"); setAmbigSortAsc(true); }
+                          }}><span className="flex items-center gap-1">Entry Years <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedAmbiguityRows.map((r, i) => (
+                          <TableRow key={`${r.courseName}-${i}`}>
+                            <TableCell className="font-medium">{r.courseName}</TableCell>
+                            <TableCell>{r.variantSummary}</TableCell>
+                            <TableCell>{r.timeRows}</TableCell>
+                            <TableCell>{r.undatedRows}</TableCell>
+                            <TableCell>{r.years || "none"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </CardContent>
         </Card>
       )}
@@ -390,10 +872,29 @@ export default function UploadData() {
             <div className="max-h-[300px] overflow-auto">
               <Table>
                 <TableHeader><TableRow>
-                  <TableHead>Course</TableHead><TableHead>Hours</TableHead><TableHead>Year</TableHead><TableHead>Tool</TableHead><TableHead>Vertical</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (legacySortKey === "course") setLegacySortAsc((v) => !v);
+                    else { setLegacySortKey("course"); setLegacySortAsc(true); }
+                  }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (legacySortKey === "hours") setLegacySortAsc((v) => !v);
+                    else { setLegacySortKey("hours"); setLegacySortAsc(true); }
+                  }}><span className="flex items-center gap-1">Hours <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (legacySortKey === "year") setLegacySortAsc((v) => !v);
+                    else { setLegacySortKey("year"); setLegacySortAsc(true); }
+                  }}><span className="flex items-center gap-1">Year <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (legacySortKey === "tool") setLegacySortAsc((v) => !v);
+                    else { setLegacySortKey("tool"); setLegacySortAsc(true); }
+                  }}><span className="flex items-center gap-1">Tool <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (legacySortKey === "vertical") setLegacySortAsc((v) => !v);
+                    else { setLegacySortKey("vertical"); setLegacySortAsc(true); }
+                  }}><span className="flex items-center gap-1">Vertical <ArrowUpDown className="h-3 w-3" /></span></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {legacyData.slice(0, 20).map((c, i) => (
+                  {sortedLegacyData.slice(0, 20).map((c, i) => (
                     <TableRow key={i}>
                       <TableCell className="font-medium">{c.courseName}</TableCell>
                       <TableCell>{Math.round(c.totalHours * 100) / 100}</TableCell>
@@ -402,8 +903,8 @@ export default function UploadData() {
                       <TableCell>{c.vertical}</TableCell>
                     </TableRow>
                   ))}
-                  {legacyData.length > 20 && (
-                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">…and {legacyData.length - 20} more</TableCell></TableRow>
+                  {sortedLegacyData.length > 20 && (
+                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">…and {sortedLegacyData.length - 20} more</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -419,10 +920,29 @@ export default function UploadData() {
             <div className="max-h-[300px] overflow-auto">
               <Table>
                 <TableHeader><TableRow>
-                  <TableHead>Course</TableHead><TableHead>Year</TableHead><TableHead>Tool</TableHead><TableHead>Vertical</TableHead><TableHead>Type</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (modernSortKey === "course") setModernSortAsc((v) => !v);
+                    else { setModernSortKey("course"); setModernSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (modernSortKey === "year") setModernSortAsc((v) => !v);
+                    else { setModernSortKey("year"); setModernSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Year <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (modernSortKey === "tool") setModernSortAsc((v) => !v);
+                    else { setModernSortKey("tool"); setModernSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Tool <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (modernSortKey === "vertical") setModernSortAsc((v) => !v);
+                    else { setModernSortKey("vertical"); setModernSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Vertical <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (modernSortKey === "type") setModernSortAsc((v) => !v);
+                    else { setModernSortKey("type"); setModernSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Type <ArrowUpDown className="h-3 w-3" /></span></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {modernData.slice(0, 20).map((c, i) => (
+                  {sortedModernData.slice(0, 20).map((c, i) => (
                     <TableRow key={i}>
                       <TableCell className="font-medium">{c.courseName}</TableCell>
                       <TableCell>{c.reportingYear}</TableCell>
@@ -445,10 +965,29 @@ export default function UploadData() {
             <div className="max-h-[300px] overflow-auto">
               <Table>
                 <TableHeader><TableRow>
-                  <TableHead>Course</TableHead><TableHead>Category</TableHead><TableHead>Date</TableHead><TableHead>Hours</TableHead><TableHead>User</TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (timeSortKey === "course") setTimeSortAsc((v) => !v);
+                    else { setTimeSortKey("course"); setTimeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (timeSortKey === "category") setTimeSortAsc((v) => !v);
+                    else { setTimeSortKey("category"); setTimeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Category <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (timeSortKey === "date") setTimeSortAsc((v) => !v);
+                    else { setTimeSortKey("date"); setTimeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Date <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (timeSortKey === "hours") setTimeSortAsc((v) => !v);
+                    else { setTimeSortKey("hours"); setTimeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Hours <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (timeSortKey === "user") setTimeSortAsc((v) => !v);
+                    else { setTimeSortKey("user"); setTimeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">User <ArrowUpDown className="h-3 w-3" /></span></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {timeData.slice(0, 20).map((e, i) => (
+                  {sortedTimeData.slice(0, 20).map((e, i) => (
                     <TableRow key={i}>
                       <TableCell className="font-medium">{e.courseName}</TableCell>
                       <TableCell>{e.category}</TableCell>
@@ -457,8 +996,8 @@ export default function UploadData() {
                       <TableCell>{e.userName}</TableCell>
                     </TableRow>
                   ))}
-                  {timeData.length > 20 && (
-                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">…and {timeData.length - 20} more</TableCell></TableRow>
+                  {sortedTimeData.length > 20 && (
+                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">…and {sortedTimeData.length - 20} more</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -474,10 +1013,25 @@ export default function UploadData() {
           <CardContent>
             <Table>
               <TableHeader><TableRow>
-                <TableHead>File</TableHead><TableHead>Rows</TableHead><TableHead>Status</TableHead><TableHead>Date</TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => {
+                  if (historySortKey === "file") setHistorySortAsc((v) => !v);
+                  else { setHistorySortKey("file"); setHistorySortAsc(true); }
+                }}><span className="flex items-center gap-1">File <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => {
+                  if (historySortKey === "rows") setHistorySortAsc((v) => !v);
+                  else { setHistorySortKey("rows"); setHistorySortAsc(true); }
+                }}><span className="flex items-center gap-1">Rows <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => {
+                  if (historySortKey === "status") setHistorySortAsc((v) => !v);
+                  else { setHistorySortKey("status"); setHistorySortAsc(true); }
+                }}><span className="flex items-center gap-1">Status <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                <TableHead className="cursor-pointer select-none" onClick={() => {
+                  if (historySortKey === "date") setHistorySortAsc((v) => !v);
+                  else { setHistorySortKey("date"); setHistorySortAsc(true); }
+                }}><span className="flex items-center gap-1">Date <ArrowUpDown className="h-3 w-3" /></span></TableHead>
               </TableRow></TableHeader>
               <TableBody>
-                {history.map((h) => (
+                {sortedHistory.map((h) => (
                   <TableRow key={h.id}>
                     <TableCell className="font-medium">{h.file_name}</TableCell>
                     <TableCell>{h.row_count}</TableCell>

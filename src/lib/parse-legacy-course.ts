@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { parseDurationHours, toReportingYear } from "@/lib/parse-duration";
 
 export interface LegacyCourse {
   courseName: string;
@@ -13,20 +14,6 @@ export interface LegacyCourse {
   courseStyle: string;
   courseLength: string;
   interactionCount: number | null;
-}
-
-function parseHHMM(raw: string): number {
-  if (!raw) return 0;
-  const str = String(raw).trim();
-  const match = str.match(/^(\d+):(\d{2})$/);
-  if (match) return parseInt(match[1], 10) + parseInt(match[2], 10) / 60;
-  const num = parseFloat(str);
-  return isNaN(num) ? 0 : num;
-}
-
-function extractYear(reporting: string): string {
-  if (!reporting) return "";
-  return String(reporting).replace(/\s*Courses\s*$/i, "").trim();
 }
 
 function normalize(s: string | undefined | null): string {
@@ -47,8 +34,8 @@ export async function parseLegacyCourseFile(file: File): Promise<LegacyCourse[]>
 
     results.push({
       courseName,
-      totalHours: parseHHMM(row["Time spent"]),
-      reportingYear: extractYear(row["[LCT] Reporting (L)"]),
+      totalHours: parseDurationHours(row["Time spent"]),
+      reportingYear: toReportingYear(row["[LCT] Reporting (L)"]),
       idAssigned: normalize(row["[LCT] ID Assigned (L)"]),
       sme: normalize(row["[LCT] SME (L)"]),
       legalReviewer: normalize(row["[LCT] Legal Reviewer (L)"]),

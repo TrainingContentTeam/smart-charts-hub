@@ -6,6 +6,10 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/hooks/use-auth";
 import Dashboard from "@/pages/Dashboard";
+import Development from "@/pages/Development";
+import SmeCollaboration from "@/pages/SmeCollaboration";
+import ExternalTeams from "@/pages/ExternalTeams";
+import MasterContentInventory from "@/pages/MasterContentInventory";
 import UploadData from "@/pages/UploadData";
 import Projects from "@/pages/Projects";
 import DataExplorer from "@/pages/DataExplorer";
@@ -34,6 +38,10 @@ function ProtectedRoutes() {
     <AppLayout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/development" element={<Development />} />
+        <Route path="/sme-collaboration" element={<SmeCollaboration />} />
+        <Route path="/external-teams" element={<ExternalTeams />} />
+        <Route path="/master-content-inventory" element={<MasterContentInventory />} />
         <Route path="/upload" element={<UploadData />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/explorer" element={<DataExplorer />} />
