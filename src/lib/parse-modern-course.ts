@@ -21,6 +21,24 @@ function normalize(s: string | undefined | null): string {
   return (s || "").trim().replace(/\s+/g, " ");
 }
 
+function pickCell(row: Record<string, unknown>, candidates: string[]): unknown {
+  const entries = Object.entries(row);
+  for (const candidate of candidates) {
+    if (candidate in row) return row[candidate];
+  }
+  for (const [key, value] of entries) {
+    const normalizedKey = key.trim().toLowerCase();
+    if (candidates.some((candidate) => normalizedKey === candidate.trim().toLowerCase())) {
+      return value;
+    }
+  }
+  for (const [key, value] of entries) {
+    const normalizedKey = key.trim().toLowerCase();
+    if (normalizedKey.includes("status")) return value;
+  }
+  return "";
+}
+
 export async function parseModernCourseFile(file: File): Promise<ModernCourse[]> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
@@ -36,7 +54,14 @@ export async function parseModernCourseFile(file: File): Promise<ModernCourse[]>
     results.push({
       courseName,
       totalHours: parseDurationHours(row["Time spent"]),
-      status: normalize(row["Status"] || row["[LCT] Status (M)"]),
+      status: normalize(
+        String(
+          pickCell(row, [
+            "Status",
+            "[LCT] Status (M)",
+          ])
+        )
+      ),
       reportingYear: toReportingYear(row["[LCT] Reporting (M)"]),
       idAssigned: normalize(row["[LCT] ID Assigned (M)"]),
       sme: normalize(row["[LCT] SME (M)"]),

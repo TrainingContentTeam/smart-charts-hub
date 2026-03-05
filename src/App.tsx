@@ -10,6 +10,7 @@ import Development from "@/pages/Development";
 import SmeCollaboration from "@/pages/SmeCollaboration";
 import ExternalTeams from "@/pages/ExternalTeams";
 import MasterContentInventory from "@/pages/MasterContentInventory";
+import Accreditation from "@/pages/Accreditation";
 import UploadData from "@/pages/UploadData";
 import Projects from "@/pages/Projects";
 import DataExplorer from "@/pages/DataExplorer";
@@ -42,6 +43,7 @@ function ProtectedRoutes() {
         <Route path="/sme-collaboration" element={<SmeCollaboration />} />
         <Route path="/external-teams" element={<ExternalTeams />} />
         <Route path="/master-content-inventory" element={<MasterContentInventory />} />
+        <Route path="/accreditation" element={<Accreditation />} />
         <Route path="/upload" element={<UploadData />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/explorer" element={<DataExplorer />} />

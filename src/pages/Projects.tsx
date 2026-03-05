@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
 import { isCompletedProjectStatus } from "@/lib/project-status";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Search, ArrowUpDown, BookOpen, Video, Clock3, CalendarDays, Ruler } from "lucide-react";
+import { ArrowLeft, Search, ArrowUpDown, BookOpen, Video, Clock3, CalendarDays, Ruler, ChevronDown } from "lucide-react";
 import { CollaborationSurveyComingSoon } from "@/components/CollaborationSurveyComingSoon";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { ChartActions } from "@/components/ChartActions";
@@ -29,11 +31,37 @@ function prettyLabel(label: string) {
     .join(" ");
 }
 
+type ProjectFilters = {
+  year: string;
+  status: string;
+  type: string;
+  tool: string;
+  vertical: string;
+  assignedId: string;
+  length: string;
+  source: string;
+  completion: "all" | "completed" | "not_completed";
+};
+
+const DEFAULT_FILTERS: ProjectFilters = {
+  year: "all",
+  status: "all",
+  type: "all",
+  tool: "all",
+  vertical: "all",
+  assignedId: "all",
+  length: "all",
+  source: "all",
+  completion: "all",
+};
+
 export default function Projects() {
   const { data: entries = [] } = useTimeEntries();
   const { data: projects = [] } = useProjects();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [filters, setFilters] = useState<ProjectFilters>({ ...DEFAULT_FILTERS });
   const [detailSortKey, setDetailSortKey] = useState<"category" | "hours" | "date" | "user">("date");
   const [detailSortAsc, setDetailSortAsc] = useState(false);
   const [showCategoryChartData, setShowCategoryChartData] = useState(false);
@@ -42,13 +70,18 @@ export default function Projects() {
     const withMetrics = projects.map((p: any) => {
       const length = text(p.course_length || "Unknown");
       const cohort = projects
-        .filter((x: any) => text(x.course_length || "Unknown") === length)
+        .filter((x: any) => text(x.course_length || "Unknown") === length && isCompletedProjectStatus(x.status))
         .map((x: any) => number(x.total_hours));
       const sorted = [...cohort].sort((a, b) => a - b);
       const current = number(p.total_hours);
       const idx = sorted.findIndex((v) => v >= current);
-      const rank = idx === -1 ? sorted.length - 1 : idx;
-      const percentile = sorted.length > 1 ? Math.round((rank / (sorted.length - 1)) * 100) : 100;
+      const rank = idx === -1 ? Math.max(sorted.length - 1, 0) : idx;
+      const percentile =
+        sorted.length > 1
+          ? Math.round((rank / (sorted.length - 1)) * 100)
+          : sorted.length === 1
+            ? (current >= sorted[0] ? 100 : 0)
+            : 0;
 
       return {
         ...p,
@@ -76,17 +109,37 @@ export default function Projects() {
     return map;
   }, [entries]);
 
+  const filterOptions = useMemo(() => {
+    const unique = (getter: (p: any) => string) =>
+      [...new Set(projectsWithRelativePosition.map(getter).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return {
+      year: unique((p) => text(p.reporting_year || "Unknown")),
+      status: unique((p) => text(p.status || "Unknown")),
+      type: unique((p) => text(p.course_type || "Unknown")),
+      tool: unique((p) => text(p.authoring_tool || "Unknown")),
+      vertical: unique((p) => text(p.vertical || "Unknown")),
+      assignedId: unique((p) => text(p.id_assigned || "Unknown")),
+      length: unique((p) => text(p.course_length || "Unknown")),
+      source: unique((p) => text(p.data_source || "Unknown")),
+    };
+  }, [projectsWithRelativePosition]);
+
   const filteredProjects = useMemo(() => {
     const q = search.toLowerCase();
     return projectsWithRelativePosition
       .filter((p: any) => {
-        if (!q) return true;
-        return (
-          text(p.name).toLowerCase().includes(q) ||
-          text(p.reporting_year).toLowerCase().includes(q) ||
-          text(p.course_type).toLowerCase().includes(q) ||
-          text(p.authoring_tool).toLowerCase().includes(q)
-        );
+        if (q && !text(p.name).toLowerCase().includes(q)) return false;
+        if (filters.year !== "all" && text(p.reporting_year || "Unknown") !== filters.year) return false;
+        if (filters.status !== "all" && text(p.status || "Unknown") !== filters.status) return false;
+        if (filters.type !== "all" && text(p.course_type || "Unknown") !== filters.type) return false;
+        if (filters.tool !== "all" && text(p.authoring_tool || "Unknown") !== filters.tool) return false;
+        if (filters.vertical !== "all" && text(p.vertical || "Unknown") !== filters.vertical) return false;
+        if (filters.assignedId !== "all" && text(p.id_assigned || "Unknown") !== filters.assignedId) return false;
+        if (filters.length !== "all" && text(p.course_length || "Unknown") !== filters.length) return false;
+        if (filters.source !== "all" && text(p.data_source || "Unknown") !== filters.source) return false;
+        if (filters.completion === "completed" && !isCompletedProjectStatus(p.status)) return false;
+        if (filters.completion === "not_completed" && isCompletedProjectStatus(p.status)) return false;
+        return true;
       })
       .sort((a: any, b: any) => {
         const aActivity = latestActivityByProjectId.get(a.id) || 0;
@@ -94,7 +147,7 @@ export default function Projects() {
         if (bActivity !== aActivity) return bActivity - aActivity;
         return b.totalHoursNum - a.totalHoursNum;
       });
-  }, [projectsWithRelativePosition, search, latestActivityByProjectId]);
+  }, [projectsWithRelativePosition, search, filters, latestActivityByProjectId]);
 
   const selected = selectedProjectId
     ? projectsWithRelativePosition.find((p: any) => p.id === selectedProjectId)
@@ -199,7 +252,7 @@ export default function Projects() {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Compared with {m.cohortSize} course(s) of length “{m.cohortLengthLabel}”.
+                  Compared with {m.cohortSize} completed/published course(s) of length “{m.cohortLengthLabel}”.
                 </p>
               </div>
             </CardContent>
@@ -297,10 +350,58 @@ export default function Projects() {
         <p className="text-muted-foreground">Course-level overview and relative time position by similar course length.</p>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Search projects..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
-      </div>
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Filters</CardTitle>
+            <Collapsible open={filtersExpanded} onOpenChange={setFiltersExpanded}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-8 gap-1">
+                  {filtersExpanded ? "Collapse" : "Expand"}
+                  <ChevronDown className={`h-4 w-4 transition-transform ${filtersExpanded ? "rotate-180" : ""}`} />
+                </Button>
+              </CollapsibleTrigger>
+            </Collapsible>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="space-y-1 md:col-span-1">
+              <p className="text-xs text-muted-foreground">Project Name</p>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by project name..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <FilterSelect label="Reporting Year" value={filters.year} onValueChange={(value) => setFilters((f) => ({ ...f, year: value }))} options={filterOptions.year} />
+            <FilterSelect label="Assigned ID" value={filters.assignedId} onValueChange={(value) => setFilters((f) => ({ ...f, assignedId: value }))} options={filterOptions.assignedId} />
+          </div>
+
+          <Collapsible open={filtersExpanded} onOpenChange={setFiltersExpanded}>
+            <CollapsibleContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                <FilterSelect label="Status" value={filters.status} onValueChange={(value) => setFilters((f) => ({ ...f, status: value }))} options={filterOptions.status} />
+                <FilterSelect label="Completion" value={filters.completion} onValueChange={(value) => setFilters((f) => ({ ...f, completion: value as ProjectFilters["completion"] }))} options={["completed", "not_completed"]} />
+                <FilterSelect label="Course Type" value={filters.type} onValueChange={(value) => setFilters((f) => ({ ...f, type: value }))} options={filterOptions.type} />
+                <FilterSelect label="Authoring Tool" value={filters.tool} onValueChange={(value) => setFilters((f) => ({ ...f, tool: value }))} options={filterOptions.tool} />
+                <FilterSelect label="Course Length" value={filters.length} onValueChange={(value) => setFilters((f) => ({ ...f, length: value }))} options={filterOptions.length} />
+                <FilterSelect label="Vertical" value={filters.vertical} onValueChange={(value) => setFilters((f) => ({ ...f, vertical: value }))} options={filterOptions.vertical} />
+                <FilterSelect label="Data Source" value={filters.source} onValueChange={(value) => setFilters((f) => ({ ...f, source: value }))} options={filterOptions.source} />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+          <div>
+            <Button variant="outline" size="sm" onClick={() => setFilters({ ...DEFAULT_FILTERS })}>
+              Clear Filters
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {filteredProjects.length === 0 ? (
         <Card>
@@ -354,7 +455,7 @@ export default function Projects() {
                     />
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Relative effort: {p.percentile}% within {p.cohortSize} similar-length course{p.cohortSize === 1 ? "" : "s"}
+                    Relative effort: {p.percentile}% within {p.cohortSize} completed similar-length course{p.cohortSize === 1 ? "" : "s"}
                   </p>
                 </div>
 
@@ -371,6 +472,37 @@ export default function Projects() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onValueChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  options: string[];
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="h-8">
+          <SelectValue placeholder={`All ${label}`} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All</SelectItem>
+          {options.map((opt) => (
+            <SelectItem key={opt} value={opt}>
+              {opt}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

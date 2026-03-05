@@ -9,7 +9,7 @@ export function useProjects() {
     queryKey: ["projects"],
     queryFn: async () => {
       if (DEV_BYPASS_AUTH) {
-        const local = readLocalStore();
+        const local = await readLocalStore();
         return [...local.projects]
           .filter((p) => String((p as any).data_source || "").toLowerCase() !== "time_only")
           .sort((a, b) => a.name.localeCompare(b.name));
@@ -30,7 +30,7 @@ export function useTimeEntries() {
     queryKey: ["time_entries"],
     queryFn: async () => {
       if (DEV_BYPASS_AUTH) {
-        const local = readLocalStore();
+        const local = await readLocalStore();
         return [...local.time_entries].sort((a, b) => b.created_at.localeCompare(a.created_at));
       }
       // Fetch all time entries (may exceed 1000 rows)
@@ -59,7 +59,7 @@ export function useUploadHistory() {
     queryKey: ["upload_history"],
     queryFn: async () => {
       if (DEV_BYPASS_AUTH) {
-        const local = readLocalStore();
+        const local = await readLocalStore();
         return [...local.upload_history].sort((a, b) => b.created_at.localeCompare(a.created_at));
       }
       const { data, error } = await supabase

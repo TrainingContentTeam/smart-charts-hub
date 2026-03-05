@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useProjects, useTimeEntries } from "@/hooks/use-time-data";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
-import { isCompletedProjectStatus } from "@/lib/project-status";
+import { isCompletedProjectStatus, normalizeProjectStatus } from "@/lib/project-status";
 import { ChartActions } from "@/components/ChartActions";
 import { ChartDataTable } from "@/components/ChartDataTable";
 import {
@@ -56,10 +56,34 @@ function normalizeMetaLabel(v: unknown): string {
   return clean(v);
 }
 
+const LP_DEV_STATUSES = new Set([
+  "lp outline development",
+  "lp development",
+  "id review of lp",
+  "lp peer review",
+]);
+
+const TESTING_READY_STATUSES = new Set([
+  "testing",
+  "testing revisions",
+  "ready to load",
+  "ready to publish",
+]);
+
+function bucketStatus(status: unknown): "not_started" | "lp_dev" | "testing_ready" | "other" | "complete" {
+  const normalized = normalizeProjectStatus(status, "Unknown").toLowerCase();
+  if (isCompletedProjectStatus(normalized)) return "complete";
+  if (normalized === "not started") return "not_started";
+  if (LP_DEV_STATUSES.has(normalized)) return "lp_dev";
+  if (TESTING_READY_STATUSES.has(normalized)) return "testing_ready";
+  return "other";
+}
+
 const TREND_TOOL_OPTIONS = ["Rise", "Storyline", "LMS"] as const;
 const TREND_TYPE_OPTIONS = ["New", "Revamp", "Maintenance"] as const;
 const TREND_VERTICAL_OPTIONS = ["P1A", "EMS1", "FR1A", "D1A", "C1A", "LGU", "Wellness", "Other"] as const;
 type ChartFilters = {
+  reportingYear: string;
   type: string;
   tool: string;
   vertical: string;
@@ -67,6 +91,7 @@ type ChartFilters = {
 };
 
 const DEFAULT_CHART_FILTERS: ChartFilters = {
+  reportingYear: "all",
   type: "all",
   tool: "all",
   vertical: "all",
@@ -90,14 +115,59 @@ export default function Development() {
 
   const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p])), [projects]);
 
-  const baseKpis = useMemo(() => {
-    const totalHours = projects.reduce((sum: number, p: any) => sum + Number(p.total_hours || 0), 0);
-    const courses = projects.length;
-    return {
-      courses,
-      totalHours: Math.round(totalHours * 10) / 10,
-      avgHours: courses ? Math.round((totalHours / courses) * 10) / 10 : 0,
-    };
+  const statusCounts = useMemo(() => {
+    const numericYears = projects
+      .map((p: any) => Number.parseInt(clean(p.reporting_year), 10))
+      .filter((y) => Number.isFinite(y));
+    const currentYear = numericYears.length ? Math.max(...numericYears) : null;
+    const priorYear = currentYear ? currentYear - 1 : null;
+
+    const map: Record<string, { current: number; prior: number; total: number }> = {};
+    projects.forEach((p: any) => {
+      if (isCompletedProjectStatus(p.status)) return;
+      const year = Number.parseInt(clean(p.reporting_year), 10);
+      if (!Number.isFinite(year) || !currentYear) return;
+      if (year !== currentYear && (!priorYear || year !== priorYear)) return;
+
+      const status = normalizeProjectStatus(p.status, "Unknown");
+      if (!map[status]) map[status] = { current: 0, prior: 0, total: 0 };
+      if (year === currentYear) map[status].current += 1;
+      else map[status].prior += 1;
+      map[status].total += 1;
+    });
+
+    const rows = Object.entries(map)
+      .map(([status, counts]) => ({ status, ...counts }))
+      .sort((a, b) => b.total - a.total || a.status.localeCompare(b.status));
+
+    return { currentYear, priorYear, rows };
+  }, [projects]);
+  const maxStatusCount = Math.max(1, ...statusCounts.rows.map((s) => s.total));
+
+  const currentYearAssignedBreakdown = useMemo(() => {
+    const numericYears = projects
+      .map((p: any) => Number.parseInt(clean(p.reporting_year), 10))
+      .filter((y) => Number.isFinite(y));
+    const currentYear = numericYears.length ? Math.max(...numericYears) : null;
+    const map: Record<string, { not_started: number; lp_dev: number; testing_ready: number; other: number; complete: number; total: number }> = {};
+
+    projects.forEach((p: any) => {
+      const year = Number.parseInt(clean(p.reporting_year), 10);
+      if (!Number.isFinite(year) || !currentYear || year !== currentYear) return;
+      const id = normalizeMetaLabel(p.id_assigned);
+      if (!map[id]) {
+        map[id] = { not_started: 0, lp_dev: 0, testing_ready: 0, other: 0, complete: 0, total: 0 };
+      }
+      const bucket = bucketStatus(p.status);
+      map[id][bucket] += 1;
+      map[id].total += 1;
+    });
+
+    const rows = Object.entries(map)
+      .map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
+
+    return { currentYear, rows };
   }, [projects]);
 
   const activeBacklogByYear = useMemo(() => {
@@ -142,9 +212,11 @@ export default function Development() {
   }, [projects, statusFilters]);
 
   function matchesFilters(project: any, filters: ChartFilters): boolean {
+    const reportingYear = clean(project.reporting_year || "");
     const tool = normalizeTool(project.authoring_tool);
     const courseType = normalizeCourseType(project.course_type);
 
+    if (filters.reportingYear !== "all" && reportingYear !== filters.reportingYear) return false;
     if (filters.tool !== "all" && tool !== filters.tool) return false;
     if (filters.type !== "all" && courseType !== filters.type) return false;
     if (filters.vertical !== "all") {
@@ -180,6 +252,14 @@ export default function Development() {
   const trendAssignedIdOptions = useMemo(() => {
     const set = new Set<string>();
     projects.forEach((p: any) => set.add(normalizeMetaLabel(p.id_assigned)));
+    return [...set].sort();
+  }, [projects]);
+  const reportingYearOptions = useMemo(() => {
+    const set = new Set<string>();
+    projects.forEach((p: any) => {
+      const y = clean(p.reporting_year);
+      if (y) set.add(y);
+    });
     return [...set].sort();
   }, [projects]);
 
@@ -256,84 +336,107 @@ export default function Development() {
     filters: ChartFilters,
     setFilters: Dispatch<SetStateAction<ChartFilters>>
   ) => (
-    <div className="flex items-center gap-3 overflow-x-auto overflow-y-visible whitespace-nowrap py-1">
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Course Type</span>
-        <Badge
-          variant={filters.type === "all" ? "default" : "outline"}
-          className="cursor-pointer"
-          onClick={() => setFilters((prev) => ({ ...prev, type: "all" }))}
-        >
-          All Types
-        </Badge>
-        {TREND_TYPE_OPTIONS.map((value) => (
+    <div className="space-y-2 py-1">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Course Type</span>
           <Badge
-            key={value}
-            variant={filters.type === value ? "default" : "outline"}
+            variant={filters.type === "all" ? "default" : "outline"}
             className="cursor-pointer"
-            onClick={() => setFilters((prev) => ({ ...prev, type: value }))}
+            onClick={() => setFilters((prev) => ({ ...prev, type: "all" }))}
           >
-            {value}
+            All Types
           </Badge>
-        ))}
-      </div>
-      <div className="h-6 w-px bg-border" />
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Authoring Tool</span>
-        <Badge
-          variant={filters.tool === "all" ? "default" : "outline"}
-          className="cursor-pointer"
-          onClick={() => setFilters((prev) => ({ ...prev, tool: "all" }))}
-        >
-          All Tools
-        </Badge>
-        {TREND_TOOL_OPTIONS.map((value) => (
+          {TREND_TYPE_OPTIONS.map((value) => (
+            <Badge
+              key={value}
+              variant={filters.type === value ? "default" : "outline"}
+              className="cursor-pointer"
+              onClick={() => setFilters((prev) => ({ ...prev, type: value }))}
+            >
+              {value}
+            </Badge>
+          ))}
+        </div>
+        <div className="hidden h-6 w-px bg-border md:block" />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Authoring Tool</span>
           <Badge
-            key={value}
-            variant={filters.tool === value ? "default" : "outline"}
+            variant={filters.tool === "all" ? "default" : "outline"}
             className="cursor-pointer"
-            onClick={() => setFilters((prev) => ({ ...prev, tool: value }))}
+            onClick={() => setFilters((prev) => ({ ...prev, tool: "all" }))}
           >
-            {value}
+            All Tools
           </Badge>
-        ))}
-      </div>
-      <div className="h-6 w-px bg-border" />
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Vertical</span>
-        <div className="min-w-[180px]">
-          <Select value={filters.vertical} onValueChange={(value) => setFilters((prev) => ({ ...prev, vertical: value }))}>
-            <SelectTrigger className="h-8">
-              <SelectValue placeholder="All Verticals" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Verticals</SelectItem>
-              {TREND_VERTICAL_OPTIONS.map((vertical) => (
-                <SelectItem key={vertical} value={vertical}>
-                  {vertical}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {TREND_TOOL_OPTIONS.map((value) => (
+            <Badge
+              key={value}
+              variant={filters.tool === value ? "default" : "outline"}
+              className="cursor-pointer"
+              onClick={() => setFilters((prev) => ({ ...prev, tool: value }))}
+            >
+              {value}
+            </Badge>
+          ))}
         </div>
       </div>
-      <div className="h-6 w-px bg-border" />
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Assigned ID</span>
-        <div className="min-w-[220px]">
-          <Select value={filters.assignedId} onValueChange={(value) => setFilters((prev) => ({ ...prev, assignedId: value }))}>
-            <SelectTrigger className="h-8">
-              <SelectValue placeholder="All IDs" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All IDs</SelectItem>
-              {trendAssignedIdOptions.map((id) => (
-                <SelectItem key={id} value={id}>
-                  {id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Reporting Year</span>
+          <div className="min-w-[160px]">
+            <Select value={filters.reportingYear} onValueChange={(value) => setFilters((prev) => ({ ...prev, reportingYear: value }))}>
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All Years" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Years</SelectItem>
+                {reportingYearOptions.map((year) => (
+                  <SelectItem key={year} value={year}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="hidden h-6 w-px bg-border md:block" />
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Vertical</span>
+          <div className="min-w-[180px]">
+            <Select value={filters.vertical} onValueChange={(value) => setFilters((prev) => ({ ...prev, vertical: value }))}>
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All Verticals" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Verticals</SelectItem>
+                {TREND_VERTICAL_OPTIONS.map((vertical) => (
+                  <SelectItem key={vertical} value={vertical}>
+                    {vertical}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="hidden h-6 w-px bg-border md:block" />
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Assigned ID</span>
+          <div className="min-w-[220px]">
+            <Select value={filters.assignedId} onValueChange={(value) => setFilters((prev) => ({ ...prev, assignedId: value }))}>
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All IDs" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All IDs</SelectItem>
+                {trendAssignedIdOptions.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
     </div>
@@ -346,18 +449,102 @@ export default function Development() {
         <p className="text-muted-foreground">Build-cycle effort, throughput, and workload distribution.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Courses</CardTitle></CardHeader>
-          <CardContent><p className="text-3xl font-bold">{baseKpis.courses}</p></CardContent>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Courses by Status</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {statusCounts.currentYear
+                ? `${statusCounts.currentYear} + ${statusCounts.priorYear ?? "prior"}`
+                : "No reporting year data"}
+            </p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-sm bg-primary" />
+                Current Year
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-sm bg-primary/40" />
+                Prior Year
+              </span>
+            </div>
+            {statusCounts.rows.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No non-completed statuses found.</p>
+            ) : (
+              statusCounts.rows.map((row) => (
+                <div key={row.status} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{row.status}</span>
+                    <span className="font-medium">
+                      {row.total} ({row.current}/{row.prior})
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-muted">
+                    <div className="flex h-full overflow-hidden rounded-full">
+                      {row.current > 0 && (
+                        <div
+                          className="bg-primary"
+                          style={{ width: `${Math.max(2, Math.round((row.current / maxStatusCount) * 100))}%` }}
+                        />
+                      )}
+                      {row.prior > 0 && (
+                        <div
+                          className="bg-primary/40"
+                          style={{ width: `${Math.max(2, Math.round((row.prior / maxStatusCount) * 100))}%` }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Hours</CardTitle></CardHeader>
-          <CardContent><p className="text-3xl font-bold">{baseKpis.totalHours}</p></CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Avg Hours/Course</CardTitle></CardHeader>
-          <CardContent><p className="text-3xl font-bold">{baseKpis.avgHours}</p></CardContent>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Current Year Courses by Assigned ID</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {currentYearAssignedBreakdown.currentYear
+                ? `${currentYearAssignedBreakdown.currentYear} reporting year`
+                : "No reporting year data"}
+            </p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-slate-500" />Not Started</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-red-500" />LP Work</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-yellow-500" />Testing/Ready</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-500" />Other</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-emerald-500" />Completed/Published</span>
+            </div>
+            {currentYearAssignedBreakdown.rows.map((row) => (
+              <div key={row.id} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">{row.id}</span>
+                  <span className="font-medium">{row.total}</span>
+                </div>
+                <div className="flex h-2 overflow-hidden rounded-full bg-muted">
+                  {row.not_started > 0 && (
+                    <div className="bg-slate-500" style={{ width: `${(row.not_started / row.total) * 100}%` }} />
+                  )}
+                  {row.lp_dev > 0 && (
+                    <div className="bg-red-500" style={{ width: `${(row.lp_dev / row.total) * 100}%` }} />
+                  )}
+                  {row.testing_ready > 0 && (
+                    <div className="bg-yellow-500" style={{ width: `${(row.testing_ready / row.total) * 100}%` }} />
+                  )}
+                  {row.other > 0 && (
+                    <div className="bg-blue-500" style={{ width: `${(row.other / row.total) * 100}%` }} />
+                  )}
+                  {row.complete > 0 && (
+                    <div className="bg-emerald-500" style={{ width: `${(row.complete / row.total) * 100}%` }} />
+                  )}
+                </div>
+              </div>
+            ))}
+          </CardContent>
         </Card>
       </div>
 

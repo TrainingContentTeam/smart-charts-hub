@@ -269,7 +269,7 @@ export default function UploadData() {
       if (DEV_BYPASS_AUTH) {
         const now = new Date().toISOString();
         const uploadId = makeId();
-        const local = readLocalStore();
+        const local = await readLocalStore();
         const existingProjects = [...local.projects];
         const existingMap = new Map(existingProjects.map((p) => [courseKey(p.name, p.reporting_year), p]));
 
@@ -298,7 +298,7 @@ export default function UploadData() {
           let meta: any = {};
 
           if (legacy) {
-            status = normalizeProjectStatus(legacy.status, existing ? String((existing as any).status || "") : "In Progress");
+            status = normalizeProjectStatus(legacy.status, "In Progress");
             totalHours = legacy.totalHours;
             dataSource = "legacy";
             meta = {
@@ -314,7 +314,7 @@ export default function UploadData() {
               reporting_year: legacy.reportingYear,
             };
           } else if (modern) {
-            status = normalizeProjectStatus(modern.status, existing ? String((existing as any).status || "") : "In Progress");
+            status = normalizeProjectStatus(modern.status, "In Progress");
             totalHours = modern.totalHours;
             dataSource = "modern";
             meta = {
@@ -425,7 +425,7 @@ export default function UploadData() {
           ...local.upload_history,
         ];
 
-        writeLocalStore({
+        await writeLocalStore({
           projects: existingProjects as any,
           time_entries: localTimeEntries as any,
           upload_history: uploadHistory as any,
@@ -488,7 +488,7 @@ export default function UploadData() {
         let meta: any = {};
 
         if (legacy) {
-          status = normalizeProjectStatus(legacy.status, existing ? String(existing.status || "") : "In Progress");
+          status = normalizeProjectStatus(legacy.status, "In Progress");
           totalHours = legacy.totalHours;
           dataSource = "legacy";
           meta = {
@@ -504,7 +504,7 @@ export default function UploadData() {
             reporting_year: legacy.reportingYear,
           };
         } else if (modern) {
-          status = normalizeProjectStatus(modern.status, existing ? String(existing.status || "") : "In Progress");
+          status = normalizeProjectStatus(modern.status, "In Progress");
           totalHours = modern.totalHours;
           dataSource = "modern";
           meta = {

@@ -1,4 +1,4 @@
-import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut } from "lucide-react";
+import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut, Construction } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -14,13 +14,23 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 
-const navItems = [
+const primaryNavItems = [
   { title: "Dashboard", url: "/", icon: BarChart3 },
   { title: "Development", url: "/development", icon: Wrench },
   { title: "SME Collaboration", url: "/sme-collaboration", icon: Users },
   { title: "Other External Teams", url: "/external-teams", icon: Building2 },
-  { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
+];
+
+const projectNavItems = [
   { title: "Projects", url: "/projects", icon: FolderOpen },
+];
+
+const underConstructionNavItems = [
+  { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
+  { title: "Accreditation", url: "/accreditation", icon: LibraryBig },
+];
+
+const utilityNavItems = [
   { title: "Upload Data", url: "/upload", icon: Upload },
 ];
 
@@ -43,10 +53,10 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Main</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
+              {primaryNavItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink
@@ -64,9 +74,77 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <div className="mx-4 border-t border-sidebar-border" />
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Work</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {projectNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild>
+                    <NavLink
+                      to={item.url}
+                      className="hover:bg-sidebar-accent"
+                      activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+                    >
+                      <item.icon className="mr-2 h-4 w-4" />
+                      <span>{item.title}</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <div className="mx-4 border-t border-sidebar-border" />
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Under Construction</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {underConstructionNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild>
+                    <NavLink
+                      to={item.url}
+                      className="hover:bg-sidebar-accent"
+                      activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+                    >
+                      <item.icon className="mr-2 h-4 w-4" />
+                      <span className="flex items-center gap-1">
+                        {item.title}
+                        <Construction className="h-3.5 w-3.5 opacity-80" />
+                      </span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-4 border-t border-sidebar-border">
         <div className="space-y-2">
+          <SidebarMenu>
+            {utilityNavItems.map((item) => (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton asChild>
+                  <NavLink
+                    to={item.url}
+                    className="hover:bg-sidebar-accent"
+                    activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+                  >
+                    <item.icon className="mr-2 h-4 w-4" />
+                    <span>{item.title}</span>
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+          <div className="border-t border-sidebar-border" />
           <div
             className={`text-[11px] inline-flex px-2 py-1 rounded-full border ${
               isBypass

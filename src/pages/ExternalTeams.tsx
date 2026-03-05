@@ -1,34 +1,57 @@
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
 import { useProjects, useTimeEntries } from "@/hooks/use-time-data";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
-import { ArrowUpDown } from "lucide-react";
 import { YearPills } from "@/components/YearPills";
+import { normalizeProjectStatus } from "@/lib/project-status";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { ChartActions } from "@/components/ChartActions";
 import { ChartDataTable } from "@/components/ChartDataTable";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
+import { Camera } from "lucide-react";
 
 function clean(v: unknown): string {
   return String(v || "").trim();
 }
 
+type TeamKey = "legal" | "cqo";
+
+type TeamConfig = {
+  key: TeamKey;
+  title: string;
+  color: string;
+  statusSet: Set<string>;
+};
+
+const TEAM_CONFIGS: TeamConfig[] = [
+  {
+    key: "legal",
+    title: "Legal Team",
+    color: "hsl(var(--chart-2))",
+    statusSet: new Set(["staging legal review", "legal review", "process legal review"]),
+  },
+  {
+    key: "cqo",
+    title: "CQO Team",
+    color: "hsl(var(--chart-4))",
+    statusSet: new Set(["staging - cqo review", "cqo review"]),
+  },
+];
+
 type TeamRow = {
-  id: string;
+  projectId: string;
   project: string;
   year: string;
-  category: string;
-  user: string;
   hours: number;
 };
 
-function isTeamMatch(value: string, team: "legal" | "cqo") {
+function isTeamMatch(value: string, team: TeamKey) {
   const s = value.toLowerCase();
   if (team === "legal") return s.includes("legal");
   return s.includes("cqo");
 }
 
-function buildTeamRows(entries: any[], projectMap: Map<string, any>, team: "legal" | "cqo"): TeamRow[] {
+function buildTeamRows(entries: any[], projectMap: Map<string, any>, team: TeamKey): TeamRow[] {
   return entries
     .filter((e) => {
       const category = clean(e.category || e.phase);
@@ -38,208 +61,259 @@ function buildTeamRows(entries: any[], projectMap: Map<string, any>, team: "lega
     .map((e) => {
       const project = projectMap.get(e.project_id);
       return {
-        id: e.id,
+        projectId: clean(e.project_id),
         project: clean(project?.name || "Unknown Project"),
         year: clean(project?.reporting_year || "Unknown"),
-        category: clean(e.category || e.phase || "Uncategorized"),
-        user: clean(e.user_name || "Unknown"),
         hours: Math.round(Number(e.hours || 0) * 100) / 100,
       };
     });
 }
 
-function TeamSection({ title, rows, color, years }: { title: string; rows: TeamRow[]; color: string; years: string[] }) {
+function TeamSection({
+  config,
+  rows,
+  years,
+  projects,
+}: {
+  config: TeamConfig;
+  rows: TeamRow[];
+  years: string[];
+  projects: any[];
+}) {
   const [selectedYears, setSelectedYears] = useState<string[]>([]);
-  const [topSortKey, setTopSortKey] = useState<"project" | "hours">("hours");
-  const [topSortAsc, setTopSortAsc] = useState(false);
-  const [detailSortKey, setDetailSortKey] = useState<"project" | "year" | "category" | "user" | "hours">("year");
-  const [detailSortAsc, setDetailSortAsc] = useState(false);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [showChartData, setShowChartData] = useState(false);
+
   const filteredRows = useMemo(
     () => (selectedYears.length ? rows.filter((r) => selectedYears.includes(r.year)) : rows),
     [rows, selectedYears]
   );
-  const totalHours = Math.round(filteredRows.reduce((sum, r) => sum + r.hours, 0) * 10) / 10;
 
-  const hoursByYear = useMemo(() => {
-    const map: Record<string, number> = {};
+  const averageByYear = useMemo(() => {
+    const byYear: Record<string, { total: number; projects: Set<string> }> = {};
     filteredRows.forEach((r) => {
-      map[r.year] = (map[r.year] || 0) + r.hours;
+      if (!byYear[r.year]) byYear[r.year] = { total: 0, projects: new Set<string>() };
+      byYear[r.year].total += r.hours;
+      byYear[r.year].projects.add(r.projectId);
     });
-    return Object.entries(map)
-      .map(([year, hours]) => ({ year, hours: Math.round(hours * 10) / 10 }))
+    return Object.entries(byYear)
+      .map(([year, v]) => {
+        const projectCount = Math.max(v.projects.size, 1);
+        return {
+          year,
+          avgHours: Math.round((v.total / projectCount) * 10) / 10,
+          totalHours: Math.round(v.total * 10) / 10,
+          projects: v.projects.size,
+        };
+      })
       .sort((a, b) => a.year.localeCompare(b.year));
   }, [filteredRows]);
 
-  const topProjects = useMemo(() => {
+  const overallAvg = useMemo(() => {
+    const total = averageByYear.reduce((sum, r) => sum + r.totalHours, 0);
+    const projectsTouched = new Set(filteredRows.map((r) => r.projectId)).size;
+    return projectsTouched ? Math.round((total / projectsTouched) * 10) / 10 : 0;
+  }, [averageByYear, filteredRows]);
+
+  const maxAvg = Math.max(1, ...averageByYear.map((r) => r.avgHours));
+
+  const teamProjectIds = useMemo(() => new Set(rows.map((r) => r.projectId)), [rows]);
+
+  const statusRows = useMemo(() => {
     const map: Record<string, number> = {};
+    projects.forEach((p: any) => {
+      const projectId = clean(p.id);
+      if (!teamProjectIds.has(projectId)) return;
+      const year = clean(p.reporting_year || "");
+      if (selectedYears.length && !selectedYears.includes(year)) return;
+      const status = normalizeProjectStatus(p.status, "Unknown");
+      const key = status.toLowerCase();
+      if (!config.statusSet.has(key)) return;
+      map[status] = (map[status] || 0) + 1;
+    });
+    return Object.entries(map)
+      .map(([status, count]) => ({ status, count }))
+      .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status));
+  }, [projects, teamProjectIds, selectedYears, config.statusSet]);
+
+  const statusTotal = statusRows.reduce((sum, r) => sum + r.count, 0);
+
+  const statusProjects = useMemo(() => {
+    const hoursByProject: Record<string, number> = {};
     filteredRows.forEach((r) => {
-      const key = `${r.project} (${r.year})`;
-      map[key] = (map[key] || 0) + r.hours;
+      hoursByProject[r.projectId] = (hoursByProject[r.projectId] || 0) + r.hours;
     });
-    const ranked = Object.entries(map)
-      .map(([name, hours]) => ({ name, hours: Math.round(hours * 10) / 10 }))
-      .sort((a, b) => {
-        const cmp = topSortKey === "project" ? a.name.localeCompare(b.name) : a.hours - b.hours;
-        return topSortAsc ? cmp : -cmp;
-      });
-    return ranked.slice(0, 12);
-  }, [filteredRows, topSortKey, topSortAsc]);
 
-  const sortedRows = useMemo(() => {
-    const copy = [...filteredRows];
-    copy.sort((a, b) => {
-      let cmp = 0;
-      switch (detailSortKey) {
-        case "project": cmp = a.project.localeCompare(b.project); break;
-        case "year": cmp = a.year.localeCompare(b.year); break;
-        case "category": cmp = a.category.localeCompare(b.category); break;
-        case "user": cmp = a.user.localeCompare(b.user); break;
-        case "hours": cmp = a.hours - b.hours; break;
-      }
-      return detailSortAsc ? cmp : -cmp;
-    });
-    return copy;
-  }, [filteredRows, detailSortKey, detailSortAsc]);
+    const rows = projects
+      .filter((p: any) => {
+        const projectId = clean(p.id);
+        if (!teamProjectIds.has(projectId)) return false;
+        const year = clean(p.reporting_year || "");
+        if (selectedYears.length && !selectedYears.includes(year)) return false;
+        const status = normalizeProjectStatus(p.status, "Unknown").toLowerCase();
+        return config.statusSet.has(status);
+      })
+      .map((p: any) => {
+        const projectId = clean(p.id);
+        return {
+          id: projectId,
+          name: clean(p.name || "Unknown Project"),
+          status: normalizeProjectStatus(p.status, "Unknown"),
+          hours: Math.round((hoursByProject[projectId] || 0) * 10) / 10,
+        };
+      })
+      .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name));
 
-  const DetailHead = ({ label, field, right = false }: { label: string; field: "project" | "year" | "category" | "user" | "hours"; right?: boolean }) => (
-    <TableHead className={`${right ? "text-right" : ""} cursor-pointer select-none`} onClick={() => {
-      if (detailSortKey === field) setDetailSortAsc((v) => !v);
-      else {
-        setDetailSortKey(field);
-        setDetailSortAsc(true);
-      }
-    }}>
-      <span className={`flex items-center gap-1 ${right ? "justify-end" : ""}`}>
-        {label} <ArrowUpDown className="h-3 w-3" />
-      </span>
-    </TableHead>
-  );
+    return rows;
+  }, [projects, teamProjectIds, selectedYears, config.statusSet, filteredRows]);
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Time Entries</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-bold">{filteredRows.length}</p></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Hours</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-bold">{totalHours}</p></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Projects Touched</CardTitle></CardHeader>
-            <CardContent><p className="text-2xl font-bold">{new Set(filteredRows.map((r) => r.project + r.year)).size}</p></CardContent>
-          </Card>
-        </div>
-
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-lg">{config.title}</CardTitle>
         <YearPills years={years} selectedYears={selectedYears} onChange={setSelectedYears} />
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle className="text-base">Hours by Year</CardTitle>
-                <ChartActions
-                  showData={showChartData}
-                  onToggleData={() => setShowChartData((v) => !v)}
-                  onSnapshot={() => saveChartSnapshot(`chart-${title.toLowerCase().replace(/\s+/g, "-")}-hours`, `${title.toLowerCase().replace(/\s+/g, "-")}-hours-by-year`)}
-                />
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm text-muted-foreground">Average Time</CardTitle>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={() => saveChartSnapshot(`metric-${config.key}-avg`, `${config.key}-avg-time-card`)}
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </CardHeader>
-            <CardContent>
-              <div id={`chart-${title.toLowerCase().replace(/\s+/g, "-")}-hours`} className="space-y-3">
-                <div className="h-[360px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hoursByYear}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="year" />
-                      <YAxis />
-                      <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                      <Bar dataKey="hours" fill={color} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+            <CardContent className="space-y-3">
+              <div id={`metric-${config.key}-avg`} className="space-y-3">
+                <p className="text-3xl font-bold">{overallAvg}h</p>
+                <p className="text-xs text-muted-foreground">Average team hours per project</p>
+                <div className="space-y-2">
+                  {averageByYear.map((row) => (
+                    <div key={row.year} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{row.year}</span>
+                        <span className="font-medium">{row.avgHours}h avg</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${Math.max(8, Math.round((row.avgHours / maxAvg) * 100))}%`, backgroundColor: config.color }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                {showChartData && <ChartDataTable rows={hoursByYear} columns={[{ key: "year", label: "Year" }, { key: "hours", label: "Hours" }]} />}
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-base">Top Projects by Team Hours</CardTitle></CardHeader>
-            <CardContent>
-              <div className="max-h-[280px] overflow-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="cursor-pointer select-none" onClick={() => {
-                        if (topSortKey === "project") setTopSortAsc((v) => !v);
-                        else {
-                          setTopSortKey("project");
-                          setTopSortAsc(true);
-                        }
-                      }}>
-                        <span className="flex items-center gap-1">
-                          Project <ArrowUpDown className="h-3 w-3" />
-                        </span>
-                      </TableHead>
-                      <TableHead className="text-right cursor-pointer select-none" onClick={() => {
-                        if (topSortKey === "hours") setTopSortAsc((v) => !v);
-                        else {
-                          setTopSortKey("hours");
-                          setTopSortAsc(false);
-                        }
-                      }}>
-                        <span className="flex items-center justify-end gap-1">
-                          Hours <ArrowUpDown className="h-3 w-3" />
-                        </span>
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {topProjects.map((p) => (
-                      <TableRow key={p.name}>
-                        <TableCell className="font-medium">{p.name}</TableCell>
-                        <TableCell className="text-right">{p.hours}</TableCell>
-                      </TableRow>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm text-muted-foreground">Status</CardTitle>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={() => saveChartSnapshot(`metric-${config.key}-status`, `${config.key}-status-card`)}
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div id={`metric-${config.key}-status`} className="space-y-2">
+                <p className="text-3xl font-bold">{statusTotal}</p>
+                <p className="text-xs text-muted-foreground">Courses currently in {config.title} statuses</p>
+                {statusRows.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No courses in these statuses for selected year(s).</p>
+                ) : (
+                  <>
+                    {statusRows.map((r) => (
+                      <div key={r.status} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{r.status}</span>
+                        <span className="font-medium">{r.count}</span>
+                      </div>
                     ))}
-                  </TableBody>
-                </Table>
+                    <div className="pt-2 space-y-2">
+                      {statusProjects.map((project, idx) => (
+                        <div key={project.id} className="rounded-md border text-sm">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between px-3 py-2 text-left"
+                            onClick={() =>
+                              setExpandedProjectId((prev) => (prev === project.id ? null : project.id))
+                            }
+                          >
+                            <span className="truncate pr-4">
+                              {idx + 1}. {project.name}
+                            </span>
+                            <span className="font-semibold">{project.hours}h</span>
+                          </button>
+                          {expandedProjectId === project.id && (
+                            <div className="grid grid-cols-1 gap-1 px-3 pb-3 pt-1 text-xs text-muted-foreground">
+                              <p>
+                                <span className="font-medium text-foreground">Project:</span> {project.name}
+                              </p>
+                              <p>
+                                <span className="font-medium text-foreground">Status:</span> {project.status}
+                              </p>
+                              <p>
+                                <span className="font-medium text-foreground">Team Hours:</span> {project.hours}h
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
         </div>
 
         <Card>
-          <CardHeader><CardTitle className="text-base">Detailed Time Entries</CardTitle></CardHeader>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-base">Average Time Spent by Year</CardTitle>
+              <ChartActions
+                showData={showChartData}
+                onToggleData={() => setShowChartData((v) => !v)}
+                onSnapshot={() => saveChartSnapshot(`chart-${config.key}-avg-year`, `${config.key}-avg-time-by-year`)}
+              />
+            </div>
+          </CardHeader>
           <CardContent>
-            <div className="max-h-[360px] overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <DetailHead label="Project" field="project" />
-                    <DetailHead label="Year" field="year" />
-                    <DetailHead label="Category" field="category" />
-                    <DetailHead label="User" field="user" />
-                    <DetailHead label="Hours" field="hours" right />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedRows.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-medium">{r.project}</TableCell>
-                      <TableCell>{r.year}</TableCell>
-                      <TableCell>{r.category}</TableCell>
-                      <TableCell>{r.user}</TableCell>
-                      <TableCell className="text-right">{r.hours}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div id={`chart-${config.key}-avg-year`} className="space-y-3">
+              <div className="h-[320px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={averageByYear}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="year" />
+                    <YAxis />
+                    <Tooltip formatter={(v: any) => [`${v}h`, "Avg Hours"]} />
+                    <Bar dataKey="avgHours" fill={config.color} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {showChartData && (
+                <ChartDataTable
+                  rows={averageByYear}
+                  columns={[
+                    { key: "year", label: "Year" },
+                    { key: "avgHours", label: "Avg Hours" },
+                    { key: "totalHours", label: "Total Hours" },
+                    { key: "projects", label: "Projects" },
+                  ]}
+                />
+              )}
             </div>
           </CardContent>
         </Card>
@@ -262,18 +336,24 @@ export default function ExternalTeams() {
     return [...set].sort();
   }, [projects]);
 
-  const allLegalRows = useMemo(() => buildTeamRows(entries, projectMap, "legal"), [entries, projectMap]);
-  const allCqoRows = useMemo(() => buildTeamRows(entries, projectMap, "cqo"), [entries, projectMap]);
+  const teamRows = useMemo(
+    () => ({
+      legal: buildTeamRows(entries, projectMap, "legal"),
+      cqo: buildTeamRows(entries, projectMap, "cqo"),
+    }),
+    [entries, projectMap]
+  );
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Other External Teams</h1>
-        <p className="text-muted-foreground">Legal and CQO effort across projects and reporting years.</p>
+        <p className="text-muted-foreground">Average time and status visibility for Legal and CQO.</p>
       </div>
 
-      <TeamSection title="Legal Team" rows={allLegalRows} color="hsl(var(--chart-2))" years={years} />
-      <TeamSection title="CQO Team" rows={allCqoRows} color="hsl(var(--chart-4))" years={years} />
+      {TEAM_CONFIGS.map((config) => (
+        <TeamSection key={config.key} config={config} rows={teamRows[config.key]} years={years} projects={projects} />
+      ))}
     </div>
   );
 }
