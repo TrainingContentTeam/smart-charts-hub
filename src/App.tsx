@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/hooks/use-auth";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Dashboard from "@/pages/Dashboard";
 import Development from "@/pages/Development";
 import SmeCollaboration from "@/pages/SmeCollaboration";
@@ -15,6 +16,7 @@ import UploadData from "@/pages/UploadData";
 import Projects from "@/pages/Projects";
 import DataExplorer from "@/pages/DataExplorer";
 import AiInsights from "@/pages/AiInsights";
+import UserManagement from "@/pages/UserManagement";
 import Auth from "@/pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -44,7 +46,8 @@ function ProtectedRoutes() {
         <Route path="/external-teams" element={<ExternalTeams />} />
         <Route path="/master-content-inventory" element={<MasterContentInventory />} />
         <Route path="/accreditation" element={<Accreditation />} />
-        <Route path="/upload" element={<UploadData />} />
+        <Route path="/upload" element={<ProtectedRoute requiredRole="admin"><UploadData /></ProtectedRoute>} />
+        <Route path="/user-management" element={<ProtectedRoute requiredRole="admin"><UserManagement /></ProtectedRoute>} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/explorer" element={<DataExplorer />} />
         <Route path="/insights" element={<AiInsights />} />

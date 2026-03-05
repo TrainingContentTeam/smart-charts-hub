@@ -1,6 +1,7 @@
-import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut, Construction } from "lucide-react";
+import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut, Construction, Shield } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
+import { useUserRole } from "@/hooks/use-user-role";
 import {
   Sidebar,
   SidebarContent,
@@ -30,12 +31,14 @@ const underConstructionNavItems = [
   { title: "Accreditation", url: "/accreditation", icon: LibraryBig },
 ];
 
-const utilityNavItems = [
+const adminNavItems = [
   { title: "Upload Data", url: "/upload", icon: Upload },
+  { title: "User Management", url: "/user-management", icon: Shield },
 ];
 
 export function AppSidebar() {
   const { user, signOut } = useAuth();
+  const { isAdmin } = useUserRole();
   const isBypass = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
 
   return (
@@ -128,22 +131,24 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter className="p-4 border-t border-sidebar-border">
         <div className="space-y-2">
-          <SidebarMenu>
-            {utilityNavItems.map((item) => (
-              <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton asChild>
-                  <NavLink
-                    to={item.url}
-                    className="hover:bg-sidebar-accent"
-                    activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
-                  >
-                    <item.icon className="mr-2 h-4 w-4" />
-                    <span>{item.title}</span>
-                  </NavLink>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
+          {isAdmin && (
+            <SidebarMenu>
+              {adminNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild>
+                    <NavLink
+                      to={item.url}
+                      className="hover:bg-sidebar-accent"
+                      activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+                    >
+                      <item.icon className="mr-2 h-4 w-4" />
+                      <span>{item.title}</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          )}
           <div className="border-t border-sidebar-border" />
           <div
             className={`text-[11px] inline-flex px-2 py-1 rounded-full border ${
