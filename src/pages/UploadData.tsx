@@ -1103,27 +1103,68 @@ export default function UploadData() {
       let sourceHintCount = 0;
       let surveyCount = 0;
       let unresolvedSurveyCount = 0;
+
+      // Build set of canceled course name keys to skip
+      const canceledNameKeys = new Set<string>();
+      for (const group of unmatchedTimeGroups) {
+        if (canceledGroups.has(group.groupKey)) canceledNameKeys.add(group.groupKey);
+      }
+      let canceledSkipCount = 0;
+
+      // Persist canceled courses to database
+      if (canceledNameKeys.size > 0) {
+        const canceledInserts: Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string; user_id: string }> = [];
+        for (const group of unmatchedTimeGroups) {
+          if (!canceledGroups.has(group.groupKey)) continue;
+          const years = new Set<string>();
+          group.rows.forEach((row) => {
+            const y = parseEntryYear(row.entry.date);
+            if (y !== null) years.add(String(y));
+          });
+          const reportingYear = years.size === 1 ? [...years][0] : null;
+          canceledInserts.push({
+            course_name_key: group.groupKey,
+            reporting_year: reportingYear,
+            original_course_name: group.courseName,
+            user_id: user!.id,
+          });
+        }
+        if (canceledInserts.length > 0) {
+          await supabase.from("canceled_courses" as any).upsert(canceledInserts as any, { onConflict: "course_name_key,reporting_year" });
+        }
+      }
+
       if (timeData && timeData.length > 0) {
         const batchSize = 500;
         for (let i = 0; i < timeData.length; i += batchSize) {
-          const batch = timeData.slice(i, i + batchSize).map((e, offset) => {
-            const index = i + offset;
-            const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
-            if (!resolved.key) unresolvedCount += 1;
-            if (resolved.reason === "fallback_latest") fallbackCount += 1;
-            if (resolved.reason === "source_hint") sourceHintCount += 1;
-            return {
-            project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
-            phase: e.category || "Uncategorized",
-            hours: e.hours,
-            category: e.category,
-            entry_date: e.date || null,
-            user_name: e.userName,
-            upload_id: upload.id,
-            user_id: user!.id,
-          };});
-          const { error: entryErr } = await supabase.from("time_entries").insert(batch as any);
-          if (entryErr) throw entryErr;
+          const batch = timeData.slice(i, i + batchSize)
+            .map((e, offset) => {
+              const index = i + offset;
+              // Skip canceled groups
+              if (canceledNameKeys.has(normKey(e.courseName))) {
+                canceledSkipCount += 1;
+                return null;
+              }
+              const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
+              if (!resolved.key) unresolvedCount += 1;
+              if (resolved.reason === "fallback_latest") fallbackCount += 1;
+              if (resolved.reason === "source_hint") sourceHintCount += 1;
+              return {
+                project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
+                phase: e.category || "Uncategorized",
+                hours: e.hours,
+                category: e.category,
+                entry_date: e.date || null,
+                user_name: e.userName,
+                upload_id: upload.id,
+                user_id: user!.id,
+              };
+            })
+            .filter((row): row is NonNullable<typeof row> => row !== null);
+          if (batch.length > 0) {
+            const { error: entryErr } = await supabase.from("time_entries").insert(batch as any);
+            if (entryErr) throw entryErr;
+          }
           timeCount += batch.length;
         }
       }
