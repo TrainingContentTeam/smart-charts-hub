@@ -1,10 +1,12 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Link2, ChevronDown, ArrowUpDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { parseLegacyCourseFile, type LegacyCourse } from "@/lib/parse-legacy-course";
 import { parseModernCourseFile, type ModernCourse } from "@/lib/parse-modern-course";
 import { parseSmeSurveyFile, type SmeCollaborationSurveyImport } from "@/lib/parse-sme-survey";
@@ -101,7 +103,8 @@ type ResolveReason =
   | "single"
   | "exact_year"
   | "source_hint"
-  | "fallback_latest";
+  | "fallback_latest"
+  | "manual_override";
 
 type ResolveResult = {
   key: string | null;
@@ -110,10 +113,26 @@ type ResolveResult = {
 
 type SurveyResolveResult = {
   key: string | null;
-  reason: "exact" | "no_candidate";
+  reason: "exact" | "no_candidate" | "manual_override";
+};
+
+type PreviewProjectVariant = {
+  key: string;
+  name: string;
+  reportingYear: string;
+  dataSource: string;
 };
 
 function resolveProjectKeyForTimeEntry(entry: TimeSpentEntry, byName: Map<string, ProjectCandidate[]>): ResolveResult {
+  return resolveProjectKeyForTimeEntryWithOverride(entry, byName, null);
+}
+
+function resolveProjectKeyForTimeEntryWithOverride(
+  entry: TimeSpentEntry,
+  byName: Map<string, ProjectCandidate[]>,
+  manualOverrideKey: string | null,
+): ResolveResult {
+  if (manualOverrideKey) return { key: manualOverrideKey, reason: "manual_override" };
   const nameKey = normKey(entry.courseName);
   const candidates = byName.get(nameKey) || [];
   if (candidates.length === 0) return { key: null, reason: "no_candidate" };
@@ -136,9 +155,85 @@ function resolveProjectKeyForTimeEntry(entry: TimeSpentEntry, byName: Map<string
 }
 
 function resolveProjectKeyForSurvey(entry: SmeCollaborationSurveyImport, allCourseKeys: Set<string>): SurveyResolveResult {
+  return resolveProjectKeyForSurveyWithOverride(entry, allCourseKeys, null);
+}
+
+function resolveProjectKeyForSurveyWithOverride(
+  entry: SmeCollaborationSurveyImport,
+  allCourseKeys: Set<string>,
+  manualOverrideKey: string | null,
+): SurveyResolveResult {
+  if (manualOverrideKey) return { key: manualOverrideKey, reason: "manual_override" };
   const key = courseKey(entry.courseName, entry.reportingYear);
   if (allCourseKeys.has(key)) return { key, reason: "exact" };
   return { key: null, reason: "no_candidate" };
+}
+
+function buildPreviewProjectVariants(legacyData: LegacyCourse[] | null, modernData: ModernCourse[] | null) {
+  const byName = new Map<string, PreviewProjectVariant[]>();
+  const allKeys = new Set<string>();
+  const allVariants: PreviewProjectVariant[] = [];
+
+  const pushVariant = (variant: PreviewProjectVariant) => {
+    allKeys.add(variant.key);
+    if (!allVariants.some((entry) => entry.key === variant.key)) allVariants.push(variant);
+    const nameKey = normKey(variant.name);
+    const list = byName.get(nameKey) || [];
+    if (!list.some((entry) => entry.key === variant.key)) {
+      list.push(variant);
+      byName.set(nameKey, list);
+    }
+  };
+
+  (legacyData || []).forEach((course) => {
+    pushVariant({
+      key: courseKey(course.courseName, course.reportingYear),
+      name: course.courseName,
+      reportingYear: course.reportingYear,
+      dataSource: "legacy",
+    });
+  });
+
+  (modernData || []).forEach((course) => {
+    pushVariant({
+      key: courseKey(course.courseName, course.reportingYear),
+      name: course.courseName,
+      reportingYear: course.reportingYear,
+      dataSource: "modern",
+    });
+  });
+
+  byName.forEach((list) => list.sort((a, b) => a.reportingYear.localeCompare(b.reportingYear)));
+
+  allVariants.sort((a, b) => a.name.localeCompare(b.name) || a.reportingYear.localeCompare(b.reportingYear));
+
+  return { byName, allKeys, allVariants };
+}
+
+function replaceDateYear(date: string, reportingYear: string): string {
+  const cleanYear = reportingYear.trim();
+  if (!cleanYear) return date;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return `${cleanYear}${date.slice(4)}`;
+  return `${cleanYear}-01-01`;
+}
+
+function describeTimeResolution(reason: ResolveReason): string {
+  switch (reason) {
+    case "manual_override": return "Manually matched to a selected project";
+    case "single": return "Matched to the only project with this course name";
+    case "exact_year": return "Matched by course name and entry year";
+    case "source_hint": return "Matched by source hint from the entry year";
+    case "fallback_latest": return "Matched by fallback to the latest reporting year";
+    default: return "No project matched this course name/date";
+  }
+}
+
+function describeSurveyResolution(reason: SurveyResolveResult["reason"]): string {
+  switch (reason) {
+    case "manual_override": return "Manually matched to a selected project";
+    case "exact": return "Matched by course name and year";
+    default: return "Survey row has no Course Name + Year match";
+  }
 }
 
 export default function UploadData() {
@@ -165,12 +260,28 @@ export default function UploadData() {
   const [historySortAsc, setHistorySortAsc] = useState(false);
   const [ambigSortKey, setAmbigSortKey] = useState<"course" | "variants" | "timeRows" | "undated" | "years">("timeRows");
   const [ambigSortAsc, setAmbigSortAsc] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [issueOpen, setIssueOpen] = useState({
+    blocking: true,
+    fallback: true,
+    duplicates: false,
+  });
+  const [showMore, setShowMore] = useState({
+    blockingTime: 10,
+    fallbackTime: 10,
+    blockingSurvey: 10,
+    duplicates: 10,
+  });
+  const [timeOverrideKeys, setTimeOverrideKeys] = useState<Record<number, string | undefined>>({});
+  const [surveyOverrideKeys, setSurveyOverrideKeys] = useState<Record<number, string | undefined>>({});
   const { data: history = [] } = useUploadHistory();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
   const handleLegacy = useCallback(async (file: File) => {
     setLegacyFile(file.name);
+    setTimeOverrideKeys({});
+    setSurveyOverrideKeys({});
     try {
       const data = await parseLegacyCourseFile(file);
       setLegacyData(data);
@@ -180,6 +291,8 @@ export default function UploadData() {
 
   const handleModern = useCallback(async (file: File) => {
     setModernFile(file.name);
+    setTimeOverrideKeys({});
+    setSurveyOverrideKeys({});
     try {
       const data = await parseModernCourseFile(file);
       setModernData(data);
@@ -189,6 +302,7 @@ export default function UploadData() {
 
   const handleTime = useCallback(async (file: File) => {
     setTimeFile(file.name);
+    setTimeOverrideKeys({});
     try {
       const data = await parseTimeSpentFile(file);
       setTimeData(data);
@@ -198,12 +312,69 @@ export default function UploadData() {
 
   const handleSme = useCallback(async (file: File) => {
     setSmeFile(file.name);
+    setSurveyOverrideKeys({});
     try {
       const data = await parseSmeSurveyFile(file);
       setSmeData(data);
       if (data.length === 0) toast.warning("No SME survey entries found.");
     } catch { toast.error("Failed to parse SME survey file."); }
   }, []);
+
+  const updateTimeEntry = useCallback((index: number, patch: Partial<TimeSpentEntry>) => {
+    setTimeData((current) => {
+      if (!current) return current;
+      return current.map((entry, i) => (i === index ? { ...entry, ...patch } : entry));
+    });
+  }, []);
+
+  const updateSmeEntry = useCallback((index: number, patch: Partial<SmeCollaborationSurveyImport>) => {
+    setSmeData((current) => {
+      if (!current) return current;
+      return current.map((entry, i) => {
+        if (i !== index) return entry;
+        const next = { ...entry, ...patch };
+        return {
+          ...next,
+          effectiveHourlyRate: next.hoursWorked > 0 ? Math.round((next.amountBilled / next.hoursWorked) * 100) / 100 : null,
+        };
+      });
+    });
+  }, []);
+
+  const setTimeOverride = useCallback((index: number, key: string | undefined) => {
+    setTimeOverrideKeys((current) => {
+      const next = { ...current };
+      if (key) next[index] = key;
+      else delete next[index];
+      return next;
+    });
+  }, []);
+
+  const setSurveyOverride = useCallback((index: number, key: string | undefined) => {
+    setSurveyOverrideKeys((current) => {
+      const next = { ...current };
+      if (key) next[index] = key;
+      else delete next[index];
+      return next;
+    });
+  }, []);
+
+  const previewProjects = useMemo(() => buildPreviewProjectVariants(legacyData, modernData), [legacyData, modernData]);
+  const previewProjectCandidates = useMemo(
+    () =>
+      new Map(
+        [...previewProjects.byName.entries()].map(([name, variants]) => [
+          name,
+          variants.map((variant) => ({
+            key: variant.key,
+            id: variant.key,
+            reportingYear: variant.reportingYear,
+            dataSource: variant.dataSource,
+          })),
+        ]),
+      ),
+    [previewProjects],
+  );
 
   // Match preview
   const matchInfo = useMemo(() => {
@@ -292,6 +463,51 @@ export default function UploadData() {
       rows,
     };
   }, [legacyData, modernData, timeData]);
+
+  const timeIssueRows = useMemo(() => {
+    if (!timeData) return [];
+    return timeData.map((entry, index) => {
+      const manualOverrideKey = timeOverrideKeys[index] || null;
+      const resolved = resolveProjectKeyForTimeEntryWithOverride(entry, previewProjectCandidates, manualOverrideKey);
+      const blockingReasons: string[] = [];
+      const reviewReasons: string[] = [];
+      if (resolved.reason === "no_candidate") blockingReasons.push("No project matched this course name/date");
+      if (entry.hours === 0) blockingReasons.push("Zero hours detected");
+      if (resolved.reason === "source_hint") reviewReasons.push("Matched by source hint");
+      if (resolved.reason === "fallback_latest") reviewReasons.push("Matched by fallback to latest year");
+
+      return {
+        index,
+        entry,
+        resolved,
+        blockingReasons,
+        reviewReasons,
+        suggestedCandidates: previewProjects.byName.get(normKey(entry.courseName)) || [],
+        forceCandidates: previewProjects.allVariants,
+      };
+    });
+  }, [timeData, previewProjects, previewProjectCandidates, timeOverrideKeys]);
+
+  const surveyIssueRows = useMemo(() => {
+    if (!smeData) return [];
+    return smeData.map((entry, index) => {
+      const manualOverrideKey = surveyOverrideKeys[index] || null;
+      const resolved = resolveProjectKeyForSurveyWithOverride(entry, previewProjects.allKeys, manualOverrideKey);
+      return {
+        index,
+        entry,
+        resolved,
+        blockingReasons: resolved.reason === "exact" || resolved.reason === "manual_override" ? [] : ["Survey row has no Course Name + Year match"],
+        suggestedCandidates: previewProjects.byName.get(normKey(entry.courseName)) || [],
+        forceCandidates: previewProjects.allVariants,
+      };
+    });
+  }, [smeData, previewProjects, surveyOverrideKeys]);
+
+  const blockingTimeRows = useMemo(() => timeIssueRows.filter((row) => row.blockingReasons.length > 0), [timeIssueRows]);
+  const fallbackTimeRows = useMemo(() => timeIssueRows.filter((row) => row.reviewReasons.length > 0), [timeIssueRows]);
+  const blockingSurveyRows = useMemo(() => surveyIssueRows.filter((row) => row.blockingReasons.length > 0), [surveyIssueRows]);
+  const hasReviewIssues = blockingTimeRows.length > 0 || fallbackTimeRows.length > 0 || blockingSurveyRows.length > 0 || ambiguityDiagnostics.totalAmbiguousTitles > 0;
 
   const importData = async () => {
     if (!legacyData && !modernData && !timeData && !smeData) return;
@@ -449,8 +665,9 @@ export default function UploadData() {
         let surveyCount = 0;
         let unresolvedSurveyCount = 0;
         if (timeData && timeData.length > 0) {
-          for (const e of timeData) {
-            const resolved = resolveProjectKeyForTimeEntry(e, projectCandidatesByName);
+          for (let index = 0; index < timeData.length; index += 1) {
+            const e = timeData[index];
+            const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
             if (!resolved.key) unresolvedCount += 1;
             if (resolved.reason === "fallback_latest") fallbackCount += 1;
             if (resolved.reason === "source_hint") sourceHintCount += 1;
@@ -471,8 +688,9 @@ export default function UploadData() {
         }
 
         if (smeData && smeData.length > 0) {
-          for (const e of smeData) {
-            const resolved = resolveProjectKeyForSurvey(e, allCourseKeys);
+          for (let index = 0; index < smeData.length; index += 1) {
+            const e = smeData[index];
+            const resolved = resolveProjectKeyForSurveyWithOverride(e, allCourseKeys, surveyOverrideKeys[index] || null);
             if (!resolved.key) unresolvedSurveyCount += 1;
             localSmeSurveys.push({
               id: makeId(),
@@ -555,6 +773,8 @@ export default function UploadData() {
         setLegacyData(null); setModernData(null); setTimeData(null); setSmeData(null);
         setLegacyFile(""); setModernFile(""); setTimeFile(""); setSmeFile("");
         setWarnings([]);
+        setTimeOverrideKeys({});
+        setSurveyOverrideKeys({});
         queryClient.invalidateQueries({ queryKey: ["time_entries"] });
         queryClient.invalidateQueries({ queryKey: ["projects"] });
         queryClient.invalidateQueries({ queryKey: ["upload_history"] });
@@ -704,8 +924,9 @@ export default function UploadData() {
       if (timeData && timeData.length > 0) {
         const batchSize = 500;
         for (let i = 0; i < timeData.length; i += batchSize) {
-          const batch = timeData.slice(i, i + batchSize).map(e => {
-            const resolved = resolveProjectKeyForTimeEntry(e, projectCandidatesByName);
+          const batch = timeData.slice(i, i + batchSize).map((e, offset) => {
+            const index = i + offset;
+            const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
             if (!resolved.key) unresolvedCount += 1;
             if (resolved.reason === "fallback_latest") fallbackCount += 1;
             if (resolved.reason === "source_hint") sourceHintCount += 1;
@@ -728,8 +949,9 @@ export default function UploadData() {
       if (smeData && smeData.length > 0) {
         const batchSize = 500;
         for (let i = 0; i < smeData.length; i += batchSize) {
-          const batch = smeData.slice(i, i + batchSize).map((e) => {
-            const resolved = resolveProjectKeyForSurvey(e, allCourseKeys);
+          const batch = smeData.slice(i, i + batchSize).map((e, offset) => {
+            const index = i + offset;
+            const resolved = resolveProjectKeyForSurveyWithOverride(e, allCourseKeys, surveyOverrideKeys[index] || null);
             if (!resolved.key) unresolvedSurveyCount += 1;
             return {
               project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
@@ -796,6 +1018,8 @@ export default function UploadData() {
       setLegacyData(null); setModernData(null); setTimeData(null); setSmeData(null);
       setLegacyFile(""); setModernFile(""); setTimeFile(""); setSmeFile("");
       setWarnings([]);
+      setTimeOverrideKeys({});
+      setSurveyOverrideKeys({});
       queryClient.invalidateQueries({ queryKey: ["time_entries"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["upload_history"] });
@@ -905,6 +1129,10 @@ export default function UploadData() {
     return rows;
   }, [ambiguityDiagnostics.rows, ambigSortKey, ambigSortAsc]);
 
+  useEffect(() => {
+    if (hasReviewIssues) setReviewOpen(true);
+  }, [hasReviewIssues]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -920,13 +1148,13 @@ export default function UploadData() {
         <DropZone label="SME Data Report" description="SME and ID collaboration survey responses" fileName={smeFile} count={smeData?.length ?? null} onFile={handleSme} id="sme-file-input" />
       </div>
 
-      {/* Match Preview */}
+      {/* Current upload summary */}
       {matchInfo && hasAnything && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div className="flex items-center gap-2">
               <Link2 className="h-5 w-5 text-primary" />
-              <CardTitle className="text-base">Match Preview</CardTitle>
+              <CardTitle className="text-base">Current Upload Summary</CardTitle>
             </div>
             <Button onClick={importData} disabled={importing || !hasAnything}>
               {importing ? "Importing…" : "Import All"}
@@ -967,77 +1195,398 @@ export default function UploadData() {
                 <p className="text-xs text-muted-foreground">Total Unique</p>
               </div>
             </div>
-
-            {warnings.length > 0 && (
-              <Collapsible>
-                <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-                  <AlertCircle className="h-4 w-4" />
-                  {warnings.length} validation warning(s)
-                  <ChevronDown className="h-3 w-3" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2 space-y-1">
-                  {warnings.map((w, i) => (
-                    <p key={i} className="text-sm text-muted-foreground">• {w}</p>
-                  ))}
-                </CollapsibleContent>
-              </Collapsible>
-            )}
-
-            {ambiguityDiagnostics.totalAmbiguousTitles > 0 && (
-              <Collapsible>
-                <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-                  <AlertCircle className="h-4 w-4" />
-                  {ambiguityDiagnostics.totalAmbiguousTitles} duplicate title group(s) detected
-                  <ChevronDown className="h-3 w-3" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2 space-y-2">
-                  <p className="text-sm text-muted-foreground">
-                    Undated rows inside duplicate title groups: {ambiguityDiagnostics.totalUndatedRows}
-                  </p>
-                  <div className="max-h-[220px] overflow-auto border rounded-md">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="cursor-pointer select-none" onClick={() => {
-                            if (ambigSortKey === "course") setAmbigSortAsc((v) => !v);
-                            else { setAmbigSortKey("course"); setAmbigSortAsc(true); }
-                          }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                          <TableHead className="cursor-pointer select-none" onClick={() => {
-                            if (ambigSortKey === "variants") setAmbigSortAsc((v) => !v);
-                            else { setAmbigSortKey("variants"); setAmbigSortAsc(true); }
-                          }}><span className="flex items-center gap-1">Variants <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                          <TableHead className="cursor-pointer select-none" onClick={() => {
-                            if (ambigSortKey === "timeRows") setAmbigSortAsc((v) => !v);
-                            else { setAmbigSortKey("timeRows"); setAmbigSortAsc(true); }
-                          }}><span className="flex items-center gap-1">Time Rows <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                          <TableHead className="cursor-pointer select-none" onClick={() => {
-                            if (ambigSortKey === "undated") setAmbigSortAsc((v) => !v);
-                            else { setAmbigSortKey("undated"); setAmbigSortAsc(true); }
-                          }}><span className="flex items-center gap-1">Undated <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                          <TableHead className="cursor-pointer select-none" onClick={() => {
-                            if (ambigSortKey === "years") setAmbigSortAsc((v) => !v);
-                            else { setAmbigSortKey("years"); setAmbigSortAsc(true); }
-                          }}><span className="flex items-center gap-1">Entry Years <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sortedAmbiguityRows.map((r, i) => (
-                          <TableRow key={`${r.courseName}-${i}`}>
-                            <TableCell className="font-medium">{r.courseName}</TableCell>
-                            <TableCell>{r.variantSummary}</TableCell>
-                            <TableCell>{r.timeRows}</TableCell>
-                            <TableCell>{r.undatedRows}</TableCell>
-                            <TableCell>{r.years || "none"}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
           </CardContent>
         </Card>
+      )}
+
+      {matchInfo && hasAnything && (
+        <Collapsible open={reviewOpen} onOpenChange={setReviewOpen}>
+          <Card>
+            <CollapsibleTrigger asChild>
+              <CardHeader className="cursor-pointer">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-5 w-5 text-primary" />
+                    <CardTitle className="text-base">Current Upload Review</CardTitle>
+                  </div>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${reviewOpen ? "rotate-180" : ""}`} />
+                </div>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Badge variant={blockingTimeRows.length + blockingSurveyRows.length > 0 ? "destructive" : "outline"}>
+                    {blockingTimeRows.length + blockingSurveyRows.length} rows need fixes
+                  </Badge>
+                  <Badge variant={fallbackTimeRows.length > 0 ? "secondary" : "outline"}>
+                    {fallbackTimeRows.length} rows need review
+                  </Badge>
+                  <Badge variant={ambiguityDiagnostics.totalAmbiguousTitles > 0 ? "secondary" : "outline"}>
+                    {ambiguityDiagnostics.totalAmbiguousTitles} duplicate title groups
+                  </Badge>
+                  <Badge variant={warnings.length > 0 ? "secondary" : "outline"}>
+                    {warnings.length} warning summaries
+                  </Badge>
+                </div>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Unmatched Time Rows</p>
+                    <p className="text-2xl font-bold">{timeIssueRows.filter((row) => row.resolved.reason === "no_candidate").length}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Fallback/Hint Time Rows</p>
+                    <p className="text-2xl font-bold">{fallbackTimeRows.length}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Zero-Hour Time Rows</p>
+                    <p className="text-2xl font-bold">{timeIssueRows.filter((row) => row.entry.hours === 0).length}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Unmatched Survey Rows</p>
+                    <p className="text-2xl font-bold">{blockingSurveyRows.length}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Duplicate Title Groups</p>
+                    <p className="text-2xl font-bold">{ambiguityDiagnostics.totalAmbiguousTitles}</p>
+                  </div>
+                </div>
+
+                <Collapsible open={issueOpen.blocking} onOpenChange={(open) => setIssueOpen((current) => ({ ...current, blocking: open }))}>
+                  <div className="rounded-md border">
+                    <CollapsibleTrigger asChild>
+                      <div className="flex cursor-pointer items-center justify-between p-4">
+                        <div>
+                          <p className="font-medium">Rows That Need Fixes</p>
+                          <p className="text-sm text-muted-foreground">Rows that will not import cleanly until corrected or manually matched.</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge variant="destructive">{blockingTimeRows.length + blockingSurveyRows.length}</Badge>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${issueOpen.blocking ? "rotate-180" : ""}`} />
+                        </div>
+                      </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-4 border-t p-4">
+                        {warnings.length > 0 && (
+                          <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground space-y-1">
+                            {warnings.map((warning, index) => <p key={index}>{warning}</p>)}
+                          </div>
+                        )}
+
+                        {blockingTimeRows.slice(0, showMore.blockingTime).map((row) => (
+                          <div key={`blocking-time-${row.index}`} className="rounded-md border p-3 space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-medium">Time row #{row.index + 1}</span>
+                              {row.blockingReasons.map((reason) => <Badge key={reason} variant="outline">{reason}</Badge>)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{describeTimeResolution(row.resolved.reason)}</p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Course Name</p>
+                                <Input value={row.entry.courseName} onChange={(e) => updateTimeEntry(row.index, { courseName: e.target.value })} />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Date</p>
+                                <Input value={row.entry.date} onChange={(e) => updateTimeEntry(row.index, { date: e.target.value })} placeholder="YYYY-MM-DD" />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Hours</p>
+                                <Input value={String(row.entry.hours)} onChange={(e) => updateTimeEntry(row.index, { hours: Number.parseFloat(e.target.value) || 0 })} />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Apply Suggested Match</p>
+                                <Select onValueChange={(value) => {
+                                  const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
+                                  if (!selected) return;
+                                  setTimeOverride(row.index, selected.key);
+                                  updateTimeEntry(row.index, {
+                                    courseName: selected.name,
+                                    date: replaceDateYear(row.entry.date, selected.reportingYear),
+                                  });
+                                }}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.suggestedCandidates.map((candidate) => (
+                                      <SelectItem key={candidate.key} value={candidate.key}>
+                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Force Match to Any Project</p>
+                                <Select onValueChange={(value) => setTimeOverride(row.index, value)}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={timeOverrideKeys[row.index] ? `Override active: ${timeOverrideKeys[row.index]}` : "Choose any project"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.forceCandidates.map((candidate) => (
+                                      <SelectItem key={candidate.key} value={candidate.key}>
+                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            {timeOverrideKeys[row.index] && (
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs text-primary">Manual override is active for this row.</p>
+                                <Button variant="outline" size="sm" onClick={() => setTimeOverride(row.index, undefined)}>Clear override</Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {blockingTimeRows.length > showMore.blockingTime && (
+                          <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, blockingTime: current.blockingTime + 10 }))}>
+                            Show More Time Fixes
+                          </Button>
+                        )}
+
+                        {blockingSurveyRows.slice(0, showMore.blockingSurvey).map((row) => (
+                          <div key={`blocking-survey-${row.index}`} className="rounded-md border p-3 space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-medium">Survey row #{row.index + 1}</span>
+                              {row.blockingReasons.map((reason) => <Badge key={reason} variant="outline">{reason}</Badge>)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{describeSurveyResolution(row.resolved.reason)}</p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Course Name</p>
+                                <Input value={row.entry.courseName} onChange={(e) => updateSmeEntry(row.index, { courseName: e.target.value })} />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Year</p>
+                                <Input value={row.entry.reportingYear} onChange={(e) => updateSmeEntry(row.index, { reportingYear: e.target.value })} />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Hours Worked</p>
+                                <Input value={String(row.entry.hoursWorked)} onChange={(e) => updateSmeEntry(row.index, { hoursWorked: Number.parseFloat(e.target.value) || 0 })} />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Apply Suggested Match</p>
+                                <Select onValueChange={(value) => {
+                                  const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
+                                  if (!selected) return;
+                                  setSurveyOverride(row.index, selected.key);
+                                  updateSmeEntry(row.index, { courseName: selected.name, reportingYear: selected.reportingYear });
+                                }}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.suggestedCandidates.map((candidate) => (
+                                      <SelectItem key={candidate.key} value={candidate.key}>
+                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Force Match to Any Project</p>
+                                <Select onValueChange={(value) => setSurveyOverride(row.index, value)}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={surveyOverrideKeys[row.index] ? `Override active: ${surveyOverrideKeys[row.index]}` : "Choose any project"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.forceCandidates.map((candidate) => (
+                                      <SelectItem key={candidate.key} value={candidate.key}>
+                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            {surveyOverrideKeys[row.index] && (
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs text-primary">Manual override is active for this row.</p>
+                                <Button variant="outline" size="sm" onClick={() => setSurveyOverride(row.index, undefined)}>Clear override</Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {blockingSurveyRows.length > showMore.blockingSurvey && (
+                          <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, blockingSurvey: current.blockingSurvey + 10 }))}>
+                            Show More Survey Fixes
+                          </Button>
+                        )}
+
+                        {blockingTimeRows.length === 0 && blockingSurveyRows.length === 0 && (
+                          <p className="text-sm text-muted-foreground">No blocking issues in the current upload.</p>
+                        )}
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </Collapsible>
+
+                <Collapsible open={issueOpen.fallback} onOpenChange={(open) => setIssueOpen((current) => ({ ...current, fallback: open }))}>
+                  <div className="rounded-md border">
+                    <CollapsibleTrigger asChild>
+                      <div className="flex cursor-pointer items-center justify-between p-4">
+                        <div>
+                          <p className="font-medium">Rows That Import With Fallback Logic</p>
+                          <p className="text-sm text-muted-foreground">These rows currently import, but they rely on hints or fallback rules you may want to correct.</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge variant="secondary">{fallbackTimeRows.length}</Badge>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${issueOpen.fallback ? "rotate-180" : ""}`} />
+                        </div>
+                      </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-4 border-t p-4">
+                        {fallbackTimeRows.slice(0, showMore.fallbackTime).map((row) => (
+                          <div key={`fallback-time-${row.index}`} className="rounded-md border p-3 space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-medium">Time row #{row.index + 1}</span>
+                              {row.reviewReasons.map((reason) => <Badge key={reason} variant="outline">{reason}</Badge>)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{describeTimeResolution(row.resolved.reason)}</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Apply Suggested Match</p>
+                                <Select onValueChange={(value) => {
+                                  const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
+                                  if (!selected) return;
+                                  setTimeOverride(row.index, selected.key);
+                                  updateTimeEntry(row.index, {
+                                    courseName: selected.name,
+                                    date: replaceDateYear(row.entry.date, selected.reportingYear),
+                                  });
+                                }}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.suggestedCandidates.map((candidate) => (
+                                      <SelectItem key={candidate.key} value={candidate.key}>
+                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Force Match to Any Project</p>
+                                <Select onValueChange={(value) => setTimeOverride(row.index, value)}>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={timeOverrideKeys[row.index] ? `Override active: ${timeOverrideKeys[row.index]}` : "Choose any project"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {row.forceCandidates.map((candidate) => (
+                                      <SelectItem key={candidate.key} value={candidate.key}>
+                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            {timeOverrideKeys[row.index] && (
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs text-primary">Manual override is active for this row.</p>
+                                <Button variant="outline" size="sm" onClick={() => setTimeOverride(row.index, undefined)}>Clear override</Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {fallbackTimeRows.length > showMore.fallbackTime && (
+                          <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, fallbackTime: current.fallbackTime + 10 }))}>
+                            Show More Review Rows
+                          </Button>
+                        )}
+                        {fallbackTimeRows.length === 0 && (
+                          <p className="text-sm text-muted-foreground">No fallback-based time rows in the current upload.</p>
+                        )}
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </Collapsible>
+
+                <Collapsible open={issueOpen.duplicates} onOpenChange={(open) => setIssueOpen((current) => ({ ...current, duplicates: open }))}>
+                  <div className="rounded-md border">
+                    <CollapsibleTrigger asChild>
+                      <div className="flex cursor-pointer items-center justify-between p-4">
+                        <div>
+                          <p className="font-medium">Duplicate Title Ambiguity</p>
+                          <p className="text-sm text-muted-foreground">Course titles that appear in more than one reporting year or source.</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge variant="secondary">{ambiguityDiagnostics.totalAmbiguousTitles}</Badge>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${issueOpen.duplicates ? "rotate-180" : ""}`} />
+                        </div>
+                      </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="border-t p-4 space-y-3">
+                        <p className="text-sm text-muted-foreground">
+                          Undated rows inside duplicate title groups: {ambiguityDiagnostics.totalUndatedRows}
+                        </p>
+                        <div className="max-h-[220px] overflow-auto border rounded-md">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="cursor-pointer select-none" onClick={() => {
+                                  if (ambigSortKey === "course") setAmbigSortAsc((v) => !v);
+                                  else { setAmbigSortKey("course"); setAmbigSortAsc(true); }
+                                }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                                <TableHead className="cursor-pointer select-none" onClick={() => {
+                                  if (ambigSortKey === "variants") setAmbigSortAsc((v) => !v);
+                                  else { setAmbigSortKey("variants"); setAmbigSortAsc(true); }
+                                }}><span className="flex items-center gap-1">Variants <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                                <TableHead className="cursor-pointer select-none" onClick={() => {
+                                  if (ambigSortKey === "timeRows") setAmbigSortAsc((v) => !v);
+                                  else { setAmbigSortKey("timeRows"); setAmbigSortAsc(true); }
+                                }}><span className="flex items-center gap-1">Time Rows <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                                <TableHead className="cursor-pointer select-none" onClick={() => {
+                                  if (ambigSortKey === "undated") setAmbigSortAsc((v) => !v);
+                                  else { setAmbigSortKey("undated"); setAmbigSortAsc(true); }
+                                }}><span className="flex items-center gap-1">Undated <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                                <TableHead className="cursor-pointer select-none" onClick={() => {
+                                  if (ambigSortKey === "years") setAmbigSortAsc((v) => !v);
+                                  else { setAmbigSortKey("years"); setAmbigSortAsc(true); }
+                                }}><span className="flex items-center gap-1">Entry Years <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {sortedAmbiguityRows.slice(0, showMore.duplicates).map((r, i) => (
+                                <TableRow key={`${r.courseName}-${i}`}>
+                                  <TableCell className="font-medium">{r.courseName}</TableCell>
+                                  <TableCell>{r.variantSummary}</TableCell>
+                                  <TableCell>{r.timeRows}</TableCell>
+                                  <TableCell>{r.undatedRows}</TableCell>
+                                  <TableCell>{r.years || "none"}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                        {sortedAmbiguityRows.length > showMore.duplicates && (
+                          <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, duplicates: current.duplicates + 10 }))}>
+                            Show More Duplicate Groups
+                          </Button>
+                        )}
+                        {ambiguityDiagnostics.totalAmbiguousTitles === 0 && (
+                          <p className="text-sm text-muted-foreground">No duplicate-title ambiguity in the current upload.</p>
+                        )}
+                      </div>
+                    </CollapsibleContent>
+                  </div>
+                </Collapsible>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       )}
 
       {/* Preview tables */}

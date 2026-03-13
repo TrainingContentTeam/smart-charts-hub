@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 
+const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
+
 export function useUserRole() {
   const { user, loading: authLoading } = useAuth();
   const [role, setRole] = useState<string>("user");
@@ -9,6 +11,12 @@ export function useUserRole() {
 
   useEffect(() => {
     if (authLoading) return;
+
+    if (DEV_BYPASS_AUTH) {
+      setRole("admin");
+      setRoleLoading(false);
+      return;
+    }
 
     if (!user) {
       setRole("user");
