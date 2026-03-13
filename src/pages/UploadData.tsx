@@ -637,6 +637,43 @@ export default function UploadData() {
   );
   const hasReviewIssues = blockingTimeRows.length > 0 || fallbackTimeRows.length > 0 || blockingSurveyRows.length > 0 || ambiguityDiagnostics.totalAmbiguousTitles > 0;
 
+  // Auto-detect previously canceled courses when unmatched groups change
+  useEffect(() => {
+    if (canceledCoursesFromDb.length === 0 || unmatchedTimeGroups.length === 0) return;
+    const autoSet = new Set<string>();
+    for (const group of unmatchedTimeGroups) {
+      const nk = normKey(group.courseName);
+      // Infer year from group entries
+      const years = new Set<string>();
+      group.rows.forEach((row) => {
+        const y = parseEntryYear(row.entry.date);
+        if (y !== null) years.add(String(y));
+      });
+      for (const dbRecord of canceledCoursesFromDb) {
+        if (dbRecord.course_name_key === nk) {
+          // Match if year matches or DB record has no year
+          if (!dbRecord.reporting_year || years.has(dbRecord.reporting_year)) {
+            autoSet.add(group.groupKey);
+            break;
+          }
+        }
+      }
+    }
+    if (autoSet.size > 0) {
+      setCanceledGroups((prev) => new Set([...prev, ...autoSet]));
+      setAutoCanceledGroups(autoSet);
+    }
+  }, [canceledCoursesFromDb, unmatchedTimeGroups]);
+
+  const toggleCanceledGroup = useCallback((groupKey: string) => {
+    setCanceledGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  }, []);
+
   const importData = async () => {
     if (!legacyData && !modernData && !timeData && !smeData) return;
     setImporting(true);
