@@ -327,10 +327,24 @@ export default function UploadData() {
   });
   const [timeOverrideKeys, setTimeOverrideKeys] = useState<Record<number, string | undefined>>({});
   const [surveyOverrideKeys, setSurveyOverrideKeys] = useState<Record<number, string | undefined>>({});
+  const [canceledGroups, setCanceledGroups] = useState<Set<string>>(new Set());
+  const [autoCanceledGroups, setAutoCanceledGroups] = useState<Set<string>>(new Set());
   const { data: history = [] } = useUploadHistory();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  // Fetch previously canceled courses from database
+  const { data: canceledCoursesFromDb = [] } = useQuery({
+    queryKey: ["canceled_courses"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) return [];
+      const { data, error } = await supabase
+        .from("canceled_courses" as any)
+        .select("*");
+      if (error) throw error;
+      return (data || []) as Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string }>;
+    },
+  });
   const handleLegacy = useCallback(async (file: File) => {
     setLegacyFile(file.name);
     setTimeOverrideKeys({});
