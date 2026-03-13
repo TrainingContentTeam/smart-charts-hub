@@ -342,7 +342,7 @@ export default function UploadData() {
         .from("canceled_courses" as any)
         .select("*");
       if (error) throw error;
-      return (data || []) as Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string }>;
+      return (data || []) as unknown as Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string }>;
     },
   });
   const handleLegacy = useCallback(async (file: File) => {
