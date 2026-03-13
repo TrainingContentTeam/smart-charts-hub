@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      canceled_courses: {
+        Row: {
+          course_name_key: string
+          created_at: string
+          id: string
+          original_course_name: string
+          reporting_year: string | null
+          user_id: string | null
+        }
+        Insert: {
+          course_name_key: string
+          created_at?: string
+          id?: string
+          original_course_name: string
+          reporting_year?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          course_name_key?: string
+          created_at?: string
+          id?: string
+          original_course_name?: string
+          reporting_year?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       projects: {
         Row: {
           authoring_tool: string | null
