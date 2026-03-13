@@ -3,16 +3,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Link2, ChevronDown, ArrowUpDown } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Link2, ChevronDown, ArrowUpDown, Check, ChevronsUpDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { parseLegacyCourseFile, type LegacyCourse } from "@/lib/parse-legacy-course";
 import { parseModernCourseFile, type ModernCourse } from "@/lib/parse-modern-course";
 import { parseSmeSurveyFile, type SmeCollaborationSurveyImport } from "@/lib/parse-sme-survey";
 import { parseTimeSpentFile, type TimeSpentEntry } from "@/lib/parse-time-spent";
 import { makeId, readLocalStore, writeLocalStore } from "@/lib/local-data-store";
 import { normalizeProjectStatus } from "@/lib/project-status";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useUploadHistory } from "@/hooks/use-time-data";
 import { useAuth } from "@/hooks/use-auth";
@@ -26,6 +29,14 @@ interface DropZoneProps {
   count: number | null;
   onFile: (file: File) => void;
   id: string;
+}
+
+interface SearchableProjectSelectProps {
+  options: PreviewProjectVariant[];
+  placeholder: string;
+  emptyLabel: string;
+  value?: string;
+  onChange: (value: string) => void;
 }
 
 function DropZone({ label, description, fileName, count, onFile, id }: DropZoneProps) {
@@ -72,6 +83,46 @@ function DropZone({ label, description, fileName, count, onFile, id }: DropZoneP
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SearchableProjectSelect({ options, placeholder, emptyLabel, value, onChange }: SearchableProjectSelectProps) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.key === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between font-normal">
+          <span className="truncate">
+            {selected ? `${selected.name} · ${selected.reportingYear || "unknown"} · ${selected.dataSource}` : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[420px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search projects..." />
+          <CommandList>
+            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            {options.map((option) => (
+              <CommandItem
+                key={option.key}
+                value={`${option.name} ${option.reportingYear} ${option.dataSource}`}
+                onSelect={() => {
+                  onChange(option.key);
+                  setOpen(false);
+                }}
+              >
+                <Check className={cn("mr-2 h-4 w-4", value === option.key ? "opacity-100" : "opacity-0")} />
+                <span className="truncate">{option.name}</span>
+                <span className="ml-auto pl-2 text-xs text-muted-foreground">{option.reportingYear || "unknown"} · {option.dataSource}</span>
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -327,6 +378,14 @@ export default function UploadData() {
     });
   }, []);
 
+  const updateTimeEntries = useCallback((indexes: number[], updater: (entry: TimeSpentEntry) => Partial<TimeSpentEntry>) => {
+    setTimeData((current) => {
+      if (!current) return current;
+      const indexSet = new Set(indexes);
+      return current.map((entry, i) => (indexSet.has(i) ? { ...entry, ...updater(entry) } : entry));
+    });
+  }, []);
+
   const updateSmeEntry = useCallback((index: number, patch: Partial<SmeCollaborationSurveyImport>) => {
     setSmeData((current) => {
       if (!current) return current;
@@ -346,6 +405,17 @@ export default function UploadData() {
       const next = { ...current };
       if (key) next[index] = key;
       else delete next[index];
+      return next;
+    });
+  }, []);
+
+  const setTimeOverrides = useCallback((indexes: number[], key: string | undefined) => {
+    setTimeOverrideKeys((current) => {
+      const next = { ...current };
+      indexes.forEach((index) => {
+        if (key) next[index] = key;
+        else delete next[index];
+      });
       return next;
     });
   }, []);
@@ -507,6 +577,48 @@ export default function UploadData() {
   const blockingTimeRows = useMemo(() => timeIssueRows.filter((row) => row.blockingReasons.length > 0), [timeIssueRows]);
   const fallbackTimeRows = useMemo(() => timeIssueRows.filter((row) => row.reviewReasons.length > 0), [timeIssueRows]);
   const blockingSurveyRows = useMemo(() => surveyIssueRows.filter((row) => row.blockingReasons.length > 0), [surveyIssueRows]);
+  const unmatchedTimeGroups = useMemo(() => {
+    const groups = new Map<string, {
+      groupKey: string;
+      courseName: string;
+      rows: typeof blockingTimeRows;
+      suggestedCandidates: PreviewProjectVariant[];
+      forceCandidates: PreviewProjectVariant[];
+      activeOverrideKey: string | undefined;
+      datePreview: string;
+    }>();
+
+    blockingTimeRows
+      .filter((row) => row.resolved.reason === "no_candidate")
+      .forEach((row) => {
+        const groupKey = normKey(row.entry.courseName);
+        const existing = groups.get(groupKey);
+        if (existing) {
+          existing.rows.push(row);
+          existing.activeOverrideKey ||= timeOverrideKeys[row.index];
+          return;
+        }
+        const dates = [row.entry.date, ...blockingTimeRows
+          .filter((candidate) => candidate.resolved.reason === "no_candidate" && normKey(candidate.entry.courseName) === groupKey)
+          .map((candidate) => candidate.entry.date)]
+          .filter(Boolean);
+        groups.set(groupKey, {
+          groupKey,
+          courseName: row.entry.courseName,
+          rows: [row],
+          suggestedCandidates: row.suggestedCandidates,
+          forceCandidates: row.forceCandidates,
+          activeOverrideKey: timeOverrideKeys[row.index],
+          datePreview: [...new Set(dates)].slice(0, 3).join(", "),
+        });
+      });
+
+    return [...groups.values()].sort((a, b) => b.rows.length - a.rows.length || a.courseName.localeCompare(b.courseName));
+  }, [blockingTimeRows, timeOverrideKeys]);
+  const individualBlockingTimeRows = useMemo(
+    () => blockingTimeRows.filter((row) => row.resolved.reason !== "no_candidate"),
+    [blockingTimeRows],
+  );
   const hasReviewIssues = blockingTimeRows.length > 0 || fallbackTimeRows.length > 0 || blockingSurveyRows.length > 0 || ambiguityDiagnostics.totalAmbiguousTitles > 0;
 
   const importData = async () => {
@@ -1137,7 +1249,7 @@ export default function UploadData() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Upload Data</h1>
-        <p className="text-muted-foreground">Import Legacy, Modern, Time Spent, and SME survey files</p>
+        <p className="text-muted-foreground">Import Legacy, Modern, Time Spent, and SME survey files. Review and correct only the current upload batch before import.</p>
       </div>
 
       {/* Upload drop zones */}
@@ -1152,9 +1264,12 @@ export default function UploadData() {
       {matchInfo && hasAnything && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Link2 className="h-5 w-5 text-primary" />
-              <CardTitle className="text-base">Current Upload Summary</CardTitle>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Link2 className="h-5 w-5 text-primary" />
+                <CardTitle className="text-base">Current Upload Summary</CardTitle>
+              </div>
+              <p className="text-sm text-muted-foreground">These counts reflect the files currently loaded on this page. Corrections below affect this batch only.</p>
             </div>
             <Button onClick={importData} disabled={importing || !hasAnything}>
               {importing ? "Importing…" : "Import All"}
@@ -1205,9 +1320,12 @@ export default function UploadData() {
             <CollapsibleTrigger asChild>
               <CardHeader className="cursor-pointer">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-base">Current Upload Review</CardTitle>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-5 w-5 text-primary" />
+                      <CardTitle className="text-base">Current Upload Review</CardTitle>
+                    </div>
+                    <p className="text-sm text-muted-foreground">Available only for the active files loaded above. Upload History below is a record and cannot be edited here.</p>
                   </div>
                   <ChevronDown className={`h-4 w-4 transition-transform ${reviewOpen ? "rotate-180" : ""}`} />
                 </div>
@@ -1274,7 +1392,77 @@ export default function UploadData() {
                           </div>
                         )}
 
-                        {blockingTimeRows.slice(0, showMore.blockingTime).map((row) => (
+                        {unmatchedTimeGroups.slice(0, showMore.blockingTime).map((group) => (
+                          <div key={`blocking-time-group-${group.groupKey}`} className="rounded-md border p-3 space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-medium">{group.rows.length} time rows for "{group.courseName}"</span>
+                              <Badge variant="outline">No project matched this course name/date</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Apply one match here to update all {group.rows.length} rows for this course in the current upload batch.
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Course Name</p>
+                                <Input
+                                  value={group.courseName}
+                                  onChange={(e) => updateTimeEntries(group.rows.map((row) => row.index), () => ({ courseName: e.target.value }))}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Rows Included</p>
+                                <div className="h-10 rounded-md border px-3 py-2 text-sm bg-muted/30 flex items-center">
+                                  {group.rows.length} rows
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Sample Dates</p>
+                                <div className="h-10 rounded-md border px-3 py-2 text-sm bg-muted/30 flex items-center truncate">
+                                  {group.datePreview || "No dates"}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Apply Suggested Match to All Rows</p>
+                                <SearchableProjectSelect
+                                  options={group.suggestedCandidates}
+                                  value={group.activeOverrideKey}
+                                  placeholder={group.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"}
+                                  emptyLabel="No matching projects found."
+                                  onChange={(value) => {
+                                    const selected = group.suggestedCandidates.find((candidate) => candidate.key === value);
+                                    if (!selected) return;
+                                    const indexes = group.rows.map((row) => row.index);
+                                    setTimeOverrides(indexes, selected.key);
+                                    updateTimeEntries(indexes, (entry) => ({
+                                      courseName: selected.name,
+                                      date: replaceDateYear(entry.date, selected.reportingYear),
+                                    }));
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Force Match All Rows to Any Project</p>
+                                <SearchableProjectSelect
+                                  options={group.forceCandidates}
+                                  value={group.activeOverrideKey}
+                                  placeholder={group.activeOverrideKey ? `Override active for ${group.rows.length} rows` : "Choose any project"}
+                                  emptyLabel="No projects available."
+                                  onChange={(value) => setTimeOverrides(group.rows.map((row) => row.index), value)}
+                                />
+                              </div>
+                            </div>
+                            {group.activeOverrideKey && (
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs text-primary">Manual override is active for all rows in this course group.</p>
+                                <Button variant="outline" size="sm" onClick={() => setTimeOverrides(group.rows.map((row) => row.index), undefined)}>Clear override for group</Button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {individualBlockingTimeRows.slice(0, showMore.blockingTime).map((row) => (
                           <div key={`blocking-time-${row.index}`} className="rounded-md border p-3 space-y-3">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm font-medium">Time row #{row.index + 1}</span>
@@ -1298,41 +1486,31 @@ export default function UploadData() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground">Apply Suggested Match</p>
-                                <Select onValueChange={(value) => {
-                                  const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
-                                  if (!selected) return;
-                                  setTimeOverride(row.index, selected.key);
-                                  updateTimeEntry(row.index, {
-                                    courseName: selected.name,
-                                    date: replaceDateYear(row.entry.date, selected.reportingYear),
-                                  });
-                                }}>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {row.suggestedCandidates.map((candidate) => (
-                                      <SelectItem key={candidate.key} value={candidate.key}>
-                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <SearchableProjectSelect
+                                  options={row.suggestedCandidates}
+                                  value={timeOverrideKeys[row.index]}
+                                  placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"}
+                                  emptyLabel="No matching projects found."
+                                  onChange={(value) => {
+                                    const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
+                                    if (!selected) return;
+                                    setTimeOverride(row.index, selected.key);
+                                    updateTimeEntry(row.index, {
+                                      courseName: selected.name,
+                                      date: replaceDateYear(row.entry.date, selected.reportingYear),
+                                    });
+                                  }}
+                                />
                               </div>
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground">Force Match to Any Project</p>
-                                <Select onValueChange={(value) => setTimeOverride(row.index, value)}>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={timeOverrideKeys[row.index] ? `Override active: ${timeOverrideKeys[row.index]}` : "Choose any project"} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {row.forceCandidates.map((candidate) => (
-                                      <SelectItem key={candidate.key} value={candidate.key}>
-                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <SearchableProjectSelect
+                                  options={row.forceCandidates}
+                                  value={timeOverrideKeys[row.index]}
+                                  placeholder={timeOverrideKeys[row.index] ? `Override active: ${timeOverrideKeys[row.index]}` : "Choose any project"}
+                                  emptyLabel="No projects available."
+                                  onChange={(value) => setTimeOverride(row.index, value)}
+                                />
                               </div>
                             </div>
                             {timeOverrideKeys[row.index] && (
@@ -1343,7 +1521,7 @@ export default function UploadData() {
                             )}
                           </div>
                         ))}
-                        {blockingTimeRows.length > showMore.blockingTime && (
+                        {unmatchedTimeGroups.length + individualBlockingTimeRows.length > showMore.blockingTime && (
                           <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, blockingTime: current.blockingTime + 10 }))}>
                             Show More Time Fixes
                           </Button>
@@ -1373,38 +1551,28 @@ export default function UploadData() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground">Apply Suggested Match</p>
-                                <Select onValueChange={(value) => {
-                                  const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
-                                  if (!selected) return;
-                                  setSurveyOverride(row.index, selected.key);
-                                  updateSmeEntry(row.index, { courseName: selected.name, reportingYear: selected.reportingYear });
-                                }}>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {row.suggestedCandidates.map((candidate) => (
-                                      <SelectItem key={candidate.key} value={candidate.key}>
-                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <SearchableProjectSelect
+                                  options={row.suggestedCandidates}
+                                  value={surveyOverrideKeys[row.index]}
+                                  placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"}
+                                  emptyLabel="No matching projects found."
+                                  onChange={(value) => {
+                                    const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
+                                    if (!selected) return;
+                                    setSurveyOverride(row.index, selected.key);
+                                    updateSmeEntry(row.index, { courseName: selected.name, reportingYear: selected.reportingYear });
+                                  }}
+                                />
                               </div>
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground">Force Match to Any Project</p>
-                                <Select onValueChange={(value) => setSurveyOverride(row.index, value)}>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={surveyOverrideKeys[row.index] ? `Override active: ${surveyOverrideKeys[row.index]}` : "Choose any project"} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {row.forceCandidates.map((candidate) => (
-                                      <SelectItem key={candidate.key} value={candidate.key}>
-                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <SearchableProjectSelect
+                                  options={row.forceCandidates}
+                                  value={surveyOverrideKeys[row.index]}
+                                  placeholder={surveyOverrideKeys[row.index] ? `Override active: ${surveyOverrideKeys[row.index]}` : "Choose any project"}
+                                  emptyLabel="No projects available."
+                                  onChange={(value) => setSurveyOverride(row.index, value)}
+                                />
                               </div>
                             </div>
                             {surveyOverrideKeys[row.index] && (
@@ -1455,41 +1623,31 @@ export default function UploadData() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground">Apply Suggested Match</p>
-                                <Select onValueChange={(value) => {
-                                  const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
-                                  if (!selected) return;
-                                  setTimeOverride(row.index, selected.key);
-                                  updateTimeEntry(row.index, {
-                                    courseName: selected.name,
-                                    date: replaceDateYear(row.entry.date, selected.reportingYear),
-                                  });
-                                }}>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {row.suggestedCandidates.map((candidate) => (
-                                      <SelectItem key={candidate.key} value={candidate.key}>
-                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <SearchableProjectSelect
+                                  options={row.suggestedCandidates}
+                                  value={timeOverrideKeys[row.index]}
+                                  placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"}
+                                  emptyLabel="No matching projects found."
+                                  onChange={(value) => {
+                                    const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
+                                    if (!selected) return;
+                                    setTimeOverride(row.index, selected.key);
+                                    updateTimeEntry(row.index, {
+                                      courseName: selected.name,
+                                      date: replaceDateYear(row.entry.date, selected.reportingYear),
+                                    });
+                                  }}
+                                />
                               </div>
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground">Force Match to Any Project</p>
-                                <Select onValueChange={(value) => setTimeOverride(row.index, value)}>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder={timeOverrideKeys[row.index] ? `Override active: ${timeOverrideKeys[row.index]}` : "Choose any project"} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {row.forceCandidates.map((candidate) => (
-                                      <SelectItem key={candidate.key} value={candidate.key}>
-                                        {candidate.name} · {candidate.reportingYear || "unknown"} · {candidate.dataSource}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <SearchableProjectSelect
+                                  options={row.forceCandidates}
+                                  value={timeOverrideKeys[row.index]}
+                                  placeholder={timeOverrideKeys[row.index] ? `Override active: ${timeOverrideKeys[row.index]}` : "Choose any project"}
+                                  emptyLabel="No projects available."
+                                  onChange={(value) => setTimeOverride(row.index, value)}
+                                />
                               </div>
                             </div>
                             {timeOverrideKeys[row.index] && (
@@ -1787,7 +1945,10 @@ export default function UploadData() {
       {/* Upload History */}
       {history.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Upload History</CardTitle></CardHeader>
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-base">Upload History</CardTitle>
+            <p className="text-sm text-muted-foreground">Read-only log of completed imports. Cleanup tools above only apply to the current upload batch before import.</p>
+          </CardHeader>
           <CardContent>
             <Table>
               <TableHeader><TableRow>
