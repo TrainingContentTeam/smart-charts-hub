@@ -935,6 +935,9 @@ export default function UploadData() {
         });
 
         toast.success(`Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`);
+        if (canceledSkipCount > 0) {
+          toast.message(`${canceledSkipCount} time entries skipped from canceled projects.`);
+        }
         if (unresolvedCount > 0) {
           toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
         }
@@ -952,6 +955,8 @@ export default function UploadData() {
         setWarnings([]);
         setTimeOverrideKeys({});
         setSurveyOverrideKeys({});
+        setCanceledGroups(new Set());
+        setAutoCanceledGroups(new Set());
         queryClient.invalidateQueries({ queryKey: ["time_entries"] });
         queryClient.invalidateQueries({ queryKey: ["projects"] });
         queryClient.invalidateQueries({ queryKey: ["upload_history"] });
