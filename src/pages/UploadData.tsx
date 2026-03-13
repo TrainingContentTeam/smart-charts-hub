@@ -6,6 +6,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Link2, ChevronDown, ArrowUpDown, Check, ChevronsUpDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -20,6 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useUploadHistory } from "@/hooks/use-time-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 interface DropZoneProps {
@@ -325,10 +327,24 @@ export default function UploadData() {
   });
   const [timeOverrideKeys, setTimeOverrideKeys] = useState<Record<number, string | undefined>>({});
   const [surveyOverrideKeys, setSurveyOverrideKeys] = useState<Record<number, string | undefined>>({});
+  const [canceledGroups, setCanceledGroups] = useState<Set<string>>(new Set());
+  const [autoCanceledGroups, setAutoCanceledGroups] = useState<Set<string>>(new Set());
   const { data: history = [] } = useUploadHistory();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  // Fetch previously canceled courses from database
+  const { data: canceledCoursesFromDb = [] } = useQuery({
+    queryKey: ["canceled_courses"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) return [];
+      const { data, error } = await supabase
+        .from("canceled_courses" as any)
+        .select("*");
+      if (error) throw error;
+      return (data || []) as unknown as Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string }>;
+    },
+  });
   const handleLegacy = useCallback(async (file: File) => {
     setLegacyFile(file.name);
     setTimeOverrideKeys({});
@@ -621,6 +637,43 @@ export default function UploadData() {
   );
   const hasReviewIssues = blockingTimeRows.length > 0 || fallbackTimeRows.length > 0 || blockingSurveyRows.length > 0 || ambiguityDiagnostics.totalAmbiguousTitles > 0;
 
+  // Auto-detect previously canceled courses when unmatched groups change
+  useEffect(() => {
+    if (canceledCoursesFromDb.length === 0 || unmatchedTimeGroups.length === 0) return;
+    const autoSet = new Set<string>();
+    for (const group of unmatchedTimeGroups) {
+      const nk = normKey(group.courseName);
+      // Infer year from group entries
+      const years = new Set<string>();
+      group.rows.forEach((row) => {
+        const y = parseEntryYear(row.entry.date);
+        if (y !== null) years.add(String(y));
+      });
+      for (const dbRecord of canceledCoursesFromDb) {
+        if (dbRecord.course_name_key === nk) {
+          // Match if year matches or DB record has no year
+          if (!dbRecord.reporting_year || years.has(dbRecord.reporting_year)) {
+            autoSet.add(group.groupKey);
+            break;
+          }
+        }
+      }
+    }
+    if (autoSet.size > 0) {
+      setCanceledGroups((prev) => new Set([...prev, ...autoSet]));
+      setAutoCanceledGroups(autoSet);
+    }
+  }, [canceledCoursesFromDb, unmatchedTimeGroups]);
+
+  const toggleCanceledGroup = useCallback((groupKey: string) => {
+    setCanceledGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  }, []);
+
   const importData = async () => {
     if (!legacyData && !modernData && !timeData && !smeData) return;
     setImporting(true);
@@ -776,9 +829,21 @@ export default function UploadData() {
         const localSmeSurveys = [...local.sme_surveys];
         let surveyCount = 0;
         let unresolvedSurveyCount = 0;
+        // Build set of canceled course name keys to skip
+        const canceledNameKeys = new Set<string>();
+        for (const group of unmatchedTimeGroups) {
+          if (canceledGroups.has(group.groupKey)) canceledNameKeys.add(group.groupKey);
+        }
+        let canceledSkipCount = 0;
+
         if (timeData && timeData.length > 0) {
           for (let index = 0; index < timeData.length; index += 1) {
             const e = timeData[index];
+            // Skip canceled groups
+            if (canceledNameKeys.has(normKey(e.courseName))) {
+              canceledSkipCount += 1;
+              continue;
+            }
             const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
             if (!resolved.key) unresolvedCount += 1;
             if (resolved.reason === "fallback_latest") fallbackCount += 1;
@@ -870,6 +935,9 @@ export default function UploadData() {
         });
 
         toast.success(`Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`);
+        if (canceledSkipCount > 0) {
+          toast.message(`${canceledSkipCount} time entries skipped from canceled projects.`);
+        }
         if (unresolvedCount > 0) {
           toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
         }
@@ -887,6 +955,8 @@ export default function UploadData() {
         setWarnings([]);
         setTimeOverrideKeys({});
         setSurveyOverrideKeys({});
+        setCanceledGroups(new Set());
+        setAutoCanceledGroups(new Set());
         queryClient.invalidateQueries({ queryKey: ["time_entries"] });
         queryClient.invalidateQueries({ queryKey: ["projects"] });
         queryClient.invalidateQueries({ queryKey: ["upload_history"] });
@@ -1033,27 +1103,68 @@ export default function UploadData() {
       let sourceHintCount = 0;
       let surveyCount = 0;
       let unresolvedSurveyCount = 0;
+
+      // Build set of canceled course name keys to skip
+      const canceledNameKeys = new Set<string>();
+      for (const group of unmatchedTimeGroups) {
+        if (canceledGroups.has(group.groupKey)) canceledNameKeys.add(group.groupKey);
+      }
+      let canceledSkipCount = 0;
+
+      // Persist canceled courses to database
+      if (canceledNameKeys.size > 0) {
+        const canceledInserts: Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string; user_id: string }> = [];
+        for (const group of unmatchedTimeGroups) {
+          if (!canceledGroups.has(group.groupKey)) continue;
+          const years = new Set<string>();
+          group.rows.forEach((row) => {
+            const y = parseEntryYear(row.entry.date);
+            if (y !== null) years.add(String(y));
+          });
+          const reportingYear = years.size === 1 ? [...years][0] : null;
+          canceledInserts.push({
+            course_name_key: group.groupKey,
+            reporting_year: reportingYear,
+            original_course_name: group.courseName,
+            user_id: user!.id,
+          });
+        }
+        if (canceledInserts.length > 0) {
+          await supabase.from("canceled_courses" as any).upsert(canceledInserts as any, { onConflict: "course_name_key,reporting_year" });
+        }
+      }
+
       if (timeData && timeData.length > 0) {
         const batchSize = 500;
         for (let i = 0; i < timeData.length; i += batchSize) {
-          const batch = timeData.slice(i, i + batchSize).map((e, offset) => {
-            const index = i + offset;
-            const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
-            if (!resolved.key) unresolvedCount += 1;
-            if (resolved.reason === "fallback_latest") fallbackCount += 1;
-            if (resolved.reason === "source_hint") sourceHintCount += 1;
-            return {
-            project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
-            phase: e.category || "Uncategorized",
-            hours: e.hours,
-            category: e.category,
-            entry_date: e.date || null,
-            user_name: e.userName,
-            upload_id: upload.id,
-            user_id: user!.id,
-          };});
-          const { error: entryErr } = await supabase.from("time_entries").insert(batch as any);
-          if (entryErr) throw entryErr;
+          const batch = timeData.slice(i, i + batchSize)
+            .map((e, offset) => {
+              const index = i + offset;
+              // Skip canceled groups
+              if (canceledNameKeys.has(normKey(e.courseName))) {
+                canceledSkipCount += 1;
+                return null;
+              }
+              const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
+              if (!resolved.key) unresolvedCount += 1;
+              if (resolved.reason === "fallback_latest") fallbackCount += 1;
+              if (resolved.reason === "source_hint") sourceHintCount += 1;
+              return {
+                project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
+                phase: e.category || "Uncategorized",
+                hours: e.hours,
+                category: e.category,
+                entry_date: e.date || null,
+                user_name: e.userName,
+                upload_id: upload.id,
+                user_id: user!.id,
+              };
+            })
+            .filter((row): row is NonNullable<typeof row> => row !== null);
+          if (batch.length > 0) {
+            const { error: entryErr } = await supabase.from("time_entries").insert(batch as any);
+            if (entryErr) throw entryErr;
+          }
           timeCount += batch.length;
         }
       }
@@ -1115,6 +1226,9 @@ export default function UploadData() {
       toast.success(
         `Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`
       );
+      if (canceledSkipCount > 0) {
+        toast.message(`${canceledSkipCount} time entries skipped from canceled projects.`);
+      }
       if (unresolvedCount > 0) {
         toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
       }
@@ -1132,10 +1246,13 @@ export default function UploadData() {
       setWarnings([]);
       setTimeOverrideKeys({});
       setSurveyOverrideKeys({});
+      setCanceledGroups(new Set());
+      setAutoCanceledGroups(new Set());
       queryClient.invalidateQueries({ queryKey: ["time_entries"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["upload_history"] });
       queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
+      queryClient.invalidateQueries({ queryKey: ["canceled_courses"] });
     } catch (err: any) {
       toast.error("Import failed: " + (err.message || "Unknown error"));
     } finally {
@@ -1392,12 +1509,36 @@ export default function UploadData() {
                           </div>
                         )}
 
-                        {unmatchedTimeGroups.slice(0, showMore.blockingTime).map((group) => (
-                          <div key={`blocking-time-group-${group.groupKey}`} className="rounded-md border p-3 space-y-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-medium">{group.rows.length} time rows for "{group.courseName}"</span>
-                              <Badge variant="outline">No project matched this course name/date</Badge>
+                        {unmatchedTimeGroups.slice(0, showMore.blockingTime).map((group) => {
+                          const isCanceled = canceledGroups.has(group.groupKey);
+                          const wasAutoCanceled = autoCanceledGroups.has(group.groupKey);
+                          return (
+                          <div key={`blocking-time-group-${group.groupKey}`} className={cn("rounded-md border p-3 space-y-3", isCanceled && "opacity-60")}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={cn("text-sm font-medium", isCanceled && "line-through")}>{group.rows.length} time rows for "{group.courseName}"</span>
+                                {isCanceled ? (
+                                  <Badge variant="secondary">Canceled Project</Badge>
+                                ) : (
+                                  <Badge variant="outline">No project matched this course name/date</Badge>
+                                )}
+                                {wasAutoCanceled && isCanceled && (
+                                  <span className="text-xs text-muted-foreground italic">Previously marked as canceled</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id={`cancel-${group.groupKey}`}
+                                  checked={isCanceled}
+                                  onCheckedChange={() => toggleCanceledGroup(group.groupKey)}
+                                />
+                                <label htmlFor={`cancel-${group.groupKey}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                                  Canceled Project
+                                </label>
+                              </div>
                             </div>
+                            {!isCanceled && (
+                              <>
                             <p className="text-xs text-muted-foreground">
                               Apply one match here to update all {group.rows.length} rows for this course in the current upload batch.
                             </p>
@@ -1459,8 +1600,16 @@ export default function UploadData() {
                                 <Button variant="outline" size="sm" onClick={() => setTimeOverrides(group.rows.map((row) => row.index), undefined)}>Clear override for group</Button>
                               </div>
                             )}
+                              </>
+                            )}
+                            {isCanceled && (
+                              <p className="text-xs text-muted-foreground">
+                                These {group.rows.length} time entries will be skipped during import.
+                              </p>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
 
                         {individualBlockingTimeRows.slice(0, showMore.blockingTime).map((row) => (
                           <div key={`blocking-time-${row.index}`} className="rounded-md border p-3 space-y-3">

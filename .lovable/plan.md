@@ -1,60 +1,33 @@
 
 
-## Canceled Course Tracking for Legacy Upload Review
+## Role-Based Access Control: Admin + User
 
-### Context
-When legacy time entries have no matching project, it's often because the course was canceled. Since the legacy CSV lacks a "Canceled" status value (unlike the Modern CSV which already has it), users need a way to mark these unmatched legacy time groups as canceled during review, and have that remembered across future uploads.
+### Roles
+- **Admin**: Full access to all pages, including Upload Data, plus ability to manage user roles
+- **User**: Access to all pages except Upload Data
 
-### Database
+### Database Changes (Migration)
 
-**New table: `canceled_courses`**
-- `id` (uuid, PK)
-- `course_name_key` (text, normalized lowercase) 
-- `reporting_year` (text, nullable)
-- `original_course_name` (text, for display)
-- `created_at` (timestamptz)
-- `user_id` (uuid)
-- UNIQUE constraint on `(course_name_key, reporting_year)`
-- RLS: authenticated can SELECT; admins can INSERT/UPDATE/DELETE
+1. Create `app_role` enum: `('admin', 'user')`
+2. Create `user_roles` table with `user_id` (references `auth.users`) and `role` columns, with RLS enabled
+3. Create `has_role` security-definer function to safely check roles without recursive RLS
+4. Add RLS policies on `user_roles`: authenticated users can read their own role; admins can read/manage all roles
+5. Create an admin management view so admins can assign roles
 
-### Upload Review UI Changes (UploadData.tsx)
+### Frontend Changes
 
-In the "Rows That Need Fixes" section, for each **unmatched time group** card:
+1. **`src/hooks/use-user-role.ts`** — New hook that queries `user_roles` for the current user's role, returns `{ role, isAdmin, loading }`
+2. **`src/components/ProtectedRoute.tsx`** — Wrapper component that checks if the user's role has access to the current route; redirects unauthorized users to Dashboard with a toast
+3. **`src/App.tsx`** — Wrap the `/upload` route with the `ProtectedRoute` requiring `admin` role
+4. **`src/components/AppSidebar.tsx`** — Conditionally hide the "Upload Data" nav item for non-admin users
+5. **`src/pages/UserManagement.tsx`** — New admin-only page listing all users with ability to assign/change roles (admin sidebar link, protected route)
 
-1. Add a **"Canceled Project"** checkbox at the top of the group card (only when the group's time entries come from a legacy-era context, i.e. no modern project match exists for this name)
-2. When checked:
-   - The group card gets muted/strikethrough styling
-   - The match selectors and course name edit are disabled
-   - The group is tracked in new state: `canceledGroups: Set<string>` (keyed by `groupKey`)
-3. New state: `canceledGroups` (`Set<string>`)
+### Default Role Assignment
+- New users who sign up get no row in `user_roles` initially — treated as `user` role by default in the frontend hook
+- Admins manually promote users via the User Management page
 
-### Auto-Detection from Prior Uploads
-
-- On component mount (or when files change), fetch all rows from `canceled_courses`
-- When `unmatchedTimeGroups` is computed, check each group's `normKey(courseName)` + inferred year against the canceled records
-- If matched, auto-add to `canceledGroups` and show a subtle label: "Previously marked as canceled"
-- User can uncheck to override
-
-### Import Logic Changes
-
-- During `importData()`, for each group in `canceledGroups`:
-  - Insert into `canceled_courses` (upsert by unique key) if not already there
-  - Skip all time entries in that group (do not insert into `time_entries`)
-- Update summary toast to reflect skipped canceled entries
-
-### Scoping: Legacy Only
-
-The canceled checkbox only appears for unmatched time groups where:
-- No modern project variant exists for that course name (i.e., the course only appears in legacy data or has no project match at all)
-- Modern courses with a "Canceled" status are handled natively by the status column in the Modern CSV parser
-
-### Files Changed
-
-- **Migration**: Create `canceled_courses` table + RLS policies
-- **`src/pages/UploadData.tsx`**:
-  - Add `canceledGroups` state
-  - Fetch `canceled_courses` on mount, auto-populate `canceledGroups`
-  - Render checkbox + visual treatment per unmatched group card
-  - In `importData()`: persist new canceled entries, skip canceled time rows
-  - Update summary counts
+### Security
+- All role checks enforced server-side via RLS + `has_role()` function
+- Upload-related INSERT policies on `projects`, `time_entries`, `upload_history` will additionally require admin role
+- The `user_roles` table write access restricted to admins only
 
