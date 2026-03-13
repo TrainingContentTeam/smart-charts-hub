@@ -829,9 +829,21 @@ export default function UploadData() {
         const localSmeSurveys = [...local.sme_surveys];
         let surveyCount = 0;
         let unresolvedSurveyCount = 0;
+        // Build set of canceled course name keys to skip
+        const canceledNameKeys = new Set<string>();
+        for (const group of unmatchedTimeGroups) {
+          if (canceledGroups.has(group.groupKey)) canceledNameKeys.add(group.groupKey);
+        }
+        let canceledSkipCount = 0;
+
         if (timeData && timeData.length > 0) {
           for (let index = 0; index < timeData.length; index += 1) {
             const e = timeData[index];
+            // Skip canceled groups
+            if (canceledNameKeys.has(normKey(e.courseName))) {
+              canceledSkipCount += 1;
+              continue;
+            }
             const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
             if (!resolved.key) unresolvedCount += 1;
             if (resolved.reason === "fallback_latest") fallbackCount += 1;
