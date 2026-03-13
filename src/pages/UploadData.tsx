@@ -1210,7 +1210,7 @@ export default function UploadData() {
               id_deadlines_schedule_score: e.idDeadlinesScheduleScore,
               id_overall_quality_score: e.idOverallQualityScore,
               id_assistance_interactions_score: e.idAssistanceInteractionsScore,
-              id_realworld_examples_included: e.idRealworldExamplesIncluded,
+              id_realworld_examples_included: e.idRealworldExamplesIncluded == null ? null : e.idRealworldExamplesIncluded ? "Yes" : "No",
               id_sme_promoter_score: e.idSmePromoterScore,
               additional_comments_id: e.additionalCommentsId || null,
               source_created_at: e.sourceCreatedAt || null,
