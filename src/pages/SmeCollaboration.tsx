@@ -203,7 +203,7 @@ export default function SmeCollaboration() {
       if (Number.isFinite(Number(row.id_sme_promoter_score))) {
         map[key].promoterScores.push(Number(row.id_sme_promoter_score));
       }
-      if (row.id_realworld_examples_included === true) map[key].realworldYes += 1;
+      if (String(row.id_realworld_examples_included).toLowerCase() === "yes") map[key].realworldYes += 1;
     });
     return Object.entries(map)
       .map(([instructionalDesigner, data]) => ({
