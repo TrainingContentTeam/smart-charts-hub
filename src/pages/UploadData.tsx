@@ -1214,7 +1214,7 @@ export default function UploadData() {
               id_sme_promoter_score: e.idSmePromoterScore,
               additional_comments_id: e.additionalCommentsId || null,
               source_created_at: e.sourceCreatedAt || null,
-              source_row: e.sourceRow,
+              source_row: null,
             };
           });
           const { error: surveyErr } = await supabase.from("sme_collaboration_surveys").insert(batch as any);
