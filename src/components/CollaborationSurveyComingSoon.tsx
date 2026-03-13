@@ -7,13 +7,13 @@ export function CollaborationSurveyComingSoon() {
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <ClipboardList className="h-4 w-4 text-primary" />
-          SME & Assigned ID Collaboration Surveys (Coming Soon)
+          SME & Assigned ID Survey Notes
         </CardTitle>
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">
-          This section will host collaboration survey outcomes for SMEs and Assigned IDs,
-          including response trends, quality signals, and project-level collaboration notes.
+          Survey analytics are available above. This section will populate when imported rows include
+          open-ended SME or instructional designer comments.
         </p>
       </CardContent>
     </Card>

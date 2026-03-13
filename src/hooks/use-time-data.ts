@@ -71,3 +71,21 @@ export function useUploadHistory() {
     },
   });
 }
+
+export function useSmeSurveys() {
+  return useQuery({
+    queryKey: ["sme_surveys"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = await readLocalStore();
+        return [...local.sme_surveys].sort((a, b) => b.created_at.localeCompare(a.created_at));
+      }
+      const { data, error } = await supabase
+        .from("sme_collaboration_surveys")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}

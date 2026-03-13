@@ -140,6 +140,150 @@ export type Database = {
           },
         ]
       }
+      sme_collaboration_surveys: {
+        Row: {
+          additional_comments_id: string | null
+          additional_feedback_sme: string | null
+          amount_billed: number | null
+          autonomy_course_design_score: number | null
+          clarity_goals_score: number | null
+          course_key_raw: string | null
+          course_name: string
+          created_at: string
+          effective_hourly_rate: number | null
+          feeling_valued_score: number | null
+          hours_worked: number | null
+          id: string
+          id_assistance_interactions_score: number | null
+          id_contribution_development_score: number | null
+          id_deadlines_schedule_score: number | null
+          id_instructional_design_knowledge_score: number | null
+          id_openness_feedback_score: number | null
+          id_overall_collaboration_score: number | null
+          id_overall_quality_score: number | null
+          id_realworld_examples_included: boolean | null
+          id_responsiveness_score: number | null
+          id_sme_knowledge_score: number | null
+          id_sme_promoter_score: number | null
+          incorporation_feedback_score: number | null
+          instructional_designer: string | null
+          project_id: string | null
+          recommend_lexipol_score: number | null
+          reporting_year: string | null
+          sme: string | null
+          sme_email: string | null
+          sme_overall_experience_score: number | null
+          source_created_at: string | null
+          source_row: Json | null
+          staff_responsiveness_score: number | null
+          survey_date: string | null
+          tools_resources_score: number | null
+          training_support_score: number | null
+          upload_id: string | null
+          use_expertise_score: number | null
+          user_id: string | null
+        }
+        Insert: {
+          additional_comments_id?: string | null
+          additional_feedback_sme?: string | null
+          amount_billed?: number | null
+          autonomy_course_design_score?: number | null
+          clarity_goals_score?: number | null
+          course_key_raw?: string | null
+          course_name: string
+          created_at?: string
+          effective_hourly_rate?: number | null
+          feeling_valued_score?: number | null
+          hours_worked?: number | null
+          id?: string
+          id_assistance_interactions_score?: number | null
+          id_contribution_development_score?: number | null
+          id_deadlines_schedule_score?: number | null
+          id_instructional_design_knowledge_score?: number | null
+          id_openness_feedback_score?: number | null
+          id_overall_collaboration_score?: number | null
+          id_overall_quality_score?: number | null
+          id_realworld_examples_included?: boolean | null
+          id_responsiveness_score?: number | null
+          id_sme_knowledge_score?: number | null
+          id_sme_promoter_score?: number | null
+          incorporation_feedback_score?: number | null
+          instructional_designer?: string | null
+          project_id?: string | null
+          recommend_lexipol_score?: number | null
+          reporting_year?: string | null
+          sme?: string | null
+          sme_email?: string | null
+          sme_overall_experience_score?: number | null
+          source_created_at?: string | null
+          source_row?: Json | null
+          staff_responsiveness_score?: number | null
+          survey_date?: string | null
+          tools_resources_score?: number | null
+          training_support_score?: number | null
+          upload_id?: string | null
+          use_expertise_score?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          additional_comments_id?: string | null
+          additional_feedback_sme?: string | null
+          amount_billed?: number | null
+          autonomy_course_design_score?: number | null
+          clarity_goals_score?: number | null
+          course_key_raw?: string | null
+          course_name?: string
+          created_at?: string
+          effective_hourly_rate?: number | null
+          feeling_valued_score?: number | null
+          hours_worked?: number | null
+          id?: string
+          id_assistance_interactions_score?: number | null
+          id_contribution_development_score?: number | null
+          id_deadlines_schedule_score?: number | null
+          id_instructional_design_knowledge_score?: number | null
+          id_openness_feedback_score?: number | null
+          id_overall_collaboration_score?: number | null
+          id_overall_quality_score?: number | null
+          id_realworld_examples_included?: boolean | null
+          id_responsiveness_score?: number | null
+          id_sme_knowledge_score?: number | null
+          id_sme_promoter_score?: number | null
+          incorporation_feedback_score?: number | null
+          instructional_designer?: string | null
+          project_id?: string | null
+          recommend_lexipol_score?: number | null
+          reporting_year?: string | null
+          sme?: string | null
+          sme_email?: string | null
+          sme_overall_experience_score?: number | null
+          source_created_at?: string | null
+          source_row?: Json | null
+          staff_responsiveness_score?: number | null
+          survey_date?: string | null
+          tools_resources_score?: number | null
+          training_support_score?: number | null
+          upload_id?: string | null
+          use_expertise_score?: number | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sme_collaboration_surveys_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sme_collaboration_surveys_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "upload_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       upload_history: {
         Row: {
           created_at: string

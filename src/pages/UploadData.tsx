@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Badge } from "@/components/ui/badge";
 import { parseLegacyCourseFile, type LegacyCourse } from "@/lib/parse-legacy-course";
 import { parseModernCourseFile, type ModernCourse } from "@/lib/parse-modern-course";
+import { parseSmeSurveyFile, type SmeCollaborationSurveyImport } from "@/lib/parse-sme-survey";
 import { parseTimeSpentFile, type TimeSpentEntry } from "@/lib/parse-time-spent";
 import { makeId, readLocalStore, writeLocalStore } from "@/lib/local-data-store";
 import { normalizeProjectStatus } from "@/lib/project-status";
@@ -107,6 +108,11 @@ type ResolveResult = {
   reason: ResolveReason;
 };
 
+type SurveyResolveResult = {
+  key: string | null;
+  reason: "exact" | "no_candidate";
+};
+
 function resolveProjectKeyForTimeEntry(entry: TimeSpentEntry, byName: Map<string, ProjectCandidate[]>): ResolveResult {
   const nameKey = normKey(entry.courseName);
   const candidates = byName.get(nameKey) || [];
@@ -129,14 +135,22 @@ function resolveProjectKeyForTimeEntry(entry: TimeSpentEntry, byName: Map<string
   };
 }
 
+function resolveProjectKeyForSurvey(entry: SmeCollaborationSurveyImport, allCourseKeys: Set<string>): SurveyResolveResult {
+  const key = courseKey(entry.courseName, entry.reportingYear);
+  if (allCourseKeys.has(key)) return { key, reason: "exact" };
+  return { key: null, reason: "no_candidate" };
+}
+
 export default function UploadData() {
   const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
   const [legacyFile, setLegacyFile] = useState("");
   const [modernFile, setModernFile] = useState("");
   const [timeFile, setTimeFile] = useState("");
+  const [smeFile, setSmeFile] = useState("");
   const [legacyData, setLegacyData] = useState<LegacyCourse[] | null>(null);
   const [modernData, setModernData] = useState<ModernCourse[] | null>(null);
   const [timeData, setTimeData] = useState<TimeSpentEntry[] | null>(null);
+  const [smeData, setSmeData] = useState<SmeCollaborationSurveyImport[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [legacySortKey, setLegacySortKey] = useState<"course" | "hours" | "year" | "tool" | "vertical">("course");
@@ -145,6 +159,8 @@ export default function UploadData() {
   const [modernSortAsc, setModernSortAsc] = useState(true);
   const [timeSortKey, setTimeSortKey] = useState<"course" | "category" | "date" | "hours" | "user">("date");
   const [timeSortAsc, setTimeSortAsc] = useState(false);
+  const [smeSortKey, setSmeSortKey] = useState<"course" | "year" | "sme" | "id" | "hours" | "billed">("course");
+  const [smeSortAsc, setSmeSortAsc] = useState(true);
   const [historySortKey, setHistorySortKey] = useState<"file" | "rows" | "status" | "date">("date");
   const [historySortAsc, setHistorySortAsc] = useState(false);
   const [ambigSortKey, setAmbigSortKey] = useState<"course" | "variants" | "timeRows" | "undated" | "years">("timeRows");
@@ -180,13 +196,27 @@ export default function UploadData() {
     } catch { toast.error("Failed to parse time spent file."); }
   }, []);
 
+  const handleSme = useCallback(async (file: File) => {
+    setSmeFile(file.name);
+    try {
+      const data = await parseSmeSurveyFile(file);
+      setSmeData(data);
+      if (data.length === 0) toast.warning("No SME survey entries found.");
+    } catch { toast.error("Failed to parse SME survey file."); }
+  }, []);
+
   // Match preview
   const matchInfo = useMemo(() => {
-    if (!legacyData && !modernData && !timeData) return null;
+    if (!legacyData && !modernData && !timeData && !smeData) return null;
     const legacyNames = new Set((legacyData || []).map(c => normKey(c.courseName)));
     const modernNames = new Set((modernData || []).map(c => normKey(c.courseName)));
     const timeNames = new Set((timeData || []).map(e => normKey(e.courseName)));
+    const surveyKeys = new Set((smeData || []).map((e) => courseKey(e.courseName, e.reportingYear)));
     const allCourseNames = new Set([...legacyNames, ...modernNames]);
+    const allCourseKeys = new Set([
+      ...(legacyData || []).map((c) => courseKey(c.courseName, c.reportingYear)),
+      ...(modernData || []).map((c) => courseKey(c.courseName, c.reportingYear)),
+    ]);
     const inProgress = [...timeNames].filter(n => !allCourseNames.has(n));
     const matched = [...allCourseNames].filter(n => timeNames.has(n));
     const warn: string[] = [];
@@ -196,17 +226,21 @@ export default function UploadData() {
     // Unmatched courses (in legacy/modern but not in time spent)
     const unmatched = [...allCourseNames].filter(n => !timeNames.has(n));
     if (unmatched.length > 0) warn.push(`${unmatched.length} courses with no time entries`);
+    const unmatchedSurveyRows = [...surveyKeys].filter((key) => !allCourseKeys.has(key)).length;
+    if (unmatchedSurveyRows > 0) warn.push(`${unmatchedSurveyRows} SME survey rows could not be matched by Course Name + Year`);
     setWarnings(warn);
     return {
       legacyCount: legacyData?.length || 0,
       modernCount: modernData?.length || 0,
       timeUniqueCount: timeNames.size,
       timeEntryCount: timeData?.length || 0,
+      smeEntryCount: smeData?.length || 0,
+      smeMatchedCount: (smeData || []).filter((entry) => allCourseKeys.has(courseKey(entry.courseName, entry.reportingYear))).length,
       matched: matched.length,
       inProgress: inProgress.length,
       totalUnique: new Set([...allCourseNames, ...timeNames]).size,
     };
-  }, [legacyData, modernData, timeData]);
+  }, [legacyData, modernData, timeData, smeData]);
 
   const ambiguityDiagnostics = useMemo(() => {
     const byName = new Map<string, { name: string; source: string; reportingYear: string }[]>();
@@ -260,11 +294,11 @@ export default function UploadData() {
   }, [legacyData, modernData, timeData]);
 
   const importData = async () => {
-    if (!legacyData && !modernData && !timeData) return;
+    if (!legacyData && !modernData && !timeData && !smeData) return;
     setImporting(true);
     try {
-      const totalRows = (legacyData?.length || 0) + (modernData?.length || 0) + (timeData?.length || 0);
-      const combinedFileName = [legacyFile, modernFile, timeFile].filter(Boolean).join(" + ");
+      const totalRows = (legacyData?.length || 0) + (modernData?.length || 0) + (timeData?.length || 0) + (smeData?.length || 0);
+      const combinedFileName = [legacyFile, modernFile, timeFile, smeFile].filter(Boolean).join(" + ");
 
       if (DEV_BYPASS_AUTH) {
         const now = new Date().toISOString();
@@ -282,7 +316,12 @@ export default function UploadData() {
 
         const projectIdMap = new Map<string, string>();
         const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
+        const importedCourseCount = new Set([
+          ...legacyMap.keys(),
+          ...modernMap.keys(),
+        ]).size;
         const allCourseKeys = new Set([
+          ...existingMap.keys(),
           ...legacyMap.keys(),
           ...modernMap.keys(),
         ]);
@@ -386,11 +425,29 @@ export default function UploadData() {
           }
         }
 
+        for (const [key, existing] of existingMap.entries()) {
+          if (!projectIdMap.has(key)) projectIdMap.set(key, (existing as any).id);
+          const nameOnlyKey = key.split("::")[0];
+          const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
+          if (!candidates.some((candidate) => candidate.key === key)) {
+            candidates.push({
+              key,
+              id: (existing as any).id,
+              reportingYear: String((existing as any).reporting_year || "").trim(),
+              dataSource: String((existing as any).data_source || "").trim(),
+            });
+            projectCandidatesByName.set(nameOnlyKey, candidates);
+          }
+        }
+
         let timeCount = 0;
         let unresolvedCount = 0;
         let fallbackCount = 0;
         let sourceHintCount = 0;
         const localTimeEntries = [...local.time_entries];
+        const localSmeSurveys = [...local.sme_surveys];
+        let surveyCount = 0;
+        let unresolvedSurveyCount = 0;
         if (timeData && timeData.length > 0) {
           for (const e of timeData) {
             const resolved = resolveProjectKeyForTimeEntry(e, projectCandidatesByName);
@@ -413,6 +470,56 @@ export default function UploadData() {
           }
         }
 
+        if (smeData && smeData.length > 0) {
+          for (const e of smeData) {
+            const resolved = resolveProjectKeyForSurvey(e, allCourseKeys);
+            if (!resolved.key) unresolvedSurveyCount += 1;
+            localSmeSurveys.push({
+              id: makeId(),
+              project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
+              upload_id: uploadId,
+              user_id: user?.id,
+              course_key_raw: e.courseKeyRaw || null,
+              course_name: e.courseName,
+              reporting_year: e.reportingYear || null,
+              hours_worked: e.hoursWorked,
+              amount_billed: e.amountBilled,
+              effective_hourly_rate: e.effectiveHourlyRate,
+              survey_date: e.surveyDate || null,
+              sme: e.sme || null,
+              sme_email: e.smeEmail || null,
+              sme_overall_experience_score: e.smeOverallExperienceScore,
+              clarity_goals_score: e.clarityGoalsScore,
+              staff_responsiveness_score: e.staffResponsivenessScore,
+              tools_resources_score: e.toolsResourcesScore,
+              training_support_score: e.trainingSupportScore,
+              use_expertise_score: e.useExpertiseScore,
+              incorporation_feedback_score: e.incorporationFeedbackScore,
+              autonomy_course_design_score: e.autonomyCourseDesignScore,
+              feeling_valued_score: e.feelingValuedScore,
+              recommend_lexipol_score: e.recommendLexipolScore,
+              additional_feedback_sme: e.additionalFeedbackSme || null,
+              instructional_designer: e.instructionalDesigner || null,
+              id_overall_collaboration_score: e.idOverallCollaborationScore,
+              id_sme_knowledge_score: e.idSmeKnowledgeScore,
+              id_responsiveness_score: e.idResponsivenessScore,
+              id_instructional_design_knowledge_score: e.idInstructionalDesignKnowledgeScore,
+              id_contribution_development_score: e.idContributionDevelopmentScore,
+              id_openness_feedback_score: e.idOpennessFeedbackScore,
+              id_deadlines_schedule_score: e.idDeadlinesScheduleScore,
+              id_overall_quality_score: e.idOverallQualityScore,
+              id_assistance_interactions_score: e.idAssistanceInteractionsScore,
+              id_realworld_examples_included: e.idRealworldExamplesIncluded,
+              id_sme_promoter_score: e.idSmePromoterScore,
+              additional_comments_id: e.additionalCommentsId || null,
+              source_created_at: e.sourceCreatedAt || null,
+              source_row: e.sourceRow,
+              created_at: now,
+            });
+            surveyCount += 1;
+          }
+        }
+
         const uploadHistory = [
           {
             id: uploadId,
@@ -429,11 +536,15 @@ export default function UploadData() {
           projects: existingProjects as any,
           time_entries: localTimeEntries as any,
           upload_history: uploadHistory as any,
+          sme_surveys: localSmeSurveys as any,
         });
 
-        toast.success(`Imported ${allCourseKeys.size} courses, ${timeCount} category time entries.`);
+        toast.success(`Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`);
         if (unresolvedCount > 0) {
           toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
+        }
+        if (unresolvedSurveyCount > 0) {
+          toast.warning(`${unresolvedSurveyCount} SME survey rows could not be matched by Course Name + Year.`);
         }
         if (fallbackCount > 0) {
           toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
@@ -441,12 +552,13 @@ export default function UploadData() {
         if (sourceHintCount > 0) {
           toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
         }
-        setLegacyData(null); setModernData(null); setTimeData(null);
-        setLegacyFile(""); setModernFile(""); setTimeFile("");
+        setLegacyData(null); setModernData(null); setTimeData(null); setSmeData(null);
+        setLegacyFile(""); setModernFile(""); setTimeFile(""); setSmeFile("");
         setWarnings([]);
         queryClient.invalidateQueries({ queryKey: ["time_entries"] });
         queryClient.invalidateQueries({ queryKey: ["projects"] });
         queryClient.invalidateQueries({ queryKey: ["upload_history"] });
+        queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
         return;
       }
 
@@ -472,7 +584,12 @@ export default function UploadData() {
       // Upsert projects
       const projectIdMap = new Map<string, string>();
       const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
+      const importedCourseCount = new Set([
+        ...legacyMap.keys(),
+        ...modernMap.keys(),
+      ]).size;
       const allCourseKeys = new Set([
+        ...existingMap.keys(),
         ...legacyMap.keys(),
         ...modernMap.keys(),
       ]);
@@ -562,11 +679,28 @@ export default function UploadData() {
         }
       }
 
+      for (const [key, existing] of existingMap.entries()) {
+        if (!projectIdMap.has(key)) projectIdMap.set(key, (existing as any).id);
+        const nameOnlyKey = key.split("::")[0];
+        const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
+        if (!candidates.some((candidate) => candidate.key === key)) {
+          candidates.push({
+            key,
+            id: (existing as any).id,
+            reportingYear: String((existing as any).reporting_year || "").trim(),
+            dataSource: String((existing as any).data_source || "").trim(),
+          });
+          projectCandidatesByName.set(nameOnlyKey, candidates);
+        }
+      }
+
       // Insert time entries from Time Spent file
       let timeCount = 0;
       let unresolvedCount = 0;
       let fallbackCount = 0;
       let sourceHintCount = 0;
+      let surveyCount = 0;
+      let unresolvedSurveyCount = 0;
       if (timeData && timeData.length > 0) {
         const batchSize = 500;
         for (let i = 0; i < timeData.length; i += batchSize) {
@@ -591,11 +725,67 @@ export default function UploadData() {
         }
       }
 
+      if (smeData && smeData.length > 0) {
+        const batchSize = 500;
+        for (let i = 0; i < smeData.length; i += batchSize) {
+          const batch = smeData.slice(i, i + batchSize).map((e) => {
+            const resolved = resolveProjectKeyForSurvey(e, allCourseKeys);
+            if (!resolved.key) unresolvedSurveyCount += 1;
+            return {
+              project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
+              upload_id: upload.id,
+              user_id: user!.id,
+              course_key_raw: e.courseKeyRaw || null,
+              course_name: e.courseName,
+              reporting_year: e.reportingYear || null,
+              hours_worked: e.hoursWorked,
+              amount_billed: e.amountBilled,
+              effective_hourly_rate: e.effectiveHourlyRate,
+              survey_date: e.surveyDate || null,
+              sme: e.sme || null,
+              sme_email: e.smeEmail || null,
+              sme_overall_experience_score: e.smeOverallExperienceScore,
+              clarity_goals_score: e.clarityGoalsScore,
+              staff_responsiveness_score: e.staffResponsivenessScore,
+              tools_resources_score: e.toolsResourcesScore,
+              training_support_score: e.trainingSupportScore,
+              use_expertise_score: e.useExpertiseScore,
+              incorporation_feedback_score: e.incorporationFeedbackScore,
+              autonomy_course_design_score: e.autonomyCourseDesignScore,
+              feeling_valued_score: e.feelingValuedScore,
+              recommend_lexipol_score: e.recommendLexipolScore,
+              additional_feedback_sme: e.additionalFeedbackSme || null,
+              instructional_designer: e.instructionalDesigner || null,
+              id_overall_collaboration_score: e.idOverallCollaborationScore,
+              id_sme_knowledge_score: e.idSmeKnowledgeScore,
+              id_responsiveness_score: e.idResponsivenessScore,
+              id_instructional_design_knowledge_score: e.idInstructionalDesignKnowledgeScore,
+              id_contribution_development_score: e.idContributionDevelopmentScore,
+              id_openness_feedback_score: e.idOpennessFeedbackScore,
+              id_deadlines_schedule_score: e.idDeadlinesScheduleScore,
+              id_overall_quality_score: e.idOverallQualityScore,
+              id_assistance_interactions_score: e.idAssistanceInteractionsScore,
+              id_realworld_examples_included: e.idRealworldExamplesIncluded,
+              id_sme_promoter_score: e.idSmePromoterScore,
+              additional_comments_id: e.additionalCommentsId || null,
+              source_created_at: e.sourceCreatedAt || null,
+              source_row: e.sourceRow,
+            };
+          });
+          const { error: surveyErr } = await supabase.from("sme_collaboration_surveys").insert(batch as any);
+          if (surveyErr) throw surveyErr;
+          surveyCount += batch.length;
+        }
+      }
+
       toast.success(
-        `Imported ${allCourseKeys.size} courses, ${timeCount} category time entries.`
+        `Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`
       );
       if (unresolvedCount > 0) {
         toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
+      }
+      if (unresolvedSurveyCount > 0) {
+        toast.warning(`${unresolvedSurveyCount} SME survey rows could not be matched by Course Name + Year.`);
       }
       if (fallbackCount > 0) {
         toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
@@ -603,12 +793,13 @@ export default function UploadData() {
       if (sourceHintCount > 0) {
         toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
       }
-      setLegacyData(null); setModernData(null); setTimeData(null);
-      setLegacyFile(""); setModernFile(""); setTimeFile("");
+      setLegacyData(null); setModernData(null); setTimeData(null); setSmeData(null);
+      setLegacyFile(""); setModernFile(""); setTimeFile(""); setSmeFile("");
       setWarnings([]);
       queryClient.invalidateQueries({ queryKey: ["time_entries"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["upload_history"] });
+      queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
     } catch (err: any) {
       toast.error("Import failed: " + (err.message || "Unknown error"));
     } finally {
@@ -616,7 +807,7 @@ export default function UploadData() {
     }
   };
 
-  const hasAnything = legacyData || modernData || timeData;
+  const hasAnything = legacyData || modernData || timeData || smeData;
 
   const sortedLegacyData = useMemo(() => {
     const rows = [...(legacyData || [])];
@@ -666,6 +857,23 @@ export default function UploadData() {
     return rows;
   }, [timeData, timeSortKey, timeSortAsc]);
 
+  const sortedSmeData = useMemo(() => {
+    const rows = [...(smeData || [])];
+    rows.sort((a, b) => {
+      let cmp = 0;
+      switch (smeSortKey) {
+        case "course": cmp = a.courseName.localeCompare(b.courseName); break;
+        case "year": cmp = a.reportingYear.localeCompare(b.reportingYear); break;
+        case "sme": cmp = a.sme.localeCompare(b.sme); break;
+        case "id": cmp = a.instructionalDesigner.localeCompare(b.instructionalDesigner); break;
+        case "hours": cmp = a.hoursWorked - b.hoursWorked; break;
+        case "billed": cmp = a.amountBilled - b.amountBilled; break;
+      }
+      return smeSortAsc ? cmp : -cmp;
+    });
+    return rows;
+  }, [smeData, smeSortKey, smeSortAsc]);
+
   const sortedHistory = useMemo(() => {
     const rows = [...history];
     rows.sort((a: any, b: any) => {
@@ -701,14 +909,15 @@ export default function UploadData() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Upload Data</h1>
-        <p className="text-muted-foreground">Import Legacy, Modern, and Time Spent CSV files</p>
+        <p className="text-muted-foreground">Import Legacy, Modern, Time Spent, and SME survey files</p>
       </div>
 
-      {/* Three drop zones */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Upload drop zones */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <DropZone label="Legacy Course Data" description="Completed courses 2022–2025" fileName={legacyFile} count={legacyData?.length ?? null} onFile={handleLegacy} id="legacy-file-input" />
         <DropZone label="Modern Course Data" description="Completed courses 2026+" fileName={modernFile} count={modernData?.length ?? null} onFile={handleModern} id="modern-file-input" />
         <DropZone label="Time Spent Category Data" description="Granular time entries by category & user" fileName={timeFile} count={timeData?.length ?? null} onFile={handleTime} id="time-file-input" />
+        <DropZone label="SME Data Report" description="SME and ID collaboration survey responses" fileName={smeFile} count={smeData?.length ?? null} onFile={handleSme} id="sme-file-input" />
       </div>
 
       {/* Match Preview */}
@@ -724,7 +933,7 @@ export default function UploadData() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-center">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-4 text-center">
               <div>
                 <p className="text-2xl font-bold">{matchInfo.legacyCount}</p>
                 <p className="text-xs text-muted-foreground">Legacy Courses</p>
@@ -736,6 +945,14 @@ export default function UploadData() {
               <div>
                 <p className="text-2xl font-bold">{matchInfo.timeUniqueCount}</p>
                 <p className="text-xs text-muted-foreground">Time Spent Courses</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{matchInfo.smeEntryCount}</p>
+                <p className="text-xs text-muted-foreground">Survey Rows</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-primary">{matchInfo.smeMatchedCount}</p>
+                <p className="text-xs text-muted-foreground">Survey Matches</p>
               </div>
               <div>
                 <p className="text-2xl font-bold text-primary">{matchInfo.matched}</p>
@@ -957,6 +1174,59 @@ export default function UploadData() {
                   ))}
                   {sortedTimeData.length > 20 && (
                     <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">…and {sortedTimeData.length - 20} more</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {smeData && smeData.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">{smeFile} — {smeData.length} survey rows</CardTitle></CardHeader>
+          <CardContent>
+            <div className="max-h-[300px] overflow-auto">
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (smeSortKey === "course") setSmeSortAsc((v) => !v);
+                    else { setSmeSortKey("course"); setSmeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (smeSortKey === "year") setSmeSortAsc((v) => !v);
+                    else { setSmeSortKey("year"); setSmeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Year <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (smeSortKey === "sme") setSmeSortAsc((v) => !v);
+                    else { setSmeSortKey("sme"); setSmeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">SME <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (smeSortKey === "id") setSmeSortAsc((v) => !v);
+                    else { setSmeSortKey("id"); setSmeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">ID <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (smeSortKey === "hours") setSmeSortAsc((v) => !v);
+                    else { setSmeSortKey("hours"); setSmeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Hours <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                  <TableHead className="cursor-pointer select-none" onClick={() => {
+                    if (smeSortKey === "billed") setSmeSortAsc((v) => !v);
+                    else { setSmeSortKey("billed"); setSmeSortAsc(true); }
+                  }}><span className="flex items-center gap-1">Billed <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {sortedSmeData.slice(0, 20).map((e, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{e.courseName}</TableCell>
+                      <TableCell>{e.reportingYear}</TableCell>
+                      <TableCell>{e.sme}</TableCell>
+                      <TableCell>{e.instructionalDesigner}</TableCell>
+                      <TableCell>{Math.round(e.hoursWorked * 100) / 100}</TableCell>
+                      <TableCell>${Math.round(e.amountBilled * 100) / 100}</TableCell>
+                    </TableRow>
+                  ))}
+                  {sortedSmeData.length > 20 && (
+                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">…and {sortedSmeData.length - 20} more</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
