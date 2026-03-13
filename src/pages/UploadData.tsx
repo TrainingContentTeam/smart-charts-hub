@@ -1445,12 +1445,36 @@ export default function UploadData() {
                           </div>
                         )}
 
-                        {unmatchedTimeGroups.slice(0, showMore.blockingTime).map((group) => (
-                          <div key={`blocking-time-group-${group.groupKey}`} className="rounded-md border p-3 space-y-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-medium">{group.rows.length} time rows for "{group.courseName}"</span>
-                              <Badge variant="outline">No project matched this course name/date</Badge>
+                        {unmatchedTimeGroups.slice(0, showMore.blockingTime).map((group) => {
+                          const isCanceled = canceledGroups.has(group.groupKey);
+                          const wasAutoCanceled = autoCanceledGroups.has(group.groupKey);
+                          return (
+                          <div key={`blocking-time-group-${group.groupKey}`} className={cn("rounded-md border p-3 space-y-3", isCanceled && "opacity-60")}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={cn("text-sm font-medium", isCanceled && "line-through")}>{group.rows.length} time rows for "{group.courseName}"</span>
+                                {isCanceled ? (
+                                  <Badge variant="secondary">Canceled Project</Badge>
+                                ) : (
+                                  <Badge variant="outline">No project matched this course name/date</Badge>
+                                )}
+                                {wasAutoCanceled && isCanceled && (
+                                  <span className="text-xs text-muted-foreground italic">Previously marked as canceled</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id={`cancel-${group.groupKey}`}
+                                  checked={isCanceled}
+                                  onCheckedChange={() => toggleCanceledGroup(group.groupKey)}
+                                />
+                                <label htmlFor={`cancel-${group.groupKey}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                                  Canceled Project
+                                </label>
+                              </div>
                             </div>
+                            {!isCanceled && (
+                              <>
                             <p className="text-xs text-muted-foreground">
                               Apply one match here to update all {group.rows.length} rows for this course in the current upload batch.
                             </p>
@@ -1512,8 +1536,16 @@ export default function UploadData() {
                                 <Button variant="outline" size="sm" onClick={() => setTimeOverrides(group.rows.map((row) => row.index), undefined)}>Clear override for group</Button>
                               </div>
                             )}
+                              </>
+                            )}
+                            {isCanceled && (
+                              <p className="text-xs text-muted-foreground">
+                                These {group.rows.length} time entries will be skipped during import.
+                              </p>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
 
                         {individualBlockingTimeRows.slice(0, showMore.blockingTime).map((row) => (
                           <div key={`blocking-time-${row.index}`} className="rounded-md border p-3 space-y-3">
