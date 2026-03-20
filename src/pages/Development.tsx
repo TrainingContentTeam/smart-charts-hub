@@ -264,15 +264,44 @@ export default function Development() {
   }, [projects]);
 
   const categoryHours = useMemo(() => {
-    const map: Record<string, number> = {};
+    // Group raw category hours per project, then normalize each project's
+    // categories proportionally against its total_hours (Total Effort).
+    const projectCategoryRaw: Record<string, Record<string, number>> = {};
     entries.forEach((e: any) => {
       const project = projectMap.get(e.project_id);
       if (!project) return;
       if (!matchesFilters(project, categoryFilters)) return;
+      const pid = clean(e.project_id);
       const category = clean(e.category || e.phase || "Uncategorized");
-      map[category] = (map[category] || 0) + Number(e.hours || 0);
+      if (!projectCategoryRaw[pid]) projectCategoryRaw[pid] = {};
+      projectCategoryRaw[pid][category] = (projectCategoryRaw[pid][category] || 0) + Number(e.hours || 0);
     });
-    return Object.entries(map)
+
+    const aggregated: Record<string, number> = {};
+    Object.entries(projectCategoryRaw).forEach(([pid, cats]) => {
+      const project = projectMap.get(pid) as any;
+      const totalEffort = Number(project?.total_hours || 0);
+      const rawSum = Object.values(cats).reduce((a, b) => a + b, 0);
+
+      Object.entries(cats).forEach(([cat, rawH]) => {
+        const share = rawSum > 0 ? rawH / rawSum : 0;
+        const normalized = totalEffort > 0 ? share * totalEffort : rawH;
+        aggregated[cat] = (aggregated[cat] || 0) + normalized;
+      });
+
+      // Add uncategorized remainder
+      if (totalEffort > 0 && rawSum > 0 && rawSum < totalEffort) {
+        const usedEffort = Object.entries(cats).reduce((sum, [, rawH]) => {
+          return sum + (rawSum > 0 ? (rawH / rawSum) * totalEffort : rawH);
+        }, 0);
+        const remainder = totalEffort - usedEffort;
+        if (remainder > 0.01) {
+          aggregated["Uncategorized"] = (aggregated["Uncategorized"] || 0) + remainder;
+        }
+      }
+    });
+
+    return Object.entries(aggregated)
       .map(([name, hours]) => ({ name, hours: Math.round(hours * 10) / 10 }))
       .sort((a, b) => b.hours - a.hours)
       .slice(0, 14);

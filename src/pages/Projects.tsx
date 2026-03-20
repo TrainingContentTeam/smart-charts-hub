@@ -179,16 +179,45 @@ export default function Projects() {
   };
 
   const categoryBreakdown = useMemo(() => {
-    if (!selectedProjectId) return [];
-    const map: Record<string, number> = {};
+    if (!selectedProjectId || !selected) return [];
+    const totalEffort = number((selected as any).total_hours);
+    const rawMap: Record<string, number> = {};
     selectedEntries.forEach((e: any) => {
       const cat = text(e.category || e.phase || "Uncategorized");
-      map[cat] = (map[cat] || 0) + number(e.hours);
+      rawMap[cat] = (rawMap[cat] || 0) + number(e.hours);
     });
-    return Object.entries(map)
-      .map(([name, hours]) => ({ name: name.length > 24 ? `${name.slice(0, 24)}...` : name, fullName: name, hours: Math.round(hours * 100) / 100 }))
-      .sort((a, b) => b.hours - a.hours);
-  }, [selectedProjectId, selectedEntries]);
+    const rawSum = Object.values(rawMap).reduce((a, b) => a + b, 0);
+    if (rawSum === 0 && totalEffort === 0) return [];
+
+    const result = Object.entries(rawMap).map(([name, rawHours]) => {
+      const share = rawSum > 0 ? rawHours / rawSum : 0;
+      const normalizedHours = totalEffort > 0 ? Math.round(share * totalEffort * 100) / 100 : Math.round(rawHours * 100) / 100;
+      const pct = Math.round(share * 1000) / 10;
+      return {
+        name: name.length > 24 ? `${name.slice(0, 24)}...` : name,
+        fullName: name,
+        hours: normalizedHours,
+        pct,
+      };
+    });
+
+    // Add "Uncategorized" remainder if category sum < total effort
+    if (totalEffort > 0 && rawSum < totalEffort) {
+      const categorizedNormalized = result.reduce((a, b) => a + b.hours, 0);
+      const remainder = Math.round((totalEffort - categorizedNormalized) * 100) / 100;
+      if (remainder > 0.01) {
+        const remainderPct = Math.round((remainder / totalEffort) * 1000) / 10;
+        result.push({
+          name: "Uncategorized",
+          fullName: "Uncategorized",
+          hours: remainder,
+          pct: remainderPct,
+        });
+      }
+    }
+
+    return result.sort((a, b) => b.hours - a.hours);
+  }, [selectedProjectId, selected, selectedEntries]);
 
   const metadataRows = useMemo(() => {
     if (!selected) return [];
@@ -298,14 +327,17 @@ export default function Projects() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={categoryBreakdown} layout="vertical" margin={{ left: 16 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis type="number" fontSize={12} />
+                    <XAxis type="number" fontSize={12} tickFormatter={(v: any) => `${v}%`} />
                     <YAxis type="category" dataKey="name" width={180} fontSize={11} />
-                    <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                    <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
+                    <Tooltip formatter={(_v: any, _n: any, item: any) => {
+                      const row = item?.payload;
+                      return [`${row?.pct ?? 0}% (${row?.hours ?? 0}h)`, "Share of Total Effort"];
+                    }} />
+                    <Bar dataKey="pct" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              {showCategoryChartData && <ChartDataTable rows={categoryBreakdown} columns={[{ key: "name", label: "Category" }, { key: "hours", label: "Hours" }]} />}
+              {showCategoryChartData && <ChartDataTable rows={categoryBreakdown} columns={[{ key: "name", label: "Category" }, { key: "pct", label: "%" }, { key: "hours", label: "Hours" }]} />}
             </div>
           </CardContent>
         </Card>

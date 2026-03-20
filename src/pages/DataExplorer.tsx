@@ -89,6 +89,9 @@ export default function DataExplorer() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Data Explorer</h1>
           <p className="text-muted-foreground">{filtered.length} entries</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Hours shown are raw category entries from the Time Spent file. They may not sum to a project's Total Effort.
+          </p>
         </div>
         <Button variant="outline" size="sm" onClick={exportCsv} disabled={filtered.length === 0}>
           <Download className="h-4 w-4 mr-1" /> Export CSV
