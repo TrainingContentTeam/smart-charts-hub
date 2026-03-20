@@ -1096,6 +1096,25 @@ export default function UploadData() {
         }
       }
 
+      // Clean up stale projects no longer in source files
+      const staleProjectIds: string[] = [];
+      for (const [key, existing] of existingMap.entries()) {
+        const ds = ((existing as any).data_source || "").toLowerCase();
+        if ((ds === "legacy" || ds === "modern") && !fileCourseKeys.has(key)) {
+          staleProjectIds.push((existing as any).id);
+        }
+      }
+      if (staleProjectIds.length > 0) {
+        console.log(`Cleaning up ${staleProjectIds.length} stale projects no longer in source files`);
+        // Delete related time_entries first (FK constraint)
+        for (let i = 0; i < staleProjectIds.length; i += 50) {
+          const batch = staleProjectIds.slice(i, i + 50);
+          await supabase.from("time_entries").delete().in("project_id", batch);
+          await supabase.from("sme_collaboration_surveys").delete().in("project_id", batch);
+          await supabase.from("projects").delete().in("id", batch);
+        }
+      }
+
       // Insert time entries from Time Spent file
       let timeCount = 0;
       let unresolvedCount = 0;
