@@ -1,72 +1,42 @@
 
 
-## Plan: Fix Data Accuracy Across All Charts
+## Fix: Project Count Discrepancies (563 vs 547)
 
-### Confirmed: Duration Parsing
+### Root Cause
 
-Yes — the "Time spent" column values are durations, not time-of-day. The parser (`parse-duration.ts`) already handles this correctly:
-- `39:45` → 39h 45m
-- `5:30:00 AM` (Excel date-time artifact from 1900-based serial) → treated as duration via the `year === 1900` branch
-- Excel serial numbers (fractions of a day, 0–10 range) → multiplied by 24 to get hours
+The database has **428 legacy** and **135 modern** projects, but your CSV files contain **425** and **122** respectively. The extras (3 legacy + 13 modern = 16 extra projects) are **leftovers from a previous upload** that were never cleaned up.
 
-No changes needed to the duration parser.
+The upload logic in `UploadData.tsx` (line 993-997) builds `allCourseKeys` by merging:
+1. Existing projects already in the database (`existingMap.keys()`)
+2. New legacy file entries
+3. New modern file entries
 
-### Terminology Fix: "Uncategorized" not "Untracked"
+When a project exists in the database from a prior upload but is **not** in the current CSV files, the code skips it (`else { continue }` on line 1041) — it doesn't update it, but it also **doesn't delete it**. So stale projects accumulate.
 
-When category time doesn't sum to Total Effort, the remainder label will be **"Uncategorized"** — the time was tracked but not assigned to a specific category.
+### Fix
 
-### Changes
+#### 1. Clean up stale projects now
+Run a database cleanup to remove the 16 projects that no longer exist in your source files. This requires identifying which projects are stale — we can do this by re-uploading, or by running a targeted deletion.
 
-#### 1. Project Detail — Category chart as percentage of Total Effort
-**File: `src/pages/Projects.tsx`** — `categoryBreakdown` memo (line ~181)
+**Recommended approach**: Add cleanup logic to the upload process so that after upserting all projects from the current files, any project whose `data_source` is `legacy` or `modern` but whose `courseKey` is NOT in the current file set gets **deleted** from the database (along with its associated time entries and SME survey rows).
 
-- After summing raw category hours, normalize them proportionally against the project's `total_hours`.
-- If raw sum exceeds `total_hours`, scale each category down proportionally so they sum to 100%.
-- If raw sum is less than `total_hours`, add an "Uncategorized" slice for the remainder.
-- Display format: each bar shows `X% (Yh)` where Y = percentage × total_hours.
-- Update tooltip formatter and chart labels accordingly.
-
-#### 2. Development Page — Category hours chart
-**File: `src/pages/Development.tsx`** — `categoryHours` memo (line ~266)
-
-- Currently sums raw `time_entries.hours` per category across filtered projects. This is the aggregate view.
-- Apply the same proportional normalization: for each project, compute category shares relative to that project's `total_hours`, then aggregate the normalized hours across projects.
-- This ensures the Development page category totals align with each project's Total Effort rather than raw time entry sums.
-
-#### 3. Data Explorer — Add context
-**File: `src/pages/DataExplorer.tsx`**
-
-- Add a small info note below the header explaining that hours shown are raw category entries from the Time Spent file and may not sum to a project's Total Effort.
-
-#### 4. Cross-source data joining
-**Files: `src/pages/UploadData.tsx`, `src/lib/parse-sme-survey.ts`**
-
-- The join key between data sources is **Course Name + Year**. The upload logic already uses `courseKey(courseName, reportingYear)` as the composite key.
-- Verify the SME survey parser maps the `Year` column to `reportingYear` for consistent joining. If not, add that mapping.
-- Ensure `normKey()` normalization (trim, lowercase, collapse whitespace) is applied consistently across all parsers before joining.
-
-#### 5. Dashboard — No changes needed
-The dashboard hours card already sums `projects.total_hours` from Legacy/Modern files, which is the authoritative Total Effort. Project counts also come from the projects table. These are correct per your intent.
-
-### Technical Detail: Proportional Normalization Formula
+#### 2. Prevent future staleness (`src/pages/UploadData.tsx`)
+After the upsert loop (around line 1090), add a cleanup step:
 
 ```text
-For a single project with total_hours = T:
-  rawCategorySum = Σ(time_entry.hours per category)
-  
-  For each category C:
-    share = categoryHours[C] / rawCategorySum
-    normalizedHours = share × T
-    percentage = share × 100
-  
-  If rawCategorySum < T:
-    uncategorizedHours = T - (Σ normalizedHours)
-    Add "Uncategorized" entry with uncategorizedHours
+For each existing project in DB where data_source = 'legacy' or 'modern':
+  If its courseKey is NOT in the union of legacyMap.keys() + modernMap.keys():
+    Delete the project and its related time_entries and sme_collaboration_surveys
 ```
 
+This ensures every upload produces an exact mirror of the source files — no more, no less.
+
 ### Files Modified
-- `src/pages/Projects.tsx` — Normalize category breakdown against Total Effort
-- `src/pages/Development.tsx` — Normalize aggregate category hours per project's Total Effort
-- `src/pages/DataExplorer.tsx` — Add contextual note about raw hours
-- `src/lib/parse-sme-survey.ts` — Verify Year → reportingYear mapping for cross-source joining
+- **`src/pages/UploadData.tsx`** — Add post-upsert cleanup of stale projects
+- **Database** — One-time cleanup of the 16 stale project rows (can be triggered by re-uploading after the fix)
+
+### Impact
+- Project count will match your CSV totals exactly (547)
+- Total hours will adjust accordingly (stale projects' hours removed)
+- All downstream charts and counts will reflect accurate data
 
