@@ -986,14 +986,14 @@ export default function UploadData() {
       // Upsert projects
       const projectIdMap = new Map<string, string>();
       const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
-      const importedCourseCount = new Set([
+      const fileCourseKeys = new Set([
         ...legacyMap.keys(),
         ...modernMap.keys(),
-      ]).size;
+      ]);
+      const importedCourseCount = fileCourseKeys.size;
       const allCourseKeys = new Set([
         ...existingMap.keys(),
-        ...legacyMap.keys(),
-        ...modernMap.keys(),
+        ...fileCourseKeys,
       ]);
 
       for (const key of allCourseKeys) {
@@ -1093,6 +1093,25 @@ export default function UploadData() {
             dataSource: String((existing as any).data_source || "").trim(),
           });
           projectCandidatesByName.set(nameOnlyKey, candidates);
+        }
+      }
+
+      // Clean up stale projects no longer in source files
+      const staleProjectIds: string[] = [];
+      for (const [key, existing] of existingMap.entries()) {
+        const ds = ((existing as any).data_source || "").toLowerCase();
+        if ((ds === "legacy" || ds === "modern") && !fileCourseKeys.has(key)) {
+          staleProjectIds.push((existing as any).id);
+        }
+      }
+      if (staleProjectIds.length > 0) {
+        console.log(`Cleaning up ${staleProjectIds.length} stale projects no longer in source files`);
+        // Delete related time_entries first (FK constraint)
+        for (let i = 0; i < staleProjectIds.length; i += 50) {
+          const batch = staleProjectIds.slice(i, i + 50);
+          await supabase.from("time_entries").delete().in("project_id", batch);
+          await supabase.from("sme_collaboration_surveys").delete().in("project_id", batch);
+          await supabase.from("projects").delete().in("id", batch);
         }
       }
 
