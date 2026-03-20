@@ -327,14 +327,17 @@ export default function Projects() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={categoryBreakdown} layout="vertical" margin={{ left: 16 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis type="number" fontSize={12} />
+                    <XAxis type="number" fontSize={12} tickFormatter={(v: any) => `${v}%`} />
                     <YAxis type="category" dataKey="name" width={180} fontSize={11} />
-                    <Tooltip formatter={(v: any) => [`${v}h`, "Hours"]} />
-                    <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
+                    <Tooltip formatter={(_v: any, _n: any, item: any) => {
+                      const row = item?.payload;
+                      return [`${row?.pct ?? 0}% (${row?.hours ?? 0}h)`, "Share of Total Effort"];
+                    }} />
+                    <Bar dataKey="pct" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              {showCategoryChartData && <ChartDataTable rows={categoryBreakdown} columns={[{ key: "name", label: "Category" }, { key: "hours", label: "Hours" }]} />}
+              {showCategoryChartData && <ChartDataTable rows={categoryBreakdown} columns={[{ key: "name", label: "Category" }, { key: "pct", label: "%" }, { key: "hours", label: "Hours" }]} />}
             </div>
           </CardContent>
         </Card>
