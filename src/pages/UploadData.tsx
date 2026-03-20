@@ -986,14 +986,14 @@ export default function UploadData() {
       // Upsert projects
       const projectIdMap = new Map<string, string>();
       const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
-      const importedCourseCount = new Set([
+      const fileCourseKeys = new Set([
         ...legacyMap.keys(),
         ...modernMap.keys(),
-      ]).size;
+      ]);
+      const importedCourseCount = fileCourseKeys.size;
       const allCourseKeys = new Set([
         ...existingMap.keys(),
-        ...legacyMap.keys(),
-        ...modernMap.keys(),
+        ...fileCourseKeys,
       ]);
 
       for (const key of allCourseKeys) {
