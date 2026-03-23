@@ -104,63 +104,6 @@ export type Database = {
         }
         Relationships: []
       }
-      survey_no_match_records: {
-        Row: {
-          course_name_key: string
-          created_at: string
-          id: string
-          original_course_name: string
-          reporting_year: string | null
-          user_id: string | null
-        }
-        Insert: {
-          course_name_key: string
-          created_at?: string
-          id?: string
-          original_course_name: string
-          reporting_year?: string | null
-          user_id?: string | null
-        }
-        Update: {
-          course_name_key?: string
-          created_at?: string
-          id?: string
-          original_course_name?: string
-          reporting_year?: string | null
-          user_id?: string | null
-        }
-        Relationships: []
-      }
-      time_match_overrides: {
-        Row: {
-          course_name_key: string
-          created_at: string
-          id: string
-          original_course_name: string
-          reporting_year: string | null
-          target_project_key: string
-          user_id: string | null
-        }
-        Insert: {
-          course_name_key: string
-          created_at?: string
-          id?: string
-          original_course_name: string
-          reporting_year?: string | null
-          target_project_key: string
-          user_id?: string | null
-        }
-        Update: {
-          course_name_key?: string
-          created_at?: string
-          id?: string
-          original_course_name?: string
-          reporting_year?: string | null
-          target_project_key?: string
-          user_id?: string | null
-        }
-        Relationships: []
-      }
       sme_collaboration_surveys: {
         Row: {
           additional_comments_id: string | null
