@@ -87,6 +87,10 @@ The upload flow expects 3 files:
 - Time Spent file can contain many rows per course; rows are preserved as separate detail entries.
 - Legacy summary rows are **not** inserted into `time_entries`, preventing duplicate total counting during import.
 
+### Stale project cleanup
+
+During upload, the app automatically removes projects from the database whose `data_source` is `legacy` or `modern` but whose Course Name + Year key is **not** present in the current CSV files. Related time entries and SME survey rows are also deleted. This ensures the database is an exact mirror of the source files after every upload — no stale leftovers from prior imports.
+
 ### Duplicate-title diagnostics
 
 - The Upload preview now flags duplicate title groups where multiple Legacy/Modern projects share the same `Course Name`.
