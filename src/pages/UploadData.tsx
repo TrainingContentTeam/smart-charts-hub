@@ -311,19 +311,15 @@ export default function UploadData() {
   const [smeSortAsc, setSmeSortAsc] = useState(true);
   const [historySortKey, setHistorySortKey] = useState<"file" | "rows" | "status" | "date">("date");
   const [historySortAsc, setHistorySortAsc] = useState(false);
-  const [ambigSortKey, setAmbigSortKey] = useState<"course" | "variants" | "timeRows" | "undated" | "years">("timeRows");
-  const [ambigSortAsc, setAmbigSortAsc] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState({
     blocking: true,
     fallback: true,
-    duplicates: false,
   });
   const [showMore, setShowMore] = useState({
     blockingTime: 10,
     fallbackTime: 10,
     blockingSurvey: 10,
-    duplicates: 10,
   });
   const [timeOverrideKeys, setTimeOverrideKeys] = useState<Record<number, string | undefined>>({});
   const [surveyOverrideKeys, setSurveyOverrideKeys] = useState<Record<number, string | undefined>>({});
@@ -499,57 +495,6 @@ export default function UploadData() {
     };
   }, [legacyData, modernData, timeData, smeData]);
 
-  const ambiguityDiagnostics = useMemo(() => {
-    const byName = new Map<string, { name: string; source: string; reportingYear: string }[]>();
-
-    (legacyData || []).forEach((c) => {
-      const key = normKey(c.courseName);
-      const list = byName.get(key) || [];
-      list.push({ name: c.courseName, source: "legacy", reportingYear: c.reportingYear || "" });
-      byName.set(key, list);
-    });
-
-    (modernData || []).forEach((c) => {
-      const key = normKey(c.courseName);
-      const list = byName.get(key) || [];
-      list.push({ name: c.courseName, source: "modern", reportingYear: c.reportingYear || "" });
-      byName.set(key, list);
-    });
-
-    const rows = [...byName.entries()]
-      .filter(([, variants]) => variants.length > 1)
-      .map(([nameKey, variants]) => {
-        const entriesForName = (timeData || []).filter((e) => normKey(e.courseName) === nameKey);
-        let undatedRows = 0;
-        const years = new Set<string>();
-        entriesForName.forEach((e) => {
-          const y = parseEntryYear(e.date);
-          if (y === null) undatedRows += 1;
-          else years.add(String(y));
-        });
-
-        const variantSummary = variants
-          .map((v) => `${v.source}:${v.reportingYear || "unknown"}`)
-          .join(", ");
-
-        return {
-          courseName: variants[0].name,
-          variantSummary,
-          variantCount: variants.length,
-          timeRows: entriesForName.length,
-          undatedRows,
-          years: [...years].sort().join(", "),
-        };
-      })
-      .sort((a, b) => b.timeRows - a.timeRows || a.courseName.localeCompare(b.courseName));
-
-    return {
-      totalAmbiguousTitles: rows.length,
-      totalUndatedRows: rows.reduce((s, r) => s + r.undatedRows, 0),
-      rows,
-    };
-  }, [legacyData, modernData, timeData]);
-
   const timeIssueRows = useMemo(() => {
     if (!timeData) return [];
     return timeData.map((entry, index) => {
@@ -635,7 +580,7 @@ export default function UploadData() {
     () => blockingTimeRows.filter((row) => row.resolved.reason !== "no_candidate"),
     [blockingTimeRows],
   );
-  const hasReviewIssues = blockingTimeRows.length > 0 || fallbackTimeRows.length > 0 || blockingSurveyRows.length > 0 || ambiguityDiagnostics.totalAmbiguousTitles > 0;
+  const hasReviewIssues = blockingTimeRows.length > 0 || fallbackTimeRows.length > 0 || blockingSurveyRows.length > 0;
 
   // Auto-detect previously canceled courses when unmatched groups change
   useEffect(() => {
@@ -1361,22 +1306,6 @@ export default function UploadData() {
     return rows;
   }, [history, historySortKey, historySortAsc]);
 
-  const sortedAmbiguityRows = useMemo(() => {
-    const rows = [...ambiguityDiagnostics.rows];
-    rows.sort((a, b) => {
-      let cmp = 0;
-      switch (ambigSortKey) {
-        case "course": cmp = a.courseName.localeCompare(b.courseName); break;
-        case "variants": cmp = a.variantSummary.localeCompare(b.variantSummary); break;
-        case "timeRows": cmp = a.timeRows - b.timeRows; break;
-        case "undated": cmp = a.undatedRows - b.undatedRows; break;
-        case "years": cmp = a.years.localeCompare(b.years); break;
-      }
-      return ambigSortAsc ? cmp : -cmp;
-    });
-    return rows;
-  }, [ambiguityDiagnostics.rows, ambigSortKey, ambigSortAsc]);
-
   useEffect(() => {
     if (hasReviewIssues) setReviewOpen(true);
   }, [hasReviewIssues]);
@@ -1472,9 +1401,6 @@ export default function UploadData() {
                   <Badge variant={fallbackTimeRows.length > 0 ? "secondary" : "outline"}>
                     {fallbackTimeRows.length} rows need review
                   </Badge>
-                  <Badge variant={ambiguityDiagnostics.totalAmbiguousTitles > 0 ? "secondary" : "outline"}>
-                    {ambiguityDiagnostics.totalAmbiguousTitles} duplicate title groups
-                  </Badge>
                   <Badge variant={warnings.length > 0 ? "secondary" : "outline"}>
                     {warnings.length} warning summaries
                   </Badge>
@@ -1499,10 +1425,6 @@ export default function UploadData() {
                   <div className="rounded-md border p-3">
                     <p className="text-xs text-muted-foreground">Unmatched Survey Rows</p>
                     <p className="text-2xl font-bold">{blockingSurveyRows.length}</p>
-                  </div>
-                  <div className="rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">Duplicate Title Groups</p>
-                    <p className="text-2xl font-bold">{ambiguityDiagnostics.totalAmbiguousTitles}</p>
                   </div>
                 </div>
 
@@ -1839,76 +1761,6 @@ export default function UploadData() {
                   </div>
                 </Collapsible>
 
-                <Collapsible open={issueOpen.duplicates} onOpenChange={(open) => setIssueOpen((current) => ({ ...current, duplicates: open }))}>
-                  <div className="rounded-md border">
-                    <CollapsibleTrigger asChild>
-                      <div className="flex cursor-pointer items-center justify-between p-4">
-                        <div>
-                          <p className="font-medium">Duplicate Title Ambiguity</p>
-                          <p className="text-sm text-muted-foreground">Course titles that appear in more than one reporting year or source.</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <Badge variant="secondary">{ambiguityDiagnostics.totalAmbiguousTitles}</Badge>
-                          <ChevronDown className={`h-4 w-4 transition-transform ${issueOpen.duplicates ? "rotate-180" : ""}`} />
-                        </div>
-                      </div>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <div className="border-t p-4 space-y-3">
-                        <p className="text-sm text-muted-foreground">
-                          Undated rows inside duplicate title groups: {ambiguityDiagnostics.totalUndatedRows}
-                        </p>
-                        <div className="max-h-[220px] overflow-auto border rounded-md">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="cursor-pointer select-none" onClick={() => {
-                                  if (ambigSortKey === "course") setAmbigSortAsc((v) => !v);
-                                  else { setAmbigSortKey("course"); setAmbigSortAsc(true); }
-                                }}><span className="flex items-center gap-1">Course <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                                <TableHead className="cursor-pointer select-none" onClick={() => {
-                                  if (ambigSortKey === "variants") setAmbigSortAsc((v) => !v);
-                                  else { setAmbigSortKey("variants"); setAmbigSortAsc(true); }
-                                }}><span className="flex items-center gap-1">Variants <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                                <TableHead className="cursor-pointer select-none" onClick={() => {
-                                  if (ambigSortKey === "timeRows") setAmbigSortAsc((v) => !v);
-                                  else { setAmbigSortKey("timeRows"); setAmbigSortAsc(true); }
-                                }}><span className="flex items-center gap-1">Time Rows <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                                <TableHead className="cursor-pointer select-none" onClick={() => {
-                                  if (ambigSortKey === "undated") setAmbigSortAsc((v) => !v);
-                                  else { setAmbigSortKey("undated"); setAmbigSortAsc(true); }
-                                }}><span className="flex items-center gap-1">Undated <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                                <TableHead className="cursor-pointer select-none" onClick={() => {
-                                  if (ambigSortKey === "years") setAmbigSortAsc((v) => !v);
-                                  else { setAmbigSortKey("years"); setAmbigSortAsc(true); }
-                                }}><span className="flex items-center gap-1">Entry Years <ArrowUpDown className="h-3 w-3" /></span></TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {sortedAmbiguityRows.slice(0, showMore.duplicates).map((r, i) => (
-                                <TableRow key={`${r.courseName}-${i}`}>
-                                  <TableCell className="font-medium">{r.courseName}</TableCell>
-                                  <TableCell>{r.variantSummary}</TableCell>
-                                  <TableCell>{r.timeRows}</TableCell>
-                                  <TableCell>{r.undatedRows}</TableCell>
-                                  <TableCell>{r.years || "none"}</TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                        {sortedAmbiguityRows.length > showMore.duplicates && (
-                          <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, duplicates: current.duplicates + 10 }))}>
-                            Show More Duplicate Groups
-                          </Button>
-                        )}
-                        {ambiguityDiagnostics.totalAmbiguousTitles === 0 && (
-                          <p className="text-sm text-muted-foreground">No duplicate-title ambiguity in the current upload.</p>
-                        )}
-                      </div>
-                    </CollapsibleContent>
-                  </div>
-                </Collapsible>
               </CardContent>
             </CollapsibleContent>
           </Card>

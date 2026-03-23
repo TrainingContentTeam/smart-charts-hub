@@ -14,6 +14,7 @@ import { CollaborationSurveyComingSoon } from "@/components/CollaborationSurveyC
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { ChartActions } from "@/components/ChartActions";
 import { ChartDataTable } from "@/components/ChartDataTable";
+import { useSearchParams } from "react-router-dom";
 
 function text(v: unknown): string {
   return String(v || "").trim();
@@ -29,6 +30,17 @@ function prettyLabel(label: string) {
     .split("_")
     .map((p) => (p ? p[0].toUpperCase() + p.slice(1) : p))
     .join(" ");
+}
+
+function normProjectTitle(value: unknown): string {
+  return text(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function reportingYearNumber(value: unknown): number | null {
+  const match = text(value).match(/^\d{4}$/);
+  if (!match) return null;
+  const year = Number.parseInt(match[0], 10);
+  return Number.isFinite(year) ? year : null;
 }
 
 type ProjectFilters = {
@@ -58,13 +70,21 @@ const DEFAULT_FILTERS: ProjectFilters = {
 export default function Projects() {
   const { data: entries = [] } = useTimeEntries();
   const { data: projects = [] } = useProjects();
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [filters, setFilters] = useState<ProjectFilters>({ ...DEFAULT_FILTERS });
   const [detailSortKey, setDetailSortKey] = useState<"category" | "hours" | "date" | "user">("date");
   const [detailSortAsc, setDetailSortAsc] = useState(false);
   const [showCategoryChartData, setShowCategoryChartData] = useState(false);
+  const selectedProjectId = text(searchParams.get("project")) || null;
+
+  const setSelectedProjectId = (projectId: string | null) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (projectId) nextParams.set("project", projectId);
+    else nextParams.delete("project");
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const projectsWithRelativePosition = useMemo(() => {
     const withMetrics = projects.map((p: any) => {
@@ -153,7 +173,7 @@ export default function Projects() {
     ? projectsWithRelativePosition.find((p: any) => p.id === selectedProjectId)
     : null;
 
-  const selectedEntries = selectedProjectId ? entries.filter((e: any) => e.project_id === selectedProjectId) : [];
+  const selectedEntries = selected?.id ? entries.filter((e: any) => e.project_id === selected.id) : [];
 
   const sortedSelectedEntries = useMemo(() => {
     const rows = [...selectedEntries];
@@ -179,7 +199,7 @@ export default function Projects() {
   };
 
   const categoryBreakdown = useMemo(() => {
-    if (!selectedProjectId || !selected) return [];
+    if (!selected) return [];
     const totalEffort = number((selected as any).total_hours);
     const rawMap: Record<string, number> = {};
     selectedEntries.forEach((e: any) => {
@@ -217,7 +237,27 @@ export default function Projects() {
     }
 
     return result.sort((a, b) => b.hours - a.hours);
-  }, [selectedProjectId, selected, selectedEntries]);
+  }, [selected, selectedEntries]);
+
+  const priorYearVariants = useMemo(() => {
+    if (!selected) return [];
+    const currentYear = reportingYearNumber((selected as any).reporting_year);
+    if (currentYear === null) return [];
+    const currentNameKey = normProjectTitle((selected as any).name);
+
+    return projectsWithRelativePosition
+      .filter((project: any) => {
+        if (project.id === (selected as any).id) return false;
+        if (normProjectTitle(project.name) !== currentNameKey) return false;
+        const year = reportingYearNumber(project.reporting_year);
+        return year !== null && year < currentYear;
+      })
+      .sort((a: any, b: any) => {
+        const yearDiff = number(b.reporting_year) - number(a.reporting_year);
+        if (yearDiff !== 0) return yearDiff;
+        return text(a.data_source).localeCompare(text(b.data_source));
+      });
+  }, [projectsWithRelativePosition, selected]);
 
   const metadataRows = useMemo(() => {
     if (!selected) return [];
@@ -295,6 +335,34 @@ export default function Projects() {
             <CardContent><p className="text-2xl font-bold">{selectedEntries.length}</p></CardContent>
           </Card>
         </div>
+
+        {priorYearVariants.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Prior Year Variants</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Earlier reporting-year versions of this same course title.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {priorYearVariants.map((variant: any) => (
+                  <Button
+                    key={variant.id}
+                    variant="outline"
+                    className="h-auto items-start justify-start px-3 py-2 text-left"
+                    onClick={() => setSelectedProjectId(variant.id)}
+                  >
+                    <span className="font-medium">{text(variant.reporting_year) || "Unknown Year"}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {text(variant.data_source) || "Unknown source"} · {Math.round(number(variant.total_hours) * 100) / 100}h
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader><CardTitle className="text-base">Course Metadata</CardTitle></CardHeader>
