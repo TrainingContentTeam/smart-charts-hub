@@ -370,7 +370,7 @@ export default function UploadData() {
         .from("survey_no_match_records" as any)
         .select("*");
       if (error) throw error;
-      return (data || []) as SurveyNoMatchRecord[];
+      return (data || []) as unknown as SurveyNoMatchRecord[];
     },
   });
 
