@@ -66,13 +66,12 @@ const LP_DEV_STATUSES = new Set([
 const TESTING_READY_STATUSES = new Set([
   "testing",
   "testing revisions",
-  "ready to load",
-  "ready to publish",
 ]);
 
 function bucketStatus(status: unknown): "not_started" | "lp_dev" | "testing_ready" | "other" | "complete" {
   const normalized = normalizeProjectStatus(status, "Unknown").toLowerCase();
   if (isCompletedProjectStatus(normalized)) return "complete";
+  if (normalized === "ready for loading" || normalized === "ready to publish") return "complete";
   if (normalized === "not started") return "not_started";
   if (LP_DEV_STATUSES.has(normalized)) return "lp_dev";
   if (TESTING_READY_STATUSES.has(normalized)) return "testing_ready";

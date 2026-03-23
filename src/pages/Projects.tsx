@@ -4,13 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useTimeEntries, useProjects } from "@/hooks/use-time-data";
+import { useSmeSurveys, useTimeEntries, useProjects } from "@/hooks/use-time-data";
 import { isCompletedProjectStatus } from "@/lib/project-status";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Search, ArrowUpDown, BookOpen, Video, Clock3, CalendarDays, Ruler, ChevronDown } from "lucide-react";
-import { CollaborationSurveyComingSoon } from "@/components/CollaborationSurveyComingSoon";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { ChartActions } from "@/components/ChartActions";
 import { ChartDataTable } from "@/components/ChartDataTable";
@@ -43,6 +42,42 @@ function reportingYearNumber(value: unknown): number | null {
   return Number.isFinite(year) ? year : null;
 }
 
+function average(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function collectScores(row: any, keys: string[]): number[] {
+  return keys
+    .map((key) => Number(row[key]))
+    .filter((value) => Number.isFinite(value) && value > 0);
+}
+
+const SME_SCORE_KEYS = [
+  "sme_overall_experience_score",
+  "clarity_goals_score",
+  "staff_responsiveness_score",
+  "tools_resources_score",
+  "training_support_score",
+  "use_expertise_score",
+  "incorporation_feedback_score",
+  "autonomy_course_design_score",
+  "feeling_valued_score",
+  "recommend_lexipol_score",
+];
+
+const ID_SCORE_KEYS = [
+  "id_overall_collaboration_score",
+  "id_sme_knowledge_score",
+  "id_responsiveness_score",
+  "id_instructional_design_knowledge_score",
+  "id_contribution_development_score",
+  "id_openness_feedback_score",
+  "id_deadlines_schedule_score",
+  "id_overall_quality_score",
+  "id_assistance_interactions_score",
+];
+
 type ProjectFilters = {
   year: string;
   status: string;
@@ -70,6 +105,7 @@ const DEFAULT_FILTERS: ProjectFilters = {
 export default function Projects() {
   const { data: entries = [] } = useTimeEntries();
   const { data: projects = [] } = useProjects();
+  const { data: surveys = [] } = useSmeSurveys();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -281,6 +317,38 @@ export default function Projects() {
     return fields.map((field) => ({ field, value: (selected as any)[field] }));
   }, [selected]);
 
+  const matchedSurveys = useMemo(() => {
+    if (!selected?.id) return [];
+    return surveys.filter((survey: any) => text(survey.project_id) === selected.id);
+  }, [selected, surveys]);
+
+  const surveySummary = useMemo(() => {
+    const billed = matchedSurveys.reduce((sum, row: any) => sum + number(row.amount_billed), 0);
+    const hoursWorked = matchedSurveys.reduce((sum, row: any) => sum + number(row.hours_worked), 0);
+    const avgSmeScore = average(matchedSurveys.flatMap((row: any) => collectScores(row, SME_SCORE_KEYS)));
+    const avgIdScore = average(matchedSurveys.flatMap((row: any) => collectScores(row, ID_SCORE_KEYS)));
+    return {
+      responses: matchedSurveys.length,
+      billed,
+      hoursWorked,
+      avgSmeScore,
+      avgIdScore,
+    };
+  }, [matchedSurveys]);
+
+  const surveyComments = useMemo(() => {
+    return matchedSurveys
+      .filter((row: any) => text(row.additional_feedback_sme) || text(row.additional_comments_id))
+      .map((row: any) => ({
+        id: text(row.id),
+        surveyDate: text(row.survey_date),
+        sme: text(row.sme) || "Unknown SME",
+        instructionalDesigner: text(row.instructional_designer) || "Unknown ID",
+        smeComment: text(row.additional_feedback_sme),
+        idComment: text(row.additional_comments_id),
+      }));
+  }, [matchedSurveys]);
+
   const SortHead = ({ label, field }: { label: string; field: "category" | "hours" | "date" | "user" }) => (
     <TableHead className="cursor-pointer select-none" onClick={() => toggleDetailSort(field)}>
       <span className="flex items-center gap-1">
@@ -438,7 +506,73 @@ export default function Projects() {
           </CardContent>
         </Card>
 
-        <CollaborationSurveyComingSoon />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Matched Survey Data</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {matchedSurveys.length > 0 ? (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Responses</p>
+                    <p className="text-2xl font-bold">{surveySummary.responses}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Avg SME Score</p>
+                    <p className="text-2xl font-bold">{Math.round(surveySummary.avgSmeScore * 100) / 100 || "—"}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Avg ID Score</p>
+                    <p className="text-2xl font-bold">{Math.round(surveySummary.avgIdScore * 100) / 100 || "—"}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Hours / Billed</p>
+                    <p className="text-lg font-bold">
+                      {Math.round(surveySummary.hoursWorked * 10) / 10}h / ${Math.round(surveySummary.billed * 100) / 100}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-medium">Survey Comments</p>
+                    <p className="text-xs text-muted-foreground">Open-text feedback linked to this project only.</p>
+                  </div>
+                  {surveyComments.length > 0 ? (
+                    <div className="space-y-3">
+                      {surveyComments.map((comment) => (
+                        <div key={comment.id} className="rounded-md border p-3 space-y-2">
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span>{comment.surveyDate || "Unknown date"}</span>
+                            <span>{comment.sme}</span>
+                            <span>{comment.instructionalDesigner}</span>
+                          </div>
+                          {comment.smeComment && (
+                            <div>
+                              <p className="text-xs text-muted-foreground">SME Comment</p>
+                              <p className="text-sm">{comment.smeComment}</p>
+                            </div>
+                          )}
+                          {comment.idComment && (
+                            <div>
+                              <p className="text-xs text-muted-foreground">Assigned ID Comment</p>
+                              <p className="text-sm">{comment.idComment}</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Matched survey rows exist for this project, but none include comments.</p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No survey rows are currently matched to this project.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }

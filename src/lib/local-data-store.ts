@@ -84,11 +84,32 @@ export type LocalSmeSurvey = {
   created_at: string;
 };
 
+export type LocalSurveyNoMatchRecord = {
+  id: string;
+  course_name_key: string;
+  original_course_name: string;
+  reporting_year: string | null;
+  user_id?: string;
+  created_at: string;
+};
+
+export type LocalTimeMatchOverride = {
+  id: string;
+  course_name_key: string;
+  original_course_name: string;
+  reporting_year: string | null;
+  target_project_key: string;
+  user_id?: string;
+  created_at: string;
+};
+
 type LocalStore = {
   projects: LocalProject[];
   time_entries: LocalTimeEntry[];
   upload_history: LocalUploadHistory[];
   sme_surveys: LocalSmeSurvey[];
+  survey_no_match_records: LocalSurveyNoMatchRecord[];
+  time_match_overrides: LocalTimeMatchOverride[];
 };
 
 const STORAGE_KEY = "smart_charts_local_store_v1";
@@ -110,6 +131,8 @@ function sanitizeStore(parsed: Partial<LocalStore> | null | undefined): LocalSto
     time_entries: Array.isArray(parsed?.time_entries) ? parsed.time_entries : [],
     upload_history: Array.isArray(parsed?.upload_history) ? parsed.upload_history : [],
     sme_surveys: Array.isArray(parsed?.sme_surveys) ? parsed.sme_surveys : [],
+    survey_no_match_records: Array.isArray(parsed?.survey_no_match_records) ? parsed.survey_no_match_records : [],
+    time_match_overrides: Array.isArray(parsed?.time_match_overrides) ? parsed.time_match_overrides : [],
   };
 }
 
@@ -150,7 +173,7 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
 }
 
 export async function readLocalStore(): Promise<LocalStore> {
-  const empty: LocalStore = { projects: [], time_entries: [], upload_history: [], sme_surveys: [] };
+  const empty: LocalStore = { projects: [], time_entries: [], upload_history: [], sme_surveys: [], survey_no_match_records: [], time_match_overrides: [] };
   if (typeof window === "undefined") return empty;
 
   try {

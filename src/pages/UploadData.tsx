@@ -176,6 +176,21 @@ type PreviewProjectVariant = {
   dataSource: string;
 };
 
+type SurveyNoMatchRecord = {
+  id: string;
+  course_name_key: string;
+  original_course_name: string;
+  reporting_year: string | null;
+};
+
+type TimeMatchOverrideRecord = {
+  id: string;
+  course_name_key: string;
+  original_course_name: string;
+  reporting_year: string | null;
+  target_project_key: string;
+};
+
 function resolveProjectKeyForTimeEntry(entry: TimeSpentEntry, byName: Map<string, ProjectCandidate[]>): ResolveResult {
   return resolveProjectKeyForTimeEntryWithOverride(entry, byName, null);
 }
@@ -318,13 +333,15 @@ export default function UploadData() {
   });
   const [showMore, setShowMore] = useState({
     blockingTime: 10,
-    fallbackTime: 10,
     blockingSurvey: 10,
   });
   const [timeOverrideKeys, setTimeOverrideKeys] = useState<Record<number, string | undefined>>({});
   const [surveyOverrideKeys, setSurveyOverrideKeys] = useState<Record<number, string | undefined>>({});
   const [canceledGroups, setCanceledGroups] = useState<Set<string>>(new Set());
   const [autoCanceledGroups, setAutoCanceledGroups] = useState<Set<string>>(new Set());
+  const [surveyNoMatchKeys, setSurveyNoMatchKeys] = useState<Set<string>>(new Set());
+  const [autoSurveyNoMatchKeys, setAutoSurveyNoMatchKeys] = useState<Set<string>>(new Set());
+  const [autoTimeOverrideGroups, setAutoTimeOverrideGroups] = useState<Set<string>>(new Set());
   const { data: history = [] } = useUploadHistory();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -341,10 +358,43 @@ export default function UploadData() {
       return (data || []) as unknown as Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string }>;
     },
   });
+
+  const { data: surveyNoMatchRecords = [] } = useQuery({
+    queryKey: ["survey_no_match_records"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = await readLocalStore();
+        return (local.survey_no_match_records || []) as SurveyNoMatchRecord[];
+      }
+      const { data, error } = await supabase
+        .from("survey_no_match_records" as any)
+        .select("*");
+      if (error) throw error;
+      return (data || []) as SurveyNoMatchRecord[];
+    },
+  });
+
+  const { data: timeMatchOverrideRecords = [] } = useQuery({
+    queryKey: ["time_match_overrides"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = await readLocalStore();
+        return (local.time_match_overrides || []) as TimeMatchOverrideRecord[];
+      }
+      const { data, error } = await supabase
+        .from("time_match_overrides" as any)
+        .select("*");
+      if (error) throw error;
+      return (data || []) as TimeMatchOverrideRecord[];
+    },
+  });
   const handleLegacy = useCallback(async (file: File) => {
     setLegacyFile(file.name);
     setTimeOverrideKeys({});
     setSurveyOverrideKeys({});
+    setSurveyNoMatchKeys(new Set());
+    setAutoSurveyNoMatchKeys(new Set());
+    setAutoTimeOverrideGroups(new Set());
     try {
       const data = await parseLegacyCourseFile(file);
       setLegacyData(data);
@@ -356,6 +406,9 @@ export default function UploadData() {
     setModernFile(file.name);
     setTimeOverrideKeys({});
     setSurveyOverrideKeys({});
+    setSurveyNoMatchKeys(new Set());
+    setAutoSurveyNoMatchKeys(new Set());
+    setAutoTimeOverrideGroups(new Set());
     try {
       const data = await parseModernCourseFile(file);
       setModernData(data);
@@ -366,6 +419,7 @@ export default function UploadData() {
   const handleTime = useCallback(async (file: File) => {
     setTimeFile(file.name);
     setTimeOverrideKeys({});
+    setAutoTimeOverrideGroups(new Set());
     try {
       const data = await parseTimeSpentFile(file);
       setTimeData(data);
@@ -376,6 +430,9 @@ export default function UploadData() {
   const handleSme = useCallback(async (file: File) => {
     setSmeFile(file.name);
     setSurveyOverrideKeys({});
+    setSurveyNoMatchKeys(new Set());
+    setAutoSurveyNoMatchKeys(new Set());
+    setAutoTimeOverrideGroups(new Set());
     try {
       const data = await parseSmeSurveyFile(file);
       setSmeData(data);
@@ -441,6 +498,15 @@ export default function UploadData() {
     });
   }, []);
 
+  const toggleSurveyNoMatchKey = useCallback((matchKey: string) => {
+    setSurveyNoMatchKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(matchKey)) next.delete(matchKey);
+      else next.add(matchKey);
+      return next;
+    });
+  }, []);
+
   const previewProjects = useMemo(() => buildPreviewProjectVariants(legacyData, modernData), [legacyData, modernData]);
   const previewProjectCandidates = useMemo(
     () =>
@@ -456,6 +522,11 @@ export default function UploadData() {
         ]),
       ),
     [previewProjects],
+  );
+
+  const persistedSurveyNoMatchKeySet = useMemo(
+    () => new Set((surveyNoMatchRecords || []).map((record) => courseKey(record.original_course_name, record.reporting_year || ""))),
+    [surveyNoMatchRecords],
   );
 
   // Match preview
@@ -479,7 +550,7 @@ export default function UploadData() {
     // Unmatched courses (in legacy/modern but not in time spent)
     const unmatched = [...allCourseNames].filter(n => !timeNames.has(n));
     if (unmatched.length > 0) warn.push(`${unmatched.length} courses with no time entries`);
-    const unmatchedSurveyRows = [...surveyKeys].filter((key) => !allCourseKeys.has(key)).length;
+    const unmatchedSurveyRows = [...surveyKeys].filter((key) => !allCourseKeys.has(key) && !persistedSurveyNoMatchKeySet.has(key)).length;
     if (unmatchedSurveyRows > 0) warn.push(`${unmatchedSurveyRows} SME survey rows could not be matched by Course Name + Year`);
     setWarnings(warn);
     return {
@@ -493,7 +564,7 @@ export default function UploadData() {
       inProgress: inProgress.length,
       totalUnique: new Set([...allCourseNames, ...timeNames]).size,
     };
-  }, [legacyData, modernData, timeData, smeData]);
+  }, [legacyData, modernData, timeData, smeData, persistedSurveyNoMatchKeySet]);
 
   const timeIssueRows = useMemo(() => {
     if (!timeData) return [];
@@ -524,9 +595,11 @@ export default function UploadData() {
     return smeData.map((entry, index) => {
       const manualOverrideKey = surveyOverrideKeys[index] || null;
       const resolved = resolveProjectKeyForSurveyWithOverride(entry, previewProjects.allKeys, manualOverrideKey);
+      const matchKey = courseKey(entry.courseName, entry.reportingYear);
       return {
         index,
         entry,
+        matchKey,
         resolved,
         blockingReasons: resolved.reason === "exact" || resolved.reason === "manual_override" ? [] : ["Survey row has no Course Name + Year match"],
         suggestedCandidates: previewProjects.byName.get(normKey(entry.courseName)) || [],
@@ -536,8 +609,14 @@ export default function UploadData() {
   }, [smeData, previewProjects, surveyOverrideKeys]);
 
   const blockingTimeRows = useMemo(() => timeIssueRows.filter((row) => row.blockingReasons.length > 0), [timeIssueRows]);
-  const fallbackTimeRows = useMemo(() => timeIssueRows.filter((row) => row.reviewReasons.length > 0), [timeIssueRows]);
-  const blockingSurveyRows = useMemo(() => surveyIssueRows.filter((row) => row.blockingReasons.length > 0), [surveyIssueRows]);
+  const blockingSurveyRows = useMemo(
+    () => surveyIssueRows.filter((row) => row.blockingReasons.length > 0 && !surveyNoMatchKeys.has(row.matchKey)),
+    [surveyIssueRows, surveyNoMatchKeys],
+  );
+  const markedSurveyRows = useMemo(
+    () => surveyIssueRows.filter((row) => row.blockingReasons.length > 0 && surveyNoMatchKeys.has(row.matchKey)),
+    [surveyIssueRows, surveyNoMatchKeys],
+  );
   const unmatchedTimeGroups = useMemo(() => {
     const groups = new Map<string, {
       groupKey: string;
@@ -580,7 +659,7 @@ export default function UploadData() {
     () => blockingTimeRows.filter((row) => row.resolved.reason !== "no_candidate"),
     [blockingTimeRows],
   );
-  const hasReviewIssues = blockingTimeRows.length > 0 || fallbackTimeRows.length > 0 || blockingSurveyRows.length > 0;
+  const hasReviewIssues = blockingTimeRows.length > 0 || blockingSurveyRows.length > 0;
 
   // Auto-detect previously canceled courses when unmatched groups change
   useEffect(() => {
@@ -609,6 +688,47 @@ export default function UploadData() {
       setAutoCanceledGroups(autoSet);
     }
   }, [canceledCoursesFromDb, unmatchedTimeGroups]);
+
+  useEffect(() => {
+    if (timeMatchOverrideRecords.length === 0 || unmatchedTimeGroups.length === 0) return;
+    const autoSet = new Set<string>();
+    const nextOverrides: Record<number, string | undefined> = {};
+    unmatchedTimeGroups.forEach((group) => {
+      const years = new Set<string>();
+      group.rows.forEach((row) => {
+        const year = parseEntryYear(row.entry.date);
+        if (year !== null) years.add(String(year));
+      });
+      const record = timeMatchOverrideRecords.find((candidate) => {
+        if (candidate.course_name_key !== group.groupKey) return false;
+        if (!candidate.reporting_year) return true;
+        return years.has(candidate.reporting_year);
+      });
+      if (!record || group.activeOverrideKey) return;
+      group.rows.forEach((row) => {
+        nextOverrides[row.index] = record.target_project_key;
+      });
+      autoSet.add(group.groupKey);
+    });
+    if (Object.keys(nextOverrides).length > 0) {
+      setTimeOverrideKeys((prev) => ({ ...nextOverrides, ...prev }));
+      setAutoTimeOverrideGroups(autoSet);
+    }
+  }, [timeMatchOverrideRecords, unmatchedTimeGroups]);
+
+  useEffect(() => {
+    if (surveyNoMatchRecords.length === 0 || surveyIssueRows.length === 0) return;
+    const autoSet = new Set<string>();
+    surveyIssueRows
+      .filter((row) => row.resolved.reason === "no_candidate")
+      .forEach((row) => {
+        if (persistedSurveyNoMatchKeySet.has(row.matchKey)) autoSet.add(row.matchKey);
+      });
+    if (autoSet.size > 0) {
+      setSurveyNoMatchKeys((prev) => new Set([...prev, ...autoSet]));
+      setAutoSurveyNoMatchKeys(autoSet);
+    }
+  }, [surveyIssueRows, surveyNoMatchRecords, persistedSurveyNoMatchKeySet]);
 
   const toggleCanceledGroup = useCallback((groupKey: string) => {
     setCanceledGroups((prev) => {
@@ -772,14 +892,57 @@ export default function UploadData() {
         let sourceHintCount = 0;
         const localTimeEntries = [...local.time_entries];
         const localSmeSurveys = [...local.sme_surveys];
+        const localSurveyNoMatchRecords = [...(local.survey_no_match_records || [])];
+        const localTimeMatchOverrides = [...(local.time_match_overrides || [])];
         let surveyCount = 0;
         let unresolvedSurveyCount = 0;
+        let retainedNoMatchSurveyCount = 0;
         // Build set of canceled course name keys to skip
         const canceledNameKeys = new Set<string>();
         for (const group of unmatchedTimeGroups) {
           if (canceledGroups.has(group.groupKey)) canceledNameKeys.add(group.groupKey);
         }
         let canceledSkipCount = 0;
+
+        const currentTimeOverrideRows = unmatchedTimeGroups
+          .map((group) => {
+            const years = new Set<string>();
+            group.rows.forEach((row) => {
+              const year = parseEntryYear(row.entry.date);
+              if (year !== null) years.add(String(year));
+            });
+            const reportingYear = years.size === 1 ? [...years][0] : null;
+            return {
+              groupKey: group.groupKey,
+              courseName: group.courseName,
+              reportingYear,
+              targetProjectKey: group.activeOverrideKey,
+            };
+          });
+        const seenTimeOverrideKeys = new Set(currentTimeOverrideRows.map((row) => courseKey(row.courseName, row.reportingYear || "")));
+        const retainedTimeOverrides = localTimeMatchOverrides.filter((record) => {
+          const key = courseKey(record.original_course_name, record.reporting_year || "");
+          return !seenTimeOverrideKeys.has(key) || currentTimeOverrideRows.some((row) => courseKey(row.courseName, row.reportingYear || "") === key && row.targetProjectKey);
+        });
+        currentTimeOverrideRows.forEach((row) => {
+          if (!row.targetProjectKey) return;
+          const key = courseKey(row.courseName, row.reportingYear || "");
+          const existing = retainedTimeOverrides.find((record) => courseKey(record.original_course_name, record.reporting_year || "") === key);
+          if (existing) {
+            existing.target_project_key = row.targetProjectKey;
+            existing.original_course_name = row.courseName;
+            return;
+          }
+          retainedTimeOverrides.push({
+            id: makeId(),
+            course_name_key: row.groupKey,
+            original_course_name: row.courseName,
+            reporting_year: row.reportingYear,
+            target_project_key: row.targetProjectKey,
+            user_id: user?.id,
+            created_at: now,
+          } as any);
+        });
 
         if (timeData && timeData.length > 0) {
           for (let index = 0; index < timeData.length; index += 1) {
@@ -810,10 +973,41 @@ export default function UploadData() {
         }
 
         if (smeData && smeData.length > 0) {
+          const currentSurveyNoMatchKeys = new Set(
+            surveyIssueRows
+              .filter((row) => row.resolved.reason === "no_candidate" && surveyNoMatchKeys.has(row.matchKey))
+              .map((row) => row.matchKey),
+          );
+          const seenSurveyNoMatchKeys = new Set(
+            surveyIssueRows
+              .filter((row) => row.resolved.reason === "no_candidate")
+              .map((row) => row.matchKey),
+          );
+          const retainedRecords = localSurveyNoMatchRecords.filter((record) => {
+            const key = courseKey(record.original_course_name, record.reporting_year || "");
+            return !seenSurveyNoMatchKeys.has(key) || currentSurveyNoMatchKeys.has(key);
+          });
+          currentSurveyNoMatchKeys.forEach((matchKey) => {
+            if (retainedRecords.some((record) => courseKey(record.original_course_name, record.reporting_year || "") === matchKey)) return;
+            const row = surveyIssueRows.find((candidate) => candidate.matchKey === matchKey);
+            if (!row) return;
+            retainedRecords.push({
+              id: makeId(),
+              course_name_key: normKey(row.entry.courseName),
+              original_course_name: row.entry.courseName,
+              reporting_year: row.entry.reportingYear || null,
+              user_id: user?.id,
+              created_at: now,
+            } as any);
+          });
+
           for (let index = 0; index < smeData.length; index += 1) {
             const e = smeData[index];
             const resolved = resolveProjectKeyForSurveyWithOverride(e, allCourseKeys, surveyOverrideKeys[index] || null);
-            if (!resolved.key) unresolvedSurveyCount += 1;
+            const matchKey = courseKey(e.courseName, e.reportingYear);
+            const isMarkedNoMatch = surveyNoMatchKeys.has(matchKey) && resolved.reason === "no_candidate";
+            if (!resolved.key && !isMarkedNoMatch) unresolvedSurveyCount += 1;
+            if (isMarkedNoMatch) retainedNoMatchSurveyCount += 1;
             localSmeSurveys.push({
               id: makeId(),
               project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
@@ -858,6 +1052,8 @@ export default function UploadData() {
             });
             surveyCount += 1;
           }
+
+          localSurveyNoMatchRecords.splice(0, localSurveyNoMatchRecords.length, ...retainedRecords);
         }
 
         const uploadHistory = [
@@ -877,6 +1073,8 @@ export default function UploadData() {
           time_entries: localTimeEntries as any,
           upload_history: uploadHistory as any,
           sme_surveys: localSmeSurveys as any,
+          survey_no_match_records: localSurveyNoMatchRecords as any,
+          time_match_overrides: retainedTimeOverrides as any,
         });
 
         toast.success(`Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`);
@@ -888,6 +1086,9 @@ export default function UploadData() {
         }
         if (unresolvedSurveyCount > 0) {
           toast.warning(`${unresolvedSurveyCount} SME survey rows could not be matched by Course Name + Year.`);
+        }
+        if (retainedNoMatchSurveyCount > 0) {
+          toast.message(`${retainedNoMatchSurveyCount} SME survey rows were retained as no-match records.`);
         }
         if (fallbackCount > 0) {
           toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
@@ -902,10 +1103,15 @@ export default function UploadData() {
         setSurveyOverrideKeys({});
         setCanceledGroups(new Set());
         setAutoCanceledGroups(new Set());
+        setSurveyNoMatchKeys(new Set());
+        setAutoSurveyNoMatchKeys(new Set());
+        setAutoTimeOverrideGroups(new Set());
         queryClient.invalidateQueries({ queryKey: ["time_entries"] });
         queryClient.invalidateQueries({ queryKey: ["projects"] });
         queryClient.invalidateQueries({ queryKey: ["upload_history"] });
         queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
+        queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
+        queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
         return;
       }
 
@@ -1067,6 +1273,7 @@ export default function UploadData() {
       let sourceHintCount = 0;
       let surveyCount = 0;
       let unresolvedSurveyCount = 0;
+      let retainedNoMatchSurveyCount = 0;
 
       // Build set of canceled course name keys to skip
       const canceledNameKeys = new Set<string>();
@@ -1093,9 +1300,70 @@ export default function UploadData() {
             user_id: user!.id,
           });
         }
-        if (canceledInserts.length > 0) {
+      if (canceledInserts.length > 0) {
           await supabase.from("canceled_courses" as any).upsert(canceledInserts as any, { onConflict: "course_name_key,reporting_year" });
         }
+      }
+
+      const currentTimeOverrideRows = unmatchedTimeGroups.map((group) => {
+        const years = new Set<string>();
+        group.rows.forEach((row) => {
+          const year = parseEntryYear(row.entry.date);
+          if (year !== null) years.add(String(year));
+        });
+        return {
+          groupKey: group.groupKey,
+          courseName: group.courseName,
+          reportingYear: years.size === 1 ? [...years][0] : null,
+          targetProjectKey: group.activeOverrideKey,
+        };
+      });
+      const seenTimeOverrideKeys = new Set(currentTimeOverrideRows.map((row) => courseKey(row.courseName, row.reportingYear || "")));
+      const timeOverrideDeletes = timeMatchOverrideRecords.filter((record) => {
+        const key = courseKey(record.original_course_name, record.reporting_year || "");
+        return seenTimeOverrideKeys.has(key) && !currentTimeOverrideRows.some((row) => courseKey(row.courseName, row.reportingYear || "") === key && row.targetProjectKey);
+      });
+      if (timeOverrideDeletes.length > 0) {
+        await supabase.from("time_match_overrides" as any).delete().in("id", timeOverrideDeletes.map((record) => record.id));
+      }
+      const timeOverrideUpserts = currentTimeOverrideRows.filter((row) => row.targetProjectKey);
+      if (timeOverrideUpserts.length > 0) {
+        await supabase.from("time_match_overrides" as any).upsert(
+          timeOverrideUpserts.map((row) => ({
+            course_name_key: row.groupKey,
+            original_course_name: row.courseName,
+            reporting_year: row.reportingYear,
+            target_project_key: row.targetProjectKey,
+            user_id: user!.id,
+          })) as any,
+          { onConflict: "course_name_key,reporting_year" },
+        );
+      }
+
+      const currentMarkedSurveyRows = surveyIssueRows.filter((row) => row.resolved.reason === "no_candidate" && surveyNoMatchKeys.has(row.matchKey));
+      const currentMarkedSurveyKeys = new Set(currentMarkedSurveyRows.map((row) => row.matchKey));
+      const seenSurveyNoMatchKeys = new Set(
+        surveyIssueRows
+          .filter((row) => row.resolved.reason === "no_candidate")
+          .map((row) => row.matchKey),
+      );
+      const surveyNoMatchDeletes = surveyNoMatchRecords.filter((record) => {
+        const key = courseKey(record.original_course_name, record.reporting_year || "");
+        return seenSurveyNoMatchKeys.has(key) && !currentMarkedSurveyKeys.has(key);
+      });
+      if (surveyNoMatchDeletes.length > 0) {
+        await supabase.from("survey_no_match_records" as any).delete().in("id", surveyNoMatchDeletes.map((record) => record.id));
+      }
+      if (currentMarkedSurveyRows.length > 0) {
+        await supabase.from("survey_no_match_records" as any).upsert(
+          currentMarkedSurveyRows.map((row) => ({
+            course_name_key: normKey(row.entry.courseName),
+            original_course_name: row.entry.courseName,
+            reporting_year: row.entry.reportingYear || null,
+            user_id: user!.id,
+          })) as any,
+          { onConflict: "course_name_key,reporting_year" },
+        );
       }
 
       if (timeData && timeData.length > 0) {
@@ -1139,7 +1407,10 @@ export default function UploadData() {
           const batch = smeData.slice(i, i + batchSize).map((e, offset) => {
             const index = i + offset;
             const resolved = resolveProjectKeyForSurveyWithOverride(e, allCourseKeys, surveyOverrideKeys[index] || null);
-            if (!resolved.key) unresolvedSurveyCount += 1;
+            const matchKey = courseKey(e.courseName, e.reportingYear);
+            const isMarkedNoMatch = surveyNoMatchKeys.has(matchKey) && resolved.reason === "no_candidate";
+            if (!resolved.key && !isMarkedNoMatch) unresolvedSurveyCount += 1;
+            if (isMarkedNoMatch) retainedNoMatchSurveyCount += 1;
             return {
               project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
               upload_id: upload.id,
@@ -1199,6 +1470,9 @@ export default function UploadData() {
       if (unresolvedSurveyCount > 0) {
         toast.warning(`${unresolvedSurveyCount} SME survey rows could not be matched by Course Name + Year.`);
       }
+      if (retainedNoMatchSurveyCount > 0) {
+        toast.message(`${retainedNoMatchSurveyCount} SME survey rows were retained as no-match records.`);
+      }
       if (fallbackCount > 0) {
         toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
       }
@@ -1212,11 +1486,16 @@ export default function UploadData() {
       setSurveyOverrideKeys({});
       setCanceledGroups(new Set());
       setAutoCanceledGroups(new Set());
+      setSurveyNoMatchKeys(new Set());
+      setAutoSurveyNoMatchKeys(new Set());
+      setAutoTimeOverrideGroups(new Set());
       queryClient.invalidateQueries({ queryKey: ["time_entries"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["upload_history"] });
       queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
       queryClient.invalidateQueries({ queryKey: ["canceled_courses"] });
+      queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
+      queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
     } catch (err: any) {
       toast.error("Import failed: " + (err.message || "Unknown error"));
     } finally {
@@ -1398,8 +1677,8 @@ export default function UploadData() {
                   <Badge variant={blockingTimeRows.length + blockingSurveyRows.length > 0 ? "destructive" : "outline"}>
                     {blockingTimeRows.length + blockingSurveyRows.length} rows need fixes
                   </Badge>
-                  <Badge variant={fallbackTimeRows.length > 0 ? "secondary" : "outline"}>
-                    {fallbackTimeRows.length} rows need review
+                  <Badge variant={markedSurveyRows.length > 0 ? "secondary" : "outline"}>
+                    {markedSurveyRows.length} survey no-match records retained
                   </Badge>
                   <Badge variant={warnings.length > 0 ? "secondary" : "outline"}>
                     {warnings.length} warning summaries
@@ -1409,22 +1688,22 @@ export default function UploadData() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div className="rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">Unmatched Time Rows</p>
-                    <p className="text-2xl font-bold">{timeIssueRows.filter((row) => row.resolved.reason === "no_candidate").length}</p>
-                  </div>
-                  <div className="rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">Fallback/Hint Time Rows</p>
-                    <p className="text-2xl font-bold">{fallbackTimeRows.length}</p>
+                    <p className="text-xs text-muted-foreground">Time Rows Need Fixes</p>
+                    <p className="text-2xl font-bold">{blockingTimeRows.length}</p>
                   </div>
                   <div className="rounded-md border p-3">
                     <p className="text-xs text-muted-foreground">Zero-Hour Time Rows</p>
                     <p className="text-2xl font-bold">{timeIssueRows.filter((row) => row.entry.hours === 0).length}</p>
                   </div>
                   <div className="rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">Unmatched Survey Rows</p>
+                    <p className="text-xs text-muted-foreground">Survey Rows Need Fixes</p>
                     <p className="text-2xl font-bold">{blockingSurveyRows.length}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Survey No-Match Saved</p>
+                    <p className="text-2xl font-bold">{markedSurveyRows.length}</p>
                   </div>
                 </div>
 
@@ -1450,9 +1729,15 @@ export default function UploadData() {
                           </div>
                         )}
 
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Time Spent Data</p>
+                          <p className="text-xs text-muted-foreground">Unmatched time rows, canceled projects, and remembered default project matches.</p>
+                        </div>
+
                         {unmatchedTimeGroups.slice(0, showMore.blockingTime).map((group) => {
                           const isCanceled = canceledGroups.has(group.groupKey);
                           const wasAutoCanceled = autoCanceledGroups.has(group.groupKey);
+                          const hasAutoOverride = autoTimeOverrideGroups.has(group.groupKey) && !!group.activeOverrideKey;
                           return (
                           <div key={`blocking-time-group-${group.groupKey}`} className={cn("rounded-md border p-3 space-y-3", isCanceled && "opacity-60")}>
                             <div className="flex items-center justify-between gap-2">
@@ -1465,6 +1750,9 @@ export default function UploadData() {
                                 )}
                                 {wasAutoCanceled && isCanceled && (
                                   <span className="text-xs text-muted-foreground italic">Previously marked as canceled</span>
+                                )}
+                                {hasAutoOverride && !isCanceled && (
+                                  <span className="text-xs text-muted-foreground italic">Previous default project match applied</span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2">
@@ -1537,7 +1825,9 @@ export default function UploadData() {
                             </div>
                             {group.activeOverrideKey && (
                               <div className="flex items-center justify-between">
-                                <p className="text-xs text-primary">Manual override is active for all rows in this course group.</p>
+                                <p className="text-xs text-primary">
+                                  {hasAutoOverride ? "Saved default project match is active for this group." : "Manual override is active for all rows in this course group."}
+                                </p>
                                 <Button variant="outline" size="sm" onClick={() => setTimeOverrides(group.rows.map((row) => row.index), undefined)}>Clear override for group</Button>
                               </div>
                             )}
@@ -1617,11 +1907,28 @@ export default function UploadData() {
                           </Button>
                         )}
 
+                        <div className="space-y-1 pt-2">
+                          <p className="text-sm font-medium">SME Survey Data</p>
+                          <p className="text-xs text-muted-foreground">Match survey rows to projects or mark that no project match exists so the app remembers that decision.</p>
+                        </div>
+
                         {blockingSurveyRows.slice(0, showMore.blockingSurvey).map((row) => (
                           <div key={`blocking-survey-${row.index}`} className="rounded-md border p-3 space-y-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-medium">Survey row #{row.index + 1}</span>
-                              {row.blockingReasons.map((reason) => <Badge key={reason} variant="outline">{reason}</Badge>)}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-medium">Survey row #{row.index + 1}</span>
+                                {row.blockingReasons.map((reason) => <Badge key={reason} variant="outline">{reason}</Badge>)}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id={`survey-no-match-${row.index}`}
+                                  checked={surveyNoMatchKeys.has(row.matchKey)}
+                                  onCheckedChange={() => toggleSurveyNoMatchKey(row.matchKey)}
+                                />
+                                <label htmlFor={`survey-no-match-${row.index}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                                  No Match Exists
+                                </label>
+                              </div>
                             </div>
                             <p className="text-xs text-muted-foreground">{describeSurveyResolution(row.resolved.reason)}</p>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1673,88 +1980,55 @@ export default function UploadData() {
                             )}
                           </div>
                         ))}
+                        {markedSurveyRows.slice(0, showMore.blockingSurvey).map((row) => {
+                          const wasAutoMarked = autoSurveyNoMatchKeys.has(row.matchKey);
+                          return (
+                            <div key={`marked-survey-${row.index}`} className="rounded-md border p-3 space-y-3 opacity-80">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-medium">Survey row #{row.index + 1}</span>
+                                  <Badge variant="secondary">No Match Exists</Badge>
+                                  {wasAutoMarked && (
+                                    <span className="text-xs text-muted-foreground italic">Previously retained</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Checkbox
+                                    id={`survey-no-match-${row.index}`}
+                                    checked
+                                    onCheckedChange={() => toggleSurveyNoMatchKey(row.matchKey)}
+                                  />
+                                  <label htmlFor={`survey-no-match-${row.index}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                                    No Match Exists
+                                  </label>
+                                </div>
+                              </div>
+                              <p className="text-xs text-muted-foreground">This survey row will remain in app-level survey views without linking to a project.</p>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div className="space-y-1">
+                                  <p className="text-xs text-muted-foreground">Course Name</p>
+                                  <Input value={row.entry.courseName} onChange={(e) => updateSmeEntry(row.index, { courseName: e.target.value })} />
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-xs text-muted-foreground">Year</p>
+                                  <Input value={row.entry.reportingYear} onChange={(e) => updateSmeEntry(row.index, { reportingYear: e.target.value })} />
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-xs text-muted-foreground">Hours Worked</p>
+                                  <Input value={String(row.entry.hoursWorked)} onChange={(e) => updateSmeEntry(row.index, { hoursWorked: Number.parseFloat(e.target.value) || 0 })} />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                         {blockingSurveyRows.length > showMore.blockingSurvey && (
                           <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, blockingSurvey: current.blockingSurvey + 10 }))}>
                             Show More Survey Fixes
                           </Button>
                         )}
 
-                        {blockingTimeRows.length === 0 && blockingSurveyRows.length === 0 && (
+                        {blockingTimeRows.length === 0 && blockingSurveyRows.length === 0 && markedSurveyRows.length === 0 && (
                           <p className="text-sm text-muted-foreground">No blocking issues in the current upload.</p>
-                        )}
-                      </div>
-                    </CollapsibleContent>
-                  </div>
-                </Collapsible>
-
-                <Collapsible open={issueOpen.fallback} onOpenChange={(open) => setIssueOpen((current) => ({ ...current, fallback: open }))}>
-                  <div className="rounded-md border">
-                    <CollapsibleTrigger asChild>
-                      <div className="flex cursor-pointer items-center justify-between p-4">
-                        <div>
-                          <p className="font-medium">Rows That Import With Fallback Logic</p>
-                          <p className="text-sm text-muted-foreground">These rows currently import, but they rely on hints or fallback rules you may want to correct.</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <Badge variant="secondary">{fallbackTimeRows.length}</Badge>
-                          <ChevronDown className={`h-4 w-4 transition-transform ${issueOpen.fallback ? "rotate-180" : ""}`} />
-                        </div>
-                      </div>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <div className="space-y-4 border-t p-4">
-                        {fallbackTimeRows.slice(0, showMore.fallbackTime).map((row) => (
-                          <div key={`fallback-time-${row.index}`} className="rounded-md border p-3 space-y-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-medium">Time row #{row.index + 1}</span>
-                              {row.reviewReasons.map((reason) => <Badge key={reason} variant="outline">{reason}</Badge>)}
-                            </div>
-                            <p className="text-xs text-muted-foreground">{describeTimeResolution(row.resolved.reason)}</p>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <p className="text-xs text-muted-foreground">Apply Suggested Match</p>
-                                <SearchableProjectSelect
-                                  options={row.suggestedCandidates}
-                                  value={timeOverrideKeys[row.index]}
-                                  placeholder={row.suggestedCandidates.length ? "Choose a likely match" : "No same-name suggestions"}
-                                  emptyLabel="No matching projects found."
-                                  onChange={(value) => {
-                                    const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
-                                    if (!selected) return;
-                                    setTimeOverride(row.index, selected.key);
-                                    updateTimeEntry(row.index, {
-                                      courseName: selected.name,
-                                      date: replaceDateYear(row.entry.date, selected.reportingYear),
-                                    });
-                                  }}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-xs text-muted-foreground">Force Match to Any Project</p>
-                                <SearchableProjectSelect
-                                  options={row.forceCandidates}
-                                  value={timeOverrideKeys[row.index]}
-                                  placeholder={timeOverrideKeys[row.index] ? `Override active: ${timeOverrideKeys[row.index]}` : "Choose any project"}
-                                  emptyLabel="No projects available."
-                                  onChange={(value) => setTimeOverride(row.index, value)}
-                                />
-                              </div>
-                            </div>
-                            {timeOverrideKeys[row.index] && (
-                              <div className="flex items-center justify-between">
-                                <p className="text-xs text-primary">Manual override is active for this row.</p>
-                                <Button variant="outline" size="sm" onClick={() => setTimeOverride(row.index, undefined)}>Clear override</Button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {fallbackTimeRows.length > showMore.fallbackTime && (
-                          <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, fallbackTime: current.fallbackTime + 10 }))}>
-                            Show More Review Rows
-                          </Button>
-                        )}
-                        {fallbackTimeRows.length === 0 && (
-                          <p className="text-sm text-muted-foreground">No fallback-based time rows in the current upload.</p>
                         )}
                       </div>
                     </CollapsibleContent>

@@ -14,6 +14,15 @@ function clean(v: unknown): string {
   return String(v || "").trim();
 }
 
+function resolveTeamEntryYear(project: any, entry: any): string {
+  const reportingYear = clean(project?.reporting_year);
+  if (reportingYear) return reportingYear;
+  const entryDate = clean(entry?.entry_date);
+  const match = entryDate.match(/^(\d{4})-/);
+  if (match) return match[1];
+  return "Unknown";
+}
+
 type TeamKey = "legal" | "cqo";
 
 type TeamConfig = {
@@ -63,7 +72,7 @@ function buildTeamRows(entries: any[], projectMap: Map<string, any>, team: TeamK
       return {
         projectId: clean(e.project_id),
         project: clean(project?.name || "Unknown Project"),
-        year: clean(project?.reporting_year || "Unknown"),
+        year: resolveTeamEntryYear(project, e),
         hours: Math.round(Number(e.hours || 0) * 100) / 100,
       };
     });
