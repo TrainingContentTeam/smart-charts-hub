@@ -385,7 +385,7 @@ export default function UploadData() {
         .from("time_match_overrides" as any)
         .select("*");
       if (error) throw error;
-      return (data || []) as TimeMatchOverrideRecord[];
+      return (data || []) as unknown as TimeMatchOverrideRecord[];
     },
   });
   const handleLegacy = useCallback(async (file: File) => {
