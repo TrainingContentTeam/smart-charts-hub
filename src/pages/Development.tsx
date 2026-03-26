@@ -112,7 +112,7 @@ export default function Development() {
   const isDataVisible = (key: string) => !!showChartData[key];
   const toggleDataVisible = (key: string) => setShowChartData((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p])), [projects]);
+  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p] as [string, any])), [projects]);
 
   const statusCounts = useMemo(() => {
     const numericYears = projects
