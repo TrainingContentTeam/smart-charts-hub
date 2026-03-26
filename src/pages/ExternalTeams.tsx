@@ -335,7 +335,7 @@ export default function ExternalTeams() {
   const { data: projects = [] } = useProjects();
   const { data: entries = [] } = useTimeEntries();
 
-  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p])), [projects]);
+  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p] as [string, any])), [projects]);
 
   const years = useMemo(() => {
     const set = new Set<string>();
