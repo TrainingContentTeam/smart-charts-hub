@@ -370,7 +370,7 @@ export default function UploadData() {
         .from("survey_no_match_records" as any)
         .select("*");
       if (error) throw error;
-      return (data || []) as SurveyNoMatchRecord[];
+      return (data || []) as unknown as SurveyNoMatchRecord[];
     },
   });
 
@@ -385,7 +385,7 @@ export default function UploadData() {
         .from("time_match_overrides" as any)
         .select("*");
       if (error) throw error;
-      return (data || []) as TimeMatchOverrideRecord[];
+      return (data || []) as unknown as TimeMatchOverrideRecord[];
     },
   });
   const handleLegacy = useCallback(async (file: File) => {
@@ -552,8 +552,8 @@ export default function UploadData() {
     if (unmatched.length > 0) warn.push(`${unmatched.length} courses with no time entries`);
     const unmatchedSurveyRows = [...surveyKeys].filter((key) => !allCourseKeys.has(key) && !persistedSurveyNoMatchKeySet.has(key)).length;
     if (unmatchedSurveyRows > 0) warn.push(`${unmatchedSurveyRows} SME survey rows could not be matched by Course Name + Year`);
-    setWarnings(warn);
     return {
+      warn,
       legacyCount: legacyData?.length || 0,
       modernCount: modernData?.length || 0,
       timeUniqueCount: timeNames.size,
@@ -565,6 +565,10 @@ export default function UploadData() {
       totalUnique: new Set([...allCourseNames, ...timeNames]).size,
     };
   }, [legacyData, modernData, timeData, smeData, persistedSurveyNoMatchKeySet]);
+
+  useEffect(() => {
+    setWarnings(matchInfo?.warn || []);
+  }, [matchInfo]);
 
   const timeIssueRows = useMemo(() => {
     if (!timeData) return [];
