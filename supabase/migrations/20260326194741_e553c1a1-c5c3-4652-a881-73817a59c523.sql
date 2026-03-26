@@ -1,0 +1,1 @@
+ALTER TABLE public.sme_collaboration_surveys ADD COLUMN IF NOT EXISTS internal text;

@@ -131,6 +131,7 @@ export type Database = {
           id_sme_promoter_score: number | null
           incorporation_feedback_score: number | null
           instructional_designer: string | null
+          internal: string | null
           project_id: string | null
           recommend_lexipol_score: number | null
           reporting_year: string | null
@@ -173,6 +174,7 @@ export type Database = {
           id_sme_promoter_score?: number | null
           incorporation_feedback_score?: number | null
           instructional_designer?: string | null
+          internal?: string | null
           project_id?: string | null
           recommend_lexipol_score?: number | null
           reporting_year?: string | null
@@ -215,6 +217,7 @@ export type Database = {
           id_sme_promoter_score?: number | null
           incorporation_feedback_score?: number | null
           instructional_designer?: string | null
+          internal?: string | null
           project_id?: string | null
           recommend_lexipol_score?: number | null
           reporting_year?: string | null
