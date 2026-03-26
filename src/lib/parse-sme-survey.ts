@@ -10,6 +10,7 @@ export interface SmeCollaborationSurveyImport {
   surveyDate: string;
   sme: string;
   smeEmail: string;
+  internal: string | null;
   smeOverallExperienceScore: number | null;
   clarityGoalsScore: number | null;
   staffResponsivenessScore: number | null;
@@ -99,6 +100,16 @@ function parseBooleanLike(value: unknown): boolean | null {
   return null;
 }
 
+function parseInternal(value: unknown): string | null {
+  const raw = normalize(value);
+  if (!raw) return null;
+
+  const normalized = raw.toLowerCase();
+  if (["yes", "y", "true", "1", "internal", "employee", "lexipol employee"].includes(normalized)) return "Yes";
+  if (["no", "n", "false", "0", "external", "contractor", "vendor", "not internal"].includes(normalized)) return "No";
+  return null;
+}
+
 function toIsoDate(value: unknown): string {
   if (typeof value === "number" && value > 30000 && value < 60000) {
     const date = new Date(Math.round((value - 25569) * 86400 * 1000));
@@ -165,6 +176,7 @@ export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSu
       surveyDate: toIsoDate(getCell(row, lookup, "Survey Date")),
       sme: normalize(getCell(row, lookup, "SME")),
       smeEmail: normalize(getCell(row, lookup, "SME Email")).toLowerCase(),
+      internal: parseInternal(getCell(row, lookup, "Internal")),
       smeOverallExperienceScore: parseLikertScore(getCell(row, lookup, "Overall Experience with Lexipol")),
       clarityGoalsScore: parseLikertScore(getCell(row, lookup, "Clarity of Goals and Objectives")),
       staffResponsivenessScore: parseLikertScore(getCell(row, lookup, "Staff Responsiveness")),

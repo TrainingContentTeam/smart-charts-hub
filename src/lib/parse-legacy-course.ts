@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { parseDurationHours, toReportingYear } from "@/lib/parse-duration";
+import { parseCourseLengthHours, parseDurationHours, toReportingYear } from "@/lib/parse-duration";
 
 export interface LegacyCourse {
   courseName: string;
@@ -14,6 +14,7 @@ export interface LegacyCourse {
   authoringTool: string;
   courseStyle: string;
   courseLength: string;
+  contentHours: number | null;
   interactionCount: number | null;
 }
 
@@ -71,6 +72,7 @@ export async function parseLegacyCourseFile(file: File): Promise<LegacyCourse[]>
       authoringTool: normalize(row["[LCT] Authoring Tool (L)"]),
       courseStyle: normalize(row["[LCT] Course Style (L)"]),
       courseLength: normalize(row["[LCT] Course Length (L)"]),
+      contentHours: parseCourseLengthHours(row["[LCT] Course Length (L)"]),
       interactionCount: row["[LCT] Interaction Count (L)"]
         ? parseInt(String(row["[LCT] Interaction Count (L)"]), 10) || null
         : null,

@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { parseDurationHours, toReportingYear } from "@/lib/parse-duration";
+import { parseCourseLengthHours, parseDurationHours, toReportingYear } from "@/lib/parse-duration";
 
 export interface ModernCourse {
   courseName: string;
@@ -14,6 +14,7 @@ export interface ModernCourse {
   authoringTool: string;
   courseStyle: string;
   courseLength: string;
+  contentHours: number | null;
   interactionCount: number | null;
 }
 
@@ -71,6 +72,7 @@ export async function parseModernCourseFile(file: File): Promise<ModernCourse[]>
       authoringTool: normalize(row["[LCT] Authoring Tool (M)"]),
       courseStyle: normalize(row["[LCT] Course Style (M)"]),
       courseLength: normalize(row["[LCT] Course Length (M)"]),
+      contentHours: parseCourseLengthHours(row["[LCT] Course Length (M)"]),
       interactionCount: row["[LCT] Interaction Count (M)"]
         ? parseInt(String(row["[LCT] Interaction Count (M)"]), 10) || null
         : null,

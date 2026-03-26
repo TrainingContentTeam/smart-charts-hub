@@ -13,6 +13,7 @@ export type LocalProject = {
   authoring_tool?: string;
   course_style?: string;
   course_length?: string;
+  content_hours?: number | null;
   interaction_count?: number | null;
   user_id?: string;
   created_at: string;
@@ -55,6 +56,7 @@ export type LocalSmeSurvey = {
   survey_date?: string | null;
   sme?: string | null;
   sme_email?: string | null;
+  internal?: string | null;
   sme_overall_experience_score?: number | null;
   clarity_goals_score?: number | null;
   staff_responsiveness_score?: number | null;

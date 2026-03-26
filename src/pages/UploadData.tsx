@@ -745,6 +745,9 @@ export default function UploadData() {
     try {
       const totalRows = (legacyData?.length || 0) + (modernData?.length || 0) + (timeData?.length || 0) + (smeData?.length || 0);
       const combinedFileName = [legacyFile, modernFile, timeFile, smeFile].filter(Boolean).join(" + ");
+      const hasCourseFiles = !!legacyData || !!modernData;
+      const hasTimeFile = !!timeData;
+      const hasSmeFile = !!smeData;
 
       if (DEV_BYPASS_AUTH) {
         const now = new Date().toISOString();
@@ -795,6 +798,7 @@ export default function UploadData() {
               authoring_tool: legacy.authoringTool,
               course_style: legacy.courseStyle,
               course_length: legacy.courseLength,
+              content_hours: legacy.contentHours,
               interaction_count: legacy.interactionCount,
               reporting_year: legacy.reportingYear,
             };
@@ -811,6 +815,7 @@ export default function UploadData() {
               authoring_tool: modern.authoringTool,
               course_style: modern.courseStyle,
               course_length: modern.courseLength,
+              content_hours: modern.contentHours,
               interaction_count: modern.interactionCount,
               reporting_year: modern.reportingYear,
             };
@@ -886,12 +891,32 @@ export default function UploadData() {
           }
         }
 
+        const staleProjectIds = hasCourseFiles
+          ? existingProjects
+              .filter((project) => {
+                const ds = String((project as any).data_source || "").toLowerCase();
+                return (ds === "legacy" || ds === "modern") && !legacyMap.has(courseKey(project.name, project.reporting_year)) && !modernMap.has(courseKey(project.name, project.reporting_year));
+              })
+              .map((project) => project.id)
+          : [];
+        const retainedProjects = staleProjectIds.length > 0
+          ? existingProjects.filter((project) => !staleProjectIds.includes(project.id))
+          : existingProjects;
+
         let timeCount = 0;
         let unresolvedCount = 0;
         let fallbackCount = 0;
         let sourceHintCount = 0;
-        const localTimeEntries = [...local.time_entries];
-        const localSmeSurveys = [...local.sme_surveys];
+        const localTimeEntries = hasTimeFile
+          ? []
+          : staleProjectIds.length > 0
+            ? local.time_entries.filter((entry) => !entry.project_id || !staleProjectIds.includes(entry.project_id))
+            : [...local.time_entries];
+        const localSmeSurveys = hasSmeFile
+          ? []
+          : staleProjectIds.length > 0
+            ? local.sme_surveys.filter((row) => !row.project_id || !staleProjectIds.includes(row.project_id))
+            : [...local.sme_surveys];
         const localSurveyNoMatchRecords = [...(local.survey_no_match_records || [])];
         const localTimeMatchOverrides = [...(local.time_match_overrides || [])];
         let surveyCount = 0;
@@ -1022,6 +1047,7 @@ export default function UploadData() {
               survey_date: e.surveyDate || null,
               sme: e.sme || null,
               sme_email: e.smeEmail || null,
+              internal: e.internal,
               sme_overall_experience_score: e.smeOverallExperienceScore,
               clarity_goals_score: e.clarityGoalsScore,
               staff_responsiveness_score: e.staffResponsivenessScore,
@@ -1069,7 +1095,7 @@ export default function UploadData() {
         ];
 
         await writeLocalStore({
-          projects: existingProjects as any,
+          projects: retainedProjects as any,
           time_entries: localTimeEntries as any,
           upload_history: uploadHistory as any,
           sme_surveys: localSmeSurveys as any,
@@ -1170,6 +1196,7 @@ export default function UploadData() {
             authoring_tool: legacy.authoringTool,
             course_style: legacy.courseStyle,
             course_length: legacy.courseLength,
+            content_hours: legacy.contentHours,
             interaction_count: legacy.interactionCount,
             reporting_year: legacy.reportingYear,
           };
@@ -1186,6 +1213,7 @@ export default function UploadData() {
             authoring_tool: modern.authoringTool,
             course_style: modern.courseStyle,
             course_length: modern.courseLength,
+            content_hours: modern.contentHours,
             interaction_count: modern.interactionCount,
             reporting_year: modern.reportingYear,
           };
@@ -1249,10 +1277,12 @@ export default function UploadData() {
 
       // Clean up stale projects no longer in source files
       const staleProjectIds: string[] = [];
-      for (const [key, existing] of existingMap.entries()) {
-        const ds = ((existing as any).data_source || "").toLowerCase();
-        if ((ds === "legacy" || ds === "modern") && !fileCourseKeys.has(key)) {
-          staleProjectIds.push((existing as any).id);
+      if (hasCourseFiles) {
+        for (const [key, existing] of existingMap.entries()) {
+          const ds = ((existing as any).data_source || "").toLowerCase();
+          if ((ds === "legacy" || ds === "modern") && !fileCourseKeys.has(key)) {
+            staleProjectIds.push((existing as any).id);
+          }
         }
       }
       if (staleProjectIds.length > 0) {
@@ -1303,6 +1333,16 @@ export default function UploadData() {
       if (canceledInserts.length > 0) {
           await supabase.from("canceled_courses" as any).upsert(canceledInserts as any, { onConflict: "course_name_key,reporting_year" });
         }
+      }
+
+      if (hasTimeFile) {
+        const { error: clearTimeErr } = await supabase.from("time_entries").delete().not("id", "is", null);
+        if (clearTimeErr) throw clearTimeErr;
+      }
+
+      if (hasSmeFile) {
+        const { error: clearSurveyErr } = await supabase.from("sme_collaboration_surveys").delete().not("id", "is", null);
+        if (clearSurveyErr) throw clearSurveyErr;
       }
 
       const currentTimeOverrideRows = unmatchedTimeGroups.map((group) => {
@@ -1424,6 +1464,7 @@ export default function UploadData() {
               survey_date: e.surveyDate || null,
               sme: e.sme || null,
               sme_email: e.smeEmail || null,
+              internal: e.internal,
               sme_overall_experience_score: e.smeOverallExperienceScore,
               clarity_goals_score: e.clarityGoalsScore,
               staff_responsiveness_score: e.staffResponsivenessScore,

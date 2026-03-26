@@ -55,6 +55,29 @@ function parseClockLike(value: string): number | null {
   return null;
 }
 
+function parseUnitDurationHours(value: string): number | null {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const matches = [...normalized.matchAll(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|minutes?|mins?|min)\b/g)];
+  if (matches.length === 0) return null;
+
+  let consumed = "";
+  let total = 0;
+  for (const match of matches) {
+    const amount = Number.parseFloat(match[1]);
+    if (!Number.isFinite(amount)) return null;
+    const unit = match[2];
+    consumed += match[0];
+    if (unit.startsWith("h")) total += amount;
+    else total += amount / 60;
+  }
+
+  const remainder = normalized.replace(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|minutes?|mins?|min)\b/g, "").replace(/[,+]/g, " ").trim();
+  if (remainder.length > 0) return null;
+  return total;
+}
+
 export function parseDurationHours(raw: unknown): number {
   if (raw === null || raw === undefined || raw === "") return 0;
 
@@ -71,6 +94,29 @@ export function parseDurationHours(raw: unknown): number {
 
   // Decimal hours typed directly should pass through.
   return num;
+}
+
+export function parseCourseLengthHours(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? raw : null;
+  }
+
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const clock = parseClockLike(trimmed);
+  if (clock !== null) return clock;
+
+  const unitDuration = parseUnitDurationHours(trimmed);
+  if (unitDuration !== null) return unitDuration;
+
+  const numeric = Number.parseFloat(trimmed);
+  if (Number.isFinite(numeric) && /^-?\d+(?:\.\d+)?$/.test(trimmed)) return numeric;
+
+  return null;
 }
 
 export function toReportingYear(value: unknown): string {

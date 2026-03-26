@@ -25,6 +25,7 @@ describe("parseSmeSurveyFile", () => {
         "Survey Date": "3/1/2026",
         SME: "Jane Doe",
         "SME Email": "JANE@example.com",
+        Internal: "Yes",
         "Overall Experience with Lexipol": "Strongly Agree",
         "Clarity of Goals and Objectives": "Agree",
         "Staff Responsiveness": "Neutral",
@@ -63,6 +64,7 @@ describe("parseSmeSurveyFile", () => {
     expect(row.effectiveHourlyRate).toBe(100);
     expect(row.surveyDate).toBe("2026-03-01");
     expect(row.smeEmail).toBe("jane@example.com");
+    expect(row.internal).toBe("Yes");
     expect(row.smeOverallExperienceScore).toBe(5);
     expect(row.trainingSupportScore).toBe(1);
     expect(row.recommendLexipolScore).toBe(1);
@@ -81,6 +83,7 @@ describe("parseSmeSurveyFile", () => {
         Year: "2027",
         "Hours Worked": "",
         "Amount Billed": "",
+        Internal: "Maybe",
         "Overall Experience with Lexipol": "Sometimes",
         "Overall Rating of SME Collaboration - ID": "8",
         "SME Promoter Score - ID": "11",
@@ -91,6 +94,7 @@ describe("parseSmeSurveyFile", () => {
     const [row] = await parseSmeSurveyFile(file);
 
     expect(row.courseName).toBe("Course Beta");
+    expect(row.internal).toBeNull();
     expect(row.smeOverallExperienceScore).toBeNull();
     expect(row.idOverallCollaborationScore).toBeNull();
     expect(row.idSmePromoterScore).toBeNull();
