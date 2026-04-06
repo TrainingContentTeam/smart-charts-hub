@@ -363,7 +363,7 @@ export default function MasterContentInventory() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{summary.latestLinkedCourses}</p>
-            <p className="text-sm text-muted-foreground">Filtered courses that currently have both info and version data.</p>
+            <p className="text-sm text-muted-foreground">Courses that currently have both info and version data.</p>
           </CardContent>
         </Card>
 

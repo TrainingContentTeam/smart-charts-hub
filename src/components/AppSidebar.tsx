@@ -20,14 +20,10 @@ const primaryNavItems = [
   { title: "Development", url: "/development", icon: Wrench },
   { title: "SME Collaboration", url: "/sme-collaboration", icon: Users },
   { title: "Other External Teams", url: "/external-teams", icon: Building2 },
-];
-
-const projectNavItems = [
-  { title: "Projects", url: "/projects", icon: FolderOpen },
+  { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
 ];
 
 const underConstructionNavItems = [
-  { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
   { title: "Accreditation", url: "/accreditation", icon: LibraryBig },
 ];
 
