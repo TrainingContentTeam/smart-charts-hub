@@ -174,7 +174,6 @@ export type Database = {
       projects: {
         Row: {
           authoring_tool: string | null
-          content_hours: number | null
           course_length: string | null
           course_style: string | null
           course_type: string | null
@@ -195,7 +194,6 @@ export type Database = {
         }
         Insert: {
           authoring_tool?: string | null
-          content_hours?: number | null
           course_length?: string | null
           course_style?: string | null
           course_type?: string | null
@@ -216,7 +214,6 @@ export type Database = {
         }
         Update: {
           authoring_tool?: string | null
-          content_hours?: number | null
           course_length?: string | null
           course_style?: string | null
           course_type?: string | null
@@ -263,8 +260,8 @@ export type Database = {
           id_sme_knowledge_score: number | null
           id_sme_promoter_score: number | null
           incorporation_feedback_score: number | null
-          internal: string | null
           instructional_designer: string | null
+          internal: string | null
           project_id: string | null
           recommend_lexipol_score: number | null
           reporting_year: string | null
@@ -306,8 +303,8 @@ export type Database = {
           id_sme_knowledge_score?: number | null
           id_sme_promoter_score?: number | null
           incorporation_feedback_score?: number | null
-          internal?: string | null
           instructional_designer?: string | null
+          internal?: string | null
           project_id?: string | null
           recommend_lexipol_score?: number | null
           reporting_year?: string | null
@@ -349,8 +346,8 @@ export type Database = {
           id_sme_knowledge_score?: number | null
           id_sme_promoter_score?: number | null
           incorporation_feedback_score?: number | null
-          internal?: string | null
           instructional_designer?: string | null
+          internal?: string | null
           project_id?: string | null
           recommend_lexipol_score?: number | null
           reporting_year?: string | null

@@ -15,7 +15,7 @@ export default function DataExplorer() {
   const [sortKey, setSortKey] = useState<SortKey>("project");
   const [sortAsc, setSortAsc] = useState(true);
 
-  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p])), [projects]);
+  const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p] as [string, any])), [projects]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
