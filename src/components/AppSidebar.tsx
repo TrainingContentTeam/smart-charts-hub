@@ -23,6 +23,10 @@ const primaryNavItems = [
   { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
 ];
 
+const projectNavItems = [
+  { title: "Projects", url: "/projects", icon: FolderOpen },
+];
+
 const underConstructionNavItems = [
   { title: "Accreditation", url: "/accreditation", icon: LibraryBig },
 ];
