@@ -38,8 +38,47 @@ export type LocalUploadHistory = {
   file_name: string;
   row_count: number;
   status: string;
+  dataset_type?: string | null;
   user_id?: string;
   created_at: string;
+};
+
+export type LocalLmsCourseInfo = {
+  course_id: string;
+  original_publish_date?: string | null;
+  course_type?: string | null;
+  backend_url?: string | null;
+  frontend_url?: string | null;
+  upload_id?: string | null;
+  user_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LocalLmsCourseVersion = {
+  id: string;
+  course_id: string;
+  course_version: string;
+  course_name?: string | null;
+  authoring_tool?: string | null;
+  course_description?: string | null;
+  duration_minutes?: number | null;
+  published_date?: string | null;
+  change_type?: string | null;
+  lesson_plan?: string | null;
+  special?: string | null;
+  ems1a?: string | null;
+  p1a?: string | null;
+  fr1a?: string | null;
+  c1a?: string | null;
+  lgu?: string | null;
+  d1a?: string | null;
+  revamp_date?: string | null;
+  version_derived?: boolean | null;
+  upload_id?: string | null;
+  user_id?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type LocalSmeSurvey = {
@@ -112,6 +151,8 @@ type LocalStore = {
   sme_surveys: LocalSmeSurvey[];
   survey_no_match_records: LocalSurveyNoMatchRecord[];
   time_match_overrides: LocalTimeMatchOverride[];
+  lms_course_info: LocalLmsCourseInfo[];
+  lms_course_versions: LocalLmsCourseVersion[];
 };
 
 const STORAGE_KEY = "smart_charts_local_store_v1";
@@ -135,6 +176,8 @@ function sanitizeStore(parsed: Partial<LocalStore> | null | undefined): LocalSto
     sme_surveys: Array.isArray(parsed?.sme_surveys) ? parsed.sme_surveys : [],
     survey_no_match_records: Array.isArray(parsed?.survey_no_match_records) ? parsed.survey_no_match_records : [],
     time_match_overrides: Array.isArray(parsed?.time_match_overrides) ? parsed.time_match_overrides : [],
+    lms_course_info: Array.isArray(parsed?.lms_course_info) ? parsed.lms_course_info : [],
+    lms_course_versions: Array.isArray(parsed?.lms_course_versions) ? parsed.lms_course_versions : [],
   };
 }
 
@@ -175,7 +218,16 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
 }
 
 export async function readLocalStore(): Promise<LocalStore> {
-  const empty: LocalStore = { projects: [], time_entries: [], upload_history: [], sme_surveys: [], survey_no_match_records: [], time_match_overrides: [] };
+  const empty: LocalStore = {
+    projects: [],
+    time_entries: [],
+    upload_history: [],
+    sme_surveys: [],
+    survey_no_match_records: [],
+    time_match_overrides: [],
+    lms_course_info: [],
+    lms_course_versions: [],
+  };
   if (typeof window === "undefined") return empty;
 
   try {

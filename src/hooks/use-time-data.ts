@@ -72,6 +72,27 @@ export function useUploadHistory() {
   });
 }
 
+export function useCatalogUploadHistory() {
+  return useQuery({
+    queryKey: ["catalog_upload_history"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = await readLocalStore();
+        return [...local.upload_history]
+          .filter((row) => String(row.dataset_type || "").startsWith("catalog_"))
+          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+      }
+      const { data, error } = await supabase
+        .from("upload_history")
+        .select("*")
+        .like("dataset_type", "catalog_%")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
 export function useSmeSurveys() {
   return useQuery({
     queryKey: ["sme_surveys"],
@@ -84,6 +105,45 @@ export function useSmeSurveys() {
         .from("sme_collaboration_surveys")
         .select("*")
         .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useLmsCourseInfo() {
+  return useQuery({
+    queryKey: ["lms_course_info"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = await readLocalStore();
+        return [...local.lms_course_info].sort((a, b) => a.course_id.localeCompare(b.course_id));
+      }
+      const { data, error } = await supabase
+        .from("lms_course_info")
+        .select("*")
+        .order("course_id");
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useLmsCourseVersions() {
+  return useQuery({
+    queryKey: ["lms_course_versions"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        const local = await readLocalStore();
+        return [...local.lms_course_versions].sort((a, b) =>
+          a.course_id.localeCompare(b.course_id) || a.course_version.localeCompare(b.course_version),
+        );
+      }
+      const { data, error } = await supabase
+        .from("lms_course_versions")
+        .select("*")
+        .order("course_id")
+        .order("course_version");
       if (error) throw error;
       return data;
     },

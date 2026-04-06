@@ -11,6 +11,7 @@ import Development from "@/pages/Development";
 import SmeCollaboration from "@/pages/SmeCollaboration";
 import ExternalTeams from "@/pages/ExternalTeams";
 import MasterContentInventory from "@/pages/MasterContentInventory";
+import MasterContentInventoryUpload from "@/pages/MasterContentInventoryUpload";
 import Accreditation from "@/pages/Accreditation";
 import UploadData from "@/pages/UploadData";
 import Projects from "@/pages/Projects";
@@ -47,6 +48,7 @@ function ProtectedRoutes() {
         <Route path="/master-content-inventory" element={<MasterContentInventory />} />
         <Route path="/accreditation" element={<Accreditation />} />
         <Route path="/upload" element={<ProtectedRoute requiredRole="admin"><UploadData /></ProtectedRoute>} />
+        <Route path="/upload/master-content-inventory" element={<ProtectedRoute requiredRole="admin"><MasterContentInventoryUpload /></ProtectedRoute>} />
         <Route path="/user-management" element={<ProtectedRoute requiredRole="admin"><UserManagement /></ProtectedRoute>} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/explorer" element={<DataExplorer />} />

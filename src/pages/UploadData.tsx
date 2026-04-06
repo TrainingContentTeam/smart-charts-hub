@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1092,6 +1093,7 @@ export default function UploadData() {
             file_name: combinedFileName,
             row_count: totalRows,
             status: "completed",
+            dataset_type: "project_batch",
             user_id: user?.id,
             created_at: now,
           },
@@ -1105,6 +1107,8 @@ export default function UploadData() {
           sme_surveys: localSmeSurveys as any,
           survey_no_match_records: localSurveyNoMatchRecords as any,
           time_match_overrides: retainedTimeOverrides as any,
+          lms_course_info: local.lms_course_info as any,
+          lms_course_versions: local.lms_course_versions as any,
         });
 
         toast.success(`Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`);
@@ -1148,7 +1152,7 @@ export default function UploadData() {
       // Upload history
       const { data: upload, error: uploadErr } = await supabase
         .from("upload_history")
-        .insert({ file_name: combinedFileName, row_count: totalRows, user_id: user!.id })
+        .insert({ file_name: combinedFileName, row_count: totalRows, dataset_type: "project_batch", user_id: user!.id })
         .select()
         .single();
       if (uploadErr) throw uploadErr;
@@ -1616,7 +1620,7 @@ export default function UploadData() {
   }, [smeData, smeSortKey, smeSortAsc]);
 
   const sortedHistory = useMemo(() => {
-    const rows = [...history];
+    const rows = [...history].filter((row: any) => !String(row.dataset_type || "").startsWith("catalog_"));
     rows.sort((a: any, b: any) => {
       let cmp = 0;
       switch (historySortKey) {
@@ -1640,6 +1644,20 @@ export default function UploadData() {
         <h1 className="text-3xl font-bold tracking-tight">Upload Data</h1>
         <p className="text-muted-foreground">Import Legacy, Modern, Time Spent, and SME survey files. Review and correct only the current upload batch before import.</p>
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">Catalog Uploads Moved</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              LMS Course Info and LMS Course Versions now live on their own upload subpage so catalog snapshots stay separate from production project data.
+            </p>
+          </div>
+          <Button asChild variant="outline">
+            <Link to="/upload/master-content-inventory">Open Catalog Uploads</Link>
+          </Button>
+        </CardHeader>
+      </Card>
 
       {/* Upload drop zones */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">

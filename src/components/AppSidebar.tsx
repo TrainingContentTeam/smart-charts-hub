@@ -33,6 +33,7 @@ const underConstructionNavItems = [
 
 const adminNavItems = [
   { title: "Upload Data", url: "/upload", icon: Upload },
+  { title: "Catalog Uploads", url: "/upload/master-content-inventory", icon: LibraryBig },
   { title: "User Management", url: "/user-management", icon: Shield },
 ];
 
@@ -89,6 +90,7 @@ export function AppSidebar() {
                   <SidebarMenuButton asChild>
                     <NavLink
                       to={item.url}
+                      end={item.url === "/upload" || item.url === "/upload/master-content-inventory" || item.url === "/user-management"}
                       className="hover:bg-sidebar-accent"
                       activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
                     >
