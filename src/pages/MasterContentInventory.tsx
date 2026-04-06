@@ -324,7 +324,7 @@ export default function MasterContentInventory() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{summary.totalCourses}</p>
-            <p className="text-sm text-muted-foreground">Filtered unique course IDs in the catalog.</p>
+            <p className="text-sm text-muted-foreground">Unique course IDs in the catalog.</p>
           </CardContent>
         </Card>
 
