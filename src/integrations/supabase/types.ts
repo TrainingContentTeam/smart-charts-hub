@@ -93,7 +93,7 @@ export type Database = {
           course_description: string | null
           course_id: string
           course_name: string | null
-          course_version: string
+          course_version: string | null
           created_at: string
           d1a: string | null
           duration_minutes: number | null
@@ -109,7 +109,7 @@ export type Database = {
           updated_at: string
           upload_id: string | null
           user_id: string | null
-          version_derived: boolean
+          version_derived: boolean | null
         }
         Insert: {
           authoring_tool?: string | null
@@ -118,7 +118,7 @@ export type Database = {
           course_description?: string | null
           course_id: string
           course_name?: string | null
-          course_version: string
+          course_version?: string | null
           created_at?: string
           d1a?: string | null
           duration_minutes?: number | null
@@ -134,7 +134,7 @@ export type Database = {
           updated_at?: string
           upload_id?: string | null
           user_id?: string | null
-          version_derived?: boolean
+          version_derived?: boolean | null
         }
         Update: {
           authoring_tool?: string | null
@@ -143,7 +143,7 @@ export type Database = {
           course_description?: string | null
           course_id?: string
           course_name?: string | null
-          course_version?: string
+          course_version?: string | null
           created_at?: string
           d1a?: string | null
           duration_minutes?: number | null
@@ -159,7 +159,7 @@ export type Database = {
           updated_at?: string
           upload_id?: string | null
           user_id?: string | null
-          version_derived?: boolean
+          version_derived?: boolean | null
         }
         Relationships: [
           {

@@ -20,6 +20,7 @@ const primaryNavItems = [
   { title: "Development", url: "/development", icon: Wrench },
   { title: "SME Collaboration", url: "/sme-collaboration", icon: Users },
   { title: "Other External Teams", url: "/external-teams", icon: Building2 },
+  { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
 ];
 
 const projectNavItems = [
@@ -27,7 +28,6 @@ const projectNavItems = [
 ];
 
 const underConstructionNavItems = [
-  { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
   { title: "Accreditation", url: "/accreditation", icon: LibraryBig },
 ];
 

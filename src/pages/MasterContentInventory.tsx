@@ -314,53 +314,6 @@ export default function MasterContentInventory() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-primary" />
-            <CardTitle className="text-base">Filters</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Search</p>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search by course ID, course name, type, tool, version, lesson plan, special, or vertical"
-                  className="pl-9"
-                />
-              </div>
-            </div>
-            <FilterSelect label="Vertical" value={filters.vertical} onValueChange={(value) => setFilters((current) => ({ ...current, vertical: value }))} options={filterOptions.verticals} />
-            <FilterSelect label="Content Type" value={filters.contentType} onValueChange={(value) => setFilters((current) => ({ ...current, contentType: value }))} options={filterOptions.contentTypes} />
-            <FilterSelect label="Authoring Tool" value={filters.authoringTool} onValueChange={(value) => setFilters((current) => ({ ...current, authoringTool: value }))} options={filterOptions.authoringTools} />
-            <FilterSelect label="Age Group" value={filters.ageGroup} onValueChange={(value) => setFilters((current) => ({ ...current, ageGroup: value as InventoryFilters["ageGroup"] }))} options={filterOptions.ageGroups} />
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Multiple Versions</p>
-              <Select value={filters.multipleVersions} onValueChange={(value) => setFilters((current) => ({ ...current, multipleVersions: value as InventoryFilters["multipleVersions"] }))}>
-                <SelectTrigger className="h-8">
-                  <SelectValue placeholder="All" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="yes">Yes</SelectItem>
-                  <SelectItem value="no">No</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div>
-            <Button variant="outline" size="sm" onClick={() => { setSearch(""); setFilters(DEFAULT_FILTERS); setVerticalMode("latest"); setAgeChartMode("include_unknown"); }}>
-              Clear Filters
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
         <Card className="xl:col-span-3">
           <CardHeader className="pb-2">
@@ -371,7 +324,7 @@ export default function MasterContentInventory() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{summary.totalCourses}</p>
-            <p className="text-sm text-muted-foreground">Filtered unique course IDs in the catalog.</p>
+            <p className="text-sm text-muted-foreground">Unique course IDs in the catalog.</p>
           </CardContent>
         </Card>
 
@@ -410,7 +363,7 @@ export default function MasterContentInventory() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold">{summary.latestLinkedCourses}</p>
-            <p className="text-sm text-muted-foreground">Filtered courses that currently have both info and version data.</p>
+            <p className="text-sm text-muted-foreground">Courses that currently have both info and version data.</p>
           </CardContent>
         </Card>
 
@@ -484,6 +437,53 @@ export default function MasterContentInventory() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">Catalog Browser Filters</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Search</p>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search by course ID, course name, type, tool, version, lesson plan, special, or vertical"
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <FilterSelect label="Vertical" value={filters.vertical} onValueChange={(value) => setFilters((current) => ({ ...current, vertical: value }))} options={filterOptions.verticals} />
+            <FilterSelect label="Content Type" value={filters.contentType} onValueChange={(value) => setFilters((current) => ({ ...current, contentType: value }))} options={filterOptions.contentTypes} />
+            <FilterSelect label="Authoring Tool" value={filters.authoringTool} onValueChange={(value) => setFilters((current) => ({ ...current, authoringTool: value }))} options={filterOptions.authoringTools} />
+            <FilterSelect label="Age Group" value={filters.ageGroup} onValueChange={(value) => setFilters((current) => ({ ...current, ageGroup: value as InventoryFilters["ageGroup"] }))} options={filterOptions.ageGroups} />
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Multiple Versions</p>
+              <Select value={filters.multipleVersions} onValueChange={(value) => setFilters((current) => ({ ...current, multipleVersions: value as InventoryFilters["multipleVersions"] }))}>
+                <SelectTrigger className="h-8">
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="yes">Yes</SelectItem>
+                  <SelectItem value="no">No</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Button variant="outline" size="sm" onClick={() => { setSearch(""); setFilters(DEFAULT_FILTERS); }}>
+              Clear Filters
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="space-y-1">
