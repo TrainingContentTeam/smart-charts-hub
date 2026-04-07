@@ -119,12 +119,21 @@ export function useLmsCourseInfo() {
         const local = await readLocalStore();
         return [...local.lms_course_info].sort((a, b) => a.course_id.localeCompare(b.course_id));
       }
-      const { data, error } = await supabase
-        .from("lms_course_info")
-        .select("*")
-        .order("course_id");
-      if (error) throw error;
-      return data;
+      const allRows: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("lms_course_info")
+          .select("*")
+          .order("course_id")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        allRows.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      return allRows;
     },
   });
 }
@@ -139,13 +148,22 @@ export function useLmsCourseVersions() {
           a.course_id.localeCompare(b.course_id) || a.course_version.localeCompare(b.course_version),
         );
       }
-      const { data, error } = await supabase
-        .from("lms_course_versions")
-        .select("*")
-        .order("course_id")
-        .order("course_version");
-      if (error) throw error;
-      return data;
+      const allRows: any[] = [];
+      let from = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from("lms_course_versions")
+          .select("*")
+          .order("course_id")
+          .order("course_version")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        allRows.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+      return allRows;
     },
   });
 }
