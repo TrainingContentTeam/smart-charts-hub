@@ -228,20 +228,24 @@ export default function MasterContentInventoryUpload() {
         const { error: deleteError } = await supabase.from("lms_course_info").delete().not("course_id", "is", null);
         if (deleteError) throw deleteError;
 
-        const { error: insertError } = await supabase.from("lms_course_info").insert(
-          infoRows.map((row) => ({
-            course_id: row.courseId,
-            original_publish_date: row.originalPublishDate,
-            course_type: row.courseType || null,
-            backend_url: row.backendUrl || null,
-            frontend_url: row.frontendUrl || null,
-            upload_id: uploadId,
-            user_id: user?.id,
-            created_at: now,
-            updated_at: now,
-          })) as any,
-        );
-        if (insertError) throw insertError;
+        const infoBatch = infoRows.map((row) => ({
+          course_id: row.courseId,
+          original_publish_date: row.originalPublishDate,
+          course_type: row.courseType || null,
+          backend_url: row.backendUrl || null,
+          frontend_url: row.frontendUrl || null,
+          upload_id: uploadId,
+          user_id: user?.id,
+          created_at: now,
+          updated_at: now,
+        }));
+        const BATCH = 500;
+        for (let i = 0; i < infoBatch.length; i += BATCH) {
+          const { error: insertError } = await supabase
+            .from("lms_course_info")
+            .insert(infoBatch.slice(i, i + BATCH) as any);
+          if (insertError) throw insertError;
+        }
       }
 
       refreshQueries();
