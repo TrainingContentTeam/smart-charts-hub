@@ -326,32 +326,37 @@ export default function MasterContentInventoryUpload() {
         const { error: deleteError } = await supabase.from("lms_course_versions").delete().not("course_id", "is", null);
         if (deleteError) throw deleteError;
 
-        const { error: insertError } = await supabase.from("lms_course_versions").insert(
-          versionRows.map((row) => ({
-            course_id: row.courseId,
-            course_version: row.courseVersion,
-            course_name: row.courseName || null,
-            authoring_tool: row.authoringTool || null,
-            course_description: row.courseDescription || null,
-            duration_minutes: row.durationMinutes,
-            published_date: row.publishedDate,
-            change_type: row.changeType || null,
-            lesson_plan: row.lessonPlan || null,
-            special: row.special || null,
-            ems1a: row.ems1a || null,
-            p1a: row.p1a || null,
-            fr1a: row.fr1a || null,
-            c1a: row.c1a || null,
-            lgu: row.lgu || null,
-            d1a: row.d1a || null,
-            revamp_date: row.revampDate,
-            version_derived: row.versionSource === "derived",
-            upload_id: uploadId,
-            user_id: user?.id,
-            created_at: now,
-            updated_at: now,
-          })) as any,
-        );
+        const versionBatch = versionRows.map((row) => ({
+          course_id: row.courseId,
+          course_version: row.courseVersion,
+          course_name: row.courseName || null,
+          authoring_tool: row.authoringTool || null,
+          course_description: row.courseDescription || null,
+          duration_minutes: row.durationMinutes,
+          published_date: row.publishedDate,
+          change_type: row.changeType || null,
+          lesson_plan: row.lessonPlan || null,
+          special: row.special || null,
+          ems1a: row.ems1a || null,
+          p1a: row.p1a || null,
+          fr1a: row.fr1a || null,
+          c1a: row.c1a || null,
+          lgu: row.lgu || null,
+          d1a: row.d1a || null,
+          revamp_date: row.revampDate,
+          version_derived: row.versionSource === "derived",
+          upload_id: uploadId,
+          user_id: user?.id,
+          created_at: now,
+          updated_at: now,
+        }));
+        const BATCH = 500;
+        for (let i = 0; i < versionBatch.length; i += BATCH) {
+          const { error: insertError } = await supabase
+            .from("lms_course_versions")
+            .insert(versionBatch.slice(i, i + BATCH) as any);
+          if (insertError) throw insertError;
+        }
         if (insertError) throw insertError;
       }
 
