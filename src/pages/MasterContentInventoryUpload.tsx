@@ -357,7 +357,6 @@ export default function MasterContentInventoryUpload() {
             .insert(versionBatch.slice(i, i + BATCH) as any);
           if (insertError) throw insertError;
         }
-        if (insertError) throw insertError;
       }
 
       refreshQueries();
