@@ -1,4 +1,4 @@
-import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut, Construction, Shield } from "lucide-react";
+import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut, Shield, ExternalLink } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
 import { useUserRole } from "@/hooks/use-user-role";
@@ -20,20 +20,15 @@ const primaryNavItems = [
   { title: "Development", url: "/development", icon: Wrench },
   { title: "SME Collaboration", url: "/sme-collaboration", icon: Users },
   { title: "Other External Teams", url: "/external-teams", icon: Building2 },
-  { title: "Master Content Inventory", url: "/master-content-inventory", icon: LibraryBig },
+  { title: "Course Catalog & Accreditation", url: "https://coursecatalog.lovable.app/", icon: LibraryBig, external: true },
 ];
 
 const projectNavItems = [
   { title: "Projects", url: "/projects", icon: FolderOpen },
 ];
 
-const underConstructionNavItems = [
-  { title: "Accreditation", url: "/accreditation", icon: LibraryBig },
-];
-
 const adminNavItems = [
   { title: "Upload Data", url: "/upload", icon: Upload },
-  { title: "Catalog Uploads", url: "/upload/master-content-inventory", icon: LibraryBig },
   { title: "User Management", url: "/user-management", icon: Shield },
 ];
 
@@ -63,15 +58,28 @@ export function AppSidebar() {
               {primaryNavItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
-                    <NavLink
-                      to={item.url}
-                      end={item.url === "/"}
-                      className="hover:bg-sidebar-accent"
-                      activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
-                    >
-                      <item.icon className="mr-2 h-4 w-4" />
-                      <span>{item.title}</span>
-                    </NavLink>
+                    {item.external ? (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="hover:bg-sidebar-accent flex items-center"
+                      >
+                        <item.icon className="mr-2 h-4 w-4" />
+                        <span>{item.title}</span>
+                        <ExternalLink className="ml-auto h-3.5 w-3.5 opacity-70" />
+                      </a>
+                    ) : (
+                      <NavLink
+                        to={item.url}
+                        end={item.url === "/"}
+                        className="hover:bg-sidebar-accent"
+                        activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+                      >
+                        <item.icon className="mr-2 h-4 w-4" />
+                        <span>{item.title}</span>
+                      </NavLink>
+                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -90,39 +98,12 @@ export function AppSidebar() {
                   <SidebarMenuButton asChild>
                     <NavLink
                       to={item.url}
-                      end={item.url === "/upload" || item.url === "/upload/master-content-inventory" || item.url === "/user-management"}
+                      end={item.url === "/upload" || item.url === "/user-management"}
                       className="hover:bg-sidebar-accent"
                       activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
                     >
                       <item.icon className="mr-2 h-4 w-4" />
                       <span>{item.title}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <div className="mx-4 border-t border-sidebar-border" />
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Under Construction</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {underConstructionNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to={item.url}
-                      className="hover:bg-sidebar-accent"
-                      activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
-                    >
-                      <item.icon className="mr-2 h-4 w-4" />
-                      <span className="flex items-center gap-1">
-                        {item.title}
-                        <Construction className="h-3.5 w-3.5 opacity-80" />
-                      </span>
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
