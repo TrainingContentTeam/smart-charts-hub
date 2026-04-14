@@ -41,6 +41,136 @@ export type Database = {
         }
         Relationships: []
       }
+      lms_course_info: {
+        Row: {
+          backend_url: string | null
+          course_id: string
+          course_type: string | null
+          created_at: string
+          frontend_url: string | null
+          original_publish_date: string | null
+          updated_at: string
+          upload_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          backend_url?: string | null
+          course_id: string
+          course_type?: string | null
+          created_at?: string
+          frontend_url?: string | null
+          original_publish_date?: string | null
+          updated_at?: string
+          upload_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          backend_url?: string | null
+          course_id?: string
+          course_type?: string | null
+          created_at?: string
+          frontend_url?: string | null
+          original_publish_date?: string | null
+          updated_at?: string
+          upload_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lms_course_info_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "upload_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lms_course_versions: {
+        Row: {
+          authoring_tool: string | null
+          c1a: string | null
+          change_type: string | null
+          course_description: string | null
+          course_id: string
+          course_name: string | null
+          course_version: string | null
+          created_at: string
+          d1a: string | null
+          duration_minutes: number | null
+          ems1a: string | null
+          fr1a: string | null
+          id: string
+          lesson_plan: string | null
+          lgu: string | null
+          p1a: string | null
+          published_date: string | null
+          revamp_date: string | null
+          special: string | null
+          updated_at: string
+          upload_id: string | null
+          user_id: string | null
+          version_derived: boolean | null
+        }
+        Insert: {
+          authoring_tool?: string | null
+          c1a?: string | null
+          change_type?: string | null
+          course_description?: string | null
+          course_id: string
+          course_name?: string | null
+          course_version?: string | null
+          created_at?: string
+          d1a?: string | null
+          duration_minutes?: number | null
+          ems1a?: string | null
+          fr1a?: string | null
+          id?: string
+          lesson_plan?: string | null
+          lgu?: string | null
+          p1a?: string | null
+          published_date?: string | null
+          revamp_date?: string | null
+          special?: string | null
+          updated_at?: string
+          upload_id?: string | null
+          user_id?: string | null
+          version_derived?: boolean | null
+        }
+        Update: {
+          authoring_tool?: string | null
+          c1a?: string | null
+          change_type?: string | null
+          course_description?: string | null
+          course_id?: string
+          course_name?: string | null
+          course_version?: string | null
+          created_at?: string
+          d1a?: string | null
+          duration_minutes?: number | null
+          ems1a?: string | null
+          fr1a?: string | null
+          id?: string
+          lesson_plan?: string | null
+          lgu?: string | null
+          p1a?: string | null
+          published_date?: string | null
+          revamp_date?: string | null
+          special?: string | null
+          updated_at?: string
+          upload_id?: string | null
+          user_id?: string | null
+          version_derived?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lms_course_versions_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "upload_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           authoring_tool: string | null
@@ -251,6 +381,33 @@ export type Database = {
           },
         ]
       }
+      survey_no_match_records: {
+        Row: {
+          course_name_key: string
+          created_at: string
+          id: string
+          original_course_name: string
+          reporting_year: string | null
+          user_id: string | null
+        }
+        Insert: {
+          course_name_key: string
+          created_at?: string
+          id?: string
+          original_course_name: string
+          reporting_year?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          course_name_key?: string
+          created_at?: string
+          id?: string
+          original_course_name?: string
+          reporting_year?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       time_entries: {
         Row: {
           category: string | null
@@ -313,6 +470,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      time_match_overrides: {
+        Row: {
+          course_name_key: string
+          created_at: string
+          id: string
+          original_course_name: string
+          reporting_year: string | null
+          target_project_key: string
+          user_id: string | null
+        }
+        Insert: {
+          course_name_key: string
+          created_at?: string
+          id?: string
+          original_course_name: string
+          reporting_year?: string | null
+          target_project_key: string
+          user_id?: string | null
+        }
+        Update: {
+          course_name_key?: string
+          created_at?: string
+          id?: string
+          original_course_name?: string
+          reporting_year?: string | null
+          target_project_key?: string
+          user_id?: string | null
+        }
+        Relationships: []
       }
       upload_history: {
         Row: {
