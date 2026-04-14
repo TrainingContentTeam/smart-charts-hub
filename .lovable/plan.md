@@ -1,44 +1,61 @@
 
 
-# Master Content Inventory — Database + UI Updates
+# Fix: Stale Chart Data and Missing Database Tables
 
-## Problem
+## What this fixes
 
-Three things need to happen:
-1. **Database tables missing**: The `lms_course_info` and `lms_course_versions` tables don't exist in the database, and `upload_history` is missing a `dataset_type` column. The upload page code already references these, so uploads fail.
-2. **Construction icon**: The sidebar shows a construction icon next to "Master Content Inventory" — it should be removed since the page is ready.
-3. **Filter scoping**: The filters card currently affects the summary stats cards and charts (Vertical Coverage, Catalog Age). They should only affect the Catalog Browser table at the bottom.
+1. **Constant 404 errors** — Two tables (`survey_no_match_records` and `time_match_overrides`) are referenced in code but don't exist in the database, causing nonstop failed requests that can interfere with data loading.
+2. **Stale cached data after upload** — React Query has no retry limits or staleness window, so old data can persist. Also, some query keys (`canceled_courses`, `lms_course_info`, `lms_course_versions`) are not invalidated after project batch uploads.
 
----
+## Steps
 
-## Plan
+### Step 1 — Database migration: create the two missing tables
 
-### Step 1 — Create database tables and add missing column (migration)
-
-Run a single migration with:
-
-**Add `dataset_type` column to `upload_history`:**
 ```sql
-ALTER TABLE public.upload_history ADD COLUMN IF NOT EXISTS dataset_type text;
+CREATE TABLE public.survey_no_match_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  course_name_key text NOT NULL,
+  original_course_name text NOT NULL,
+  reporting_year text,
+  user_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.survey_no_match_records ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Auth read survey_no_match" ON public.survey_no_match_records FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Insert own survey_no_match" ON public.survey_no_match_records FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Delete own survey_no_match" ON public.survey_no_match_records FOR DELETE TO authenticated USING (auth.uid() = user_id);
+
+CREATE TABLE public.time_match_overrides (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  course_name_key text NOT NULL,
+  original_course_name text NOT NULL,
+  reporting_year text,
+  target_project_key text NOT NULL,
+  user_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.time_match_overrides ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Auth read time_match_overrides" ON public.time_match_overrides FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Insert own time_match_overrides" ON public.time_match_overrides FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Delete own time_match_overrides" ON public.time_match_overrides FOR DELETE TO authenticated USING (auth.uid() = user_id);
 ```
 
-**Create `lms_course_info` table:**
-- Columns: `course_id` (text, PK), `original_publish_date` (text), `course_type` (text), `backend_url` (text), `frontend_url` (text), `upload_id` (uuid, FK → upload_history), `user_id` (uuid), `created_at` (timestamptz), `updated_at` (timestamptz)
-- RLS: authenticated can SELECT all, INSERT/DELETE own rows (by user_id)
+### Step 2 — Configure QueryClient with retry limits
 
-**Create `lms_course_versions` table:**
-- Columns: `id` (uuid, PK), `course_id` (text), `course_version` (text), `course_name` (text), `authoring_tool` (text), `course_description` (text), `duration_minutes` (integer), `published_date` (text), `change_type` (text), `lesson_plan` (text), `special` (text), `ems1a`/`p1a`/`fr1a`/`c1a`/`lgu`/`d1a` (text), `revamp_date` (text), `version_derived` (boolean), `upload_id` (uuid, FK → upload_history), `user_id` (uuid), `created_at` (timestamptz), `updated_at` (timestamptz)
-- RLS: authenticated can SELECT all, INSERT/DELETE own rows (by user_id)
+In `src/App.tsx`, change:
+```typescript
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+```
 
-### Step 2 — Remove construction icon from sidebar
+### Step 3 — Add missing cache invalidation keys after project batch upload
 
-In `src/components/AppSidebar.tsx`, move "Master Content Inventory" from `underConstructionNavItems` into `primaryNavItems` (or a new non-construction group). If "Accreditation" is the only remaining construction item, keep that section for it alone.
-
-### Step 3 — Scope filters to Catalog Browser only
-
-In `src/pages/MasterContentInventory.tsx`:
-- The summary cards (total courses, multi-version, undated, linked metadata), the Vertical Coverage chart, and the Catalog Age chart should always use the full unfiltered `combinedCourses` dataset
-- The filters card (search, vertical, content type, authoring tool, age group, multiple versions) should be moved visually into (or just above) the Catalog Browser section
-- Only the `browserFilteredCourses` list uses filters — this is already the case in code, **except** the summary cards currently show "Filtered" counts. Update the summary cards to use `combinedCourses.length` instead of being affected by filters. The charts already use `combinedCourses` so they're fine.
-- Move the Filters card from its current position (between the header and the stats) to just before the Catalog Browser card
+In `src/pages/UploadData.tsx` around line 1145, add invalidation for `canceled_courses`, `lms_course_info`, and `lms_course_versions` to the project batch upload success block.
 
