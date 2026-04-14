@@ -1143,6 +1143,9 @@ export default function UploadData() {
         queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
         queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
         queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
+        queryClient.invalidateQueries({ queryKey: ["canceled_courses"] });
+        queryClient.invalidateQueries({ queryKey: ["lms_course_info"] });
+        queryClient.invalidateQueries({ queryKey: ["lms_course_versions"] });
         return;
       }
 
@@ -1540,6 +1543,10 @@ export default function UploadData() {
       queryClient.invalidateQueries({ queryKey: ["upload_history"] });
       queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
       queryClient.invalidateQueries({ queryKey: ["canceled_courses"] });
+      queryClient.invalidateQueries({ queryKey: ["lms_course_info"] });
+      queryClient.invalidateQueries({ queryKey: ["lms_course_versions"] });
+      queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
+      queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
       queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
       queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
     } catch (err: any) {

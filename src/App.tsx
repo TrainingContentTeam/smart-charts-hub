@@ -18,7 +18,15 @@ import UserManagement from "@/pages/UserManagement";
 import Auth from "@/pages/Auth";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 function ProtectedRoutes() {
   const { session, loading } = useAuth();
