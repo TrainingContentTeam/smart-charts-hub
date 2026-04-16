@@ -7,7 +7,6 @@ import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Link2, ChevronDown,
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { parseLegacyCourseFile, type LegacyCourse } from "@/lib/parse-legacy-course";
@@ -17,13 +16,14 @@ import { parseTimeSpentFile, type TimeSpentEntry } from "@/lib/parse-time-spent"
 import { makeId, readLocalStore, writeLocalStore } from "@/lib/local-data-store";
 import { normalizeProjectStatus } from "@/lib/project-status";
 import {
-  buildCoursePersistenceAuditRows,
-  type CoursePersistenceAuditRow,
-  type CoursePersistenceInputRow,
-} from "@/lib/course-persistence-audit";
+  parseEntryYear,
+  resolveProjectKeyForTimeEntryWithOverride,
+  type TimeResolutionReason,
+  type TimelineProjectCandidate,
+} from "@/lib/time-entry-resolution";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { useProjects, useUploadHistory } from "@/hooks/use-time-data";
+import { useUploadHistory } from "@/hooks/use-time-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
@@ -56,42 +56,47 @@ type UploadUser = {
   created_at: string;
 };
 
-type StatusComparisonRow = {
-  source: string;
-  year: string;
-  uploadTotal: number;
-  uploadIncomplete: number;
-  persistedTotal: number;
-  persistedIncomplete: number;
-};
-
-type YearlyStatusComparisonRow = {
-  year: string;
-  uploadCompleted: number;
-  uploadActive: number;
-  persistedCompleted: number;
-  persistedActive: number;
-};
-
-type StatusMismatchRow = {
+type CourseRosterRow = {
   key: string;
   courseName: string;
-  year: string;
+  source: "legacy" | "modern";
+  reportingYear: string;
   rawYear: string;
-  source: string;
-  issue: string;
-  uploadStatus: string;
-  persistedStatus: string;
+  rawStatus: string;
+  isComplete: boolean;
 };
 
-type YearKeyDiagnosticsRow = {
+type SourceYearSummaryRow = {
   source: string;
-  rawYear: string;
-  normalizedYear: string;
+  year: string;
   total: number;
-  finalized: number;
+  completed: number;
   active: number;
-  malformed: boolean;
+};
+
+type DuplicateTitleGroupRow = {
+  key: string;
+  courseName: string;
+  variantCount: number;
+  years: string;
+  sources: string;
+  variants: string;
+};
+
+type DuplicateTitleResolutionSummaryRow = {
+  reason: Extract<TimeResolutionReason, "exact_year" | "source_hint" | "manual_override" | "unresolved">;
+  label: string;
+  count: number;
+  description: string;
+};
+
+type UndatedAmbiguousTimeRow = {
+  index: number;
+  courseName: string;
+  date: string;
+  hours: number;
+  candidateCount: number;
+  candidateProjects: string;
 };
 
 interface DropZoneProps {
@@ -110,6 +115,8 @@ interface SearchableProjectSelectProps {
   value?: string;
   onChange: (value: string) => void;
 }
+
+const GROUPED_TIME_RESOLUTION_REASONS = new Set<TimeResolutionReason>(["no_candidate", "unresolved"]);
 
 function DropZone({ label, description, fileName, count, onFile, id }: DropZoneProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -206,34 +213,6 @@ function courseKey(courseName: string, reportingYear?: string): string {
   return `${normKey(courseName)}::${normKey(reportingYear || "")}`;
 }
 
-function parseEntryYear(entryDate: string): number | null {
-  if (!entryDate) return null;
-  const match = entryDate.match(/^(\d{4})-/);
-  if (!match) return null;
-  const year = Number.parseInt(match[1], 10);
-  return Number.isFinite(year) ? year : null;
-}
-
-type ProjectCandidate = {
-  key: string;
-  id: string;
-  reportingYear: string;
-  dataSource: string;
-};
-
-type ResolveReason =
-  | "no_candidate"
-  | "single"
-  | "exact_year"
-  | "source_hint"
-  | "fallback_latest"
-  | "manual_override";
-
-type ResolveResult = {
-  key: string | null;
-  reason: ResolveReason;
-};
-
 type SurveyResolveResult = {
   key: string | null;
   reason: "exact" | "no_candidate" | "manual_override";
@@ -260,41 +239,6 @@ type TimeMatchOverrideRecord = {
   reporting_year: string | null;
   target_project_key: string;
 };
-
-function resolveProjectKeyForTimeEntry(entry: TimeSpentEntry, byName: Map<string, ProjectCandidate[]>): ResolveResult {
-  return resolveProjectKeyForTimeEntryWithOverride(entry, byName, null);
-}
-
-function resolveProjectKeyForTimeEntryWithOverride(
-  entry: TimeSpentEntry,
-  byName: Map<string, ProjectCandidate[]>,
-  manualOverrideKey: string | null,
-): ResolveResult {
-  if (manualOverrideKey) return { key: manualOverrideKey, reason: "manual_override" };
-  const nameKey = normKey(entry.courseName);
-  const candidates = byName.get(nameKey) || [];
-  if (candidates.length === 0) return { key: null, reason: "no_candidate" };
-  if (candidates.length === 1) return { key: candidates[0].key, reason: "single" };
-
-  const entryYear = parseEntryYear(entry.date);
-  if (entryYear !== null) {
-    const exactYear = candidates.filter((c) => c.reportingYear === String(entryYear));
-    if (exactYear.length > 0) return { key: exactYear[0].key, reason: "exact_year" };
-
-    const preferredSource = entryYear <= 2025 ? "legacy" : "modern";
-    const sourceMatch = candidates.filter((c) => c.dataSource === preferredSource);
-    if (sourceMatch.length > 0) return { key: sourceMatch[0].key, reason: "source_hint" };
-  }
-
-  return {
-    key: [...candidates].sort((a, b) => b.reportingYear.localeCompare(a.reportingYear))[0].key,
-    reason: "fallback_latest",
-  };
-}
-
-function resolveProjectKeyForSurvey(entry: SmeCollaborationSurveyImport, allCourseKeys: Set<string>): SurveyResolveResult {
-  return resolveProjectKeyForSurveyWithOverride(entry, allCourseKeys, null);
-}
 
 function resolveProjectKeyForSurveyWithOverride(
   entry: SmeCollaborationSurveyImport,
@@ -348,20 +292,13 @@ function buildPreviewProjectVariants(legacyData: LegacyCourse[] | null, modernDa
   return { byName, allKeys, allVariants };
 }
 
-function replaceDateYear(date: string, reportingYear: string): string {
-  const cleanYear = reportingYear.trim();
-  if (!cleanYear) return date;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return `${cleanYear}${date.slice(4)}`;
-  return `${cleanYear}-01-01`;
-}
-
-function describeTimeResolution(reason: ResolveReason): string {
+function describeTimeResolution(reason: TimeResolutionReason): string {
   switch (reason) {
     case "manual_override": return "Manually matched to a selected project";
     case "single": return "Matched to the only project with this course name";
     case "exact_year": return "Matched by course name and entry year";
     case "source_hint": return "Matched by source hint from the entry year";
-    case "fallback_latest": return "Matched by fallback to the latest reporting year";
+    case "unresolved": return "Multiple reporting-year candidates need manual review";
     default: return "No project matched this course name/date";
   }
 }
@@ -409,17 +346,6 @@ function normalizeYearLabel(value: unknown): string {
   return year || "Unknown";
 }
 
-function normalizeSourceLabel(value: unknown): string {
-  const source = String(value || "").trim().toLowerCase();
-  if (source === "legacy") return "legacy";
-  if (source === "modern") return "modern";
-  return source || "unknown";
-}
-
-function isCleanFourDigitYear(value: unknown): boolean {
-  return /^\d{4}$/.test(String(value || "").trim());
-}
-
 export default function UploadData() {
   const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
   const [legacyFile, setLegacyFile] = useState("");
@@ -443,10 +369,7 @@ export default function UploadData() {
   const [historySortKey, setHistorySortKey] = useState<"file" | "rows" | "status" | "date">("date");
   const [historySortAsc, setHistorySortAsc] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [issueOpen, setIssueOpen] = useState({
-    blocking: true,
-    fallback: true,
-  });
+  const [issueOpen, setIssueOpen] = useState({ blocking: true });
   const [showMore, setShowMore] = useState({
     blockingTime: 10,
     blockingSurvey: 10,
@@ -458,9 +381,7 @@ export default function UploadData() {
   const [surveyNoMatchKeys, setSurveyNoMatchKeys] = useState<Set<string>>(new Set());
   const [autoSurveyNoMatchKeys, setAutoSurveyNoMatchKeys] = useState<Set<string>>(new Set());
   const [autoTimeOverrideGroups, setAutoTimeOverrideGroups] = useState<Set<string>>(new Set());
-  const [statusDiagnosticYear, setStatusDiagnosticYear] = useState<string>("all");
   const { data: history = [] } = useUploadHistory();
-  const { data: persistedProjects = [] } = useProjects();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -584,7 +505,6 @@ export default function UploadData() {
     unresolvedCount: number,
     unresolvedSurveyCount: number,
     retainedNoMatchSurveyCount: number,
-    fallbackCount: number,
     sourceHintCount: number,
   ) => {
     toast.success(
@@ -604,9 +524,6 @@ export default function UploadData() {
     }
     if (retainedNoMatchSurveyCount > 0) {
       toast.message(`${retainedNoMatchSurveyCount} SME survey rows were retained as no-match records.`);
-    }
-    if (fallbackCount > 0) {
-      toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
     }
     if (sourceHintCount > 0) {
       toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
@@ -737,9 +654,8 @@ export default function UploadData() {
       new Map(
         [...previewProjects.byName.entries()].map(([name, variants]) => [
           name,
-          variants.map((variant) => ({
+          variants.map((variant): TimelineProjectCandidate => ({
             key: variant.key,
-            id: variant.key,
             reportingYear: variant.reportingYear,
             dataSource: variant.dataSource,
           })),
@@ -794,16 +710,16 @@ export default function UploadData() {
     setWarnings(matchInfo?.warn || []);
   }, [matchInfo]);
 
-  const uploadStatusRows = useMemo(() => {
-    const rows: CoursePersistenceInputRow[] = [];
+  const courseRosterRows = useMemo(() => {
+    const rows: CourseRosterRow[] = [];
 
     (legacyData || []).forEach((course) => {
       rows.push({
         key: courseKey(course.courseName, course.reportingYear),
         courseName: course.courseName,
-        year: normalizeYearLabel(course.reportingYear),
-        rawYear: String(course.reportingYear || "").trim(),
         source: "legacy",
+        reportingYear: normalizeYearLabel(course.reportingYear),
+        rawYear: String(course.reportingYear || "").trim(),
         rawStatus: String(course.status || "").trim(),
         isComplete: isCompletedProjectStatus(course.status),
       });
@@ -813,9 +729,9 @@ export default function UploadData() {
       rows.push({
         key: courseKey(course.courseName, course.reportingYear),
         courseName: course.courseName,
-        year: normalizeYearLabel(course.reportingYear),
-        rawYear: String(course.reportingYear || "").trim(),
         source: "modern",
+        reportingYear: normalizeYearLabel(course.reportingYear),
+        rawYear: String(course.reportingYear || "").trim(),
         rawStatus: String(course.status || "").trim(),
         isComplete: isCompletedProjectStatus(course.status),
       });
@@ -824,223 +740,50 @@ export default function UploadData() {
     return rows;
   }, [legacyData, modernData]);
 
-  const persistedStatusRows = useMemo(() => {
-    return (persistedProjects as any[])
-      .filter((project: any) => {
-        const source = normalizeSourceLabel(project.data_source);
-        return source === "legacy" || source === "modern";
-      })
-      .map((project: any) => ({
-        key: courseKey(project.name, project.reporting_year),
-        courseName: String(project.name || "").trim(),
-        year: normalizeYearLabel(project.reporting_year),
-        rawYear: String(project.reporting_year || "").trim(),
-        source: normalizeSourceLabel(project.data_source),
-        rawStatus: String(project.status || "").trim(),
-        isComplete: isCompletedProjectStatus(project.status),
-      }));
-  }, [persistedProjects]);
+  const courseRosterSummary = useMemo(() => {
+    const counts = new Map<string, SourceYearSummaryRow>();
 
-  const availableStatusDiagnosticYears = useMemo(() => {
-    const set = new Set<string>();
-    uploadStatusRows.forEach((row) => set.add(row.year));
-    persistedStatusRows.forEach((row) => set.add(row.year));
-    return [...set].sort(compareYearLabel);
-  }, [persistedStatusRows, uploadStatusRows]);
-
-  const filteredUploadStatusRows = useMemo(
-    () => uploadStatusRows.filter((row) => statusDiagnosticYear === "all" || row.year === statusDiagnosticYear),
-    [statusDiagnosticYear, uploadStatusRows],
-  );
-
-  const filteredPersistedStatusRows = useMemo(
-    () => persistedStatusRows.filter((row) => statusDiagnosticYear === "all" || row.year === statusDiagnosticYear),
-    [persistedStatusRows, statusDiagnosticYear],
-  );
-
-  const coursePersistenceAuditRows = useMemo(
-    () => buildCoursePersistenceAuditRows(filteredUploadStatusRows, filteredPersistedStatusRows),
-    [filteredPersistedStatusRows, filteredUploadStatusRows],
-  );
-
-  const coursePersistenceSummary = useMemo(() => {
-    const countBySource = (rows: CoursePersistenceInputRow[], source: string) =>
-      rows.filter((row) => row.source === source).length;
-
-    return {
-      uploadLegacyTotal: countBySource(filteredUploadStatusRows, "legacy"),
-      uploadModernTotal: countBySource(filteredUploadStatusRows, "modern"),
-      persistedLegacyTotal: countBySource(filteredPersistedStatusRows, "legacy"),
-      persistedModernTotal: countBySource(filteredPersistedStatusRows, "modern"),
-      issueCount: coursePersistenceAuditRows.filter((row) => row.reason !== "Persisted").length,
-    };
-  }, [coursePersistenceAuditRows, filteredPersistedStatusRows, filteredUploadStatusRows]);
-
-  const dashboardStatusDiagnostics = useMemo(() => {
-    const uploadMap = new Map(filteredUploadStatusRows.map((row) => [row.key, row]));
-    const persistedMap = new Map(filteredPersistedStatusRows.map((row) => [row.key, row]));
-    const counts = new Map<string, StatusComparisonRow>();
-
-    const ensureCount = (source: string, year: string) => {
-      const key = `${source}::${year}`;
-      const existing = counts.get(key);
-      if (existing) return existing;
-      const next: StatusComparisonRow = {
-        source,
-        year,
-        uploadTotal: 0,
-        uploadIncomplete: 0,
-        persistedTotal: 0,
-        persistedIncomplete: 0,
-      };
-      counts.set(key, next);
-      return next;
-    };
-
-    filteredUploadStatusRows.forEach((row) => {
-      const entry = ensureCount(row.source, row.year);
-      entry.uploadTotal += 1;
-      if (!row.isComplete) entry.uploadIncomplete += 1;
-    });
-
-    filteredPersistedStatusRows.forEach((row) => {
-      const entry = ensureCount(row.source, row.year);
-      entry.persistedTotal += 1;
-      if (!row.isComplete) entry.persistedIncomplete += 1;
-    });
-
-    const allKeys = new Set<string>([...uploadMap.keys(), ...persistedMap.keys()]);
-    const mismatches: StatusMismatchRow[] = [];
-    const yearlyCounts = new Map<string, YearlyStatusComparisonRow>();
-
-    const ensureYearlyCount = (year: string) => {
-      const existing = yearlyCounts.get(year);
-      if (existing) return existing;
-      const next: YearlyStatusComparisonRow = {
-        year,
-        uploadCompleted: 0,
-        uploadActive: 0,
-        persistedCompleted: 0,
-        persistedActive: 0,
-      };
-      yearlyCounts.set(year, next);
-      return next;
-    };
-
-    allKeys.forEach((key) => {
-      const upload = uploadMap.get(key);
-      const persisted = persistedMap.get(key);
-      if (upload && !persisted) {
-        mismatches.push({
-          key,
-          courseName: upload.courseName,
-          year: upload.year,
-          rawYear: upload.rawYear || "(blank)",
-          source: upload.source,
-          issue: "Missing from persisted projects",
-          uploadStatus: upload.rawStatus || "(blank)",
-          persistedStatus: "(missing)",
-        });
-        return;
-      }
-      if (!upload && persisted) {
-        mismatches.push({
-          key,
-          courseName: persisted.courseName,
-          year: persisted.year,
-          rawYear: persisted.rawYear || "(blank)",
-          source: persisted.source,
-          issue: "Extra persisted project not in current upload",
-          uploadStatus: "(missing)",
-          persistedStatus: persisted.rawStatus || "(blank)",
-        });
-        return;
-      }
-      if (!upload || !persisted) return;
-      if (
-        upload.isComplete !== persisted.isComplete ||
-        upload.rawStatus !== persisted.rawStatus ||
-        upload.rawYear !== persisted.rawYear
-      ) {
-        mismatches.push({
-          key,
-          courseName: upload.courseName,
-          year: upload.year,
-          rawYear: persisted.rawYear || upload.rawYear || "(blank)",
-          source: upload.source,
-          issue: upload.rawYear !== persisted.rawYear
-            ? "Reporting year mismatch"
-            : upload.isComplete !== persisted.isComplete
-              ? "Completion bucket mismatch"
-              : "Raw status text mismatch",
-          uploadStatus: upload.rawStatus || "(blank)",
-          persistedStatus: persisted.rawStatus || "(blank)",
-        });
-      }
-    });
-
-    filteredUploadStatusRows.forEach((row) => {
-      const entry = ensureYearlyCount(row.year);
-      if (row.isComplete) entry.uploadCompleted += 1;
-      else entry.uploadActive += 1;
-    });
-
-    filteredPersistedStatusRows.forEach((row) => {
-      const entry = ensureYearlyCount(row.year);
-      if (row.isComplete) entry.persistedCompleted += 1;
-      else entry.persistedActive += 1;
-    });
-
-    const uploadIncomplete = filteredUploadStatusRows.filter((row) => !row.isComplete).length;
-    const persistedIncomplete = filteredPersistedStatusRows.filter((row) => !row.isComplete).length;
-
-    return {
-      uploadTotal: filteredUploadStatusRows.length,
-      uploadIncomplete,
-      persistedTotal: filteredPersistedStatusRows.length,
-      persistedIncomplete,
-      dashboardDonutComplete: filteredPersistedStatusRows.length - persistedIncomplete,
-      dashboardDonutIncomplete: persistedIncomplete,
-      comparisonRows: [...counts.values()].sort((a, b) => a.source.localeCompare(b.source) || compareYearLabel(a.year, b.year)),
-      yearlyRows: [...yearlyCounts.values()].sort((a, b) => compareYearLabel(a.year, b.year)),
-      mismatchRows: mismatches.sort((a, b) => compareYearLabel(a.year, b.year) || a.courseName.localeCompare(b.courseName)),
-    };
-  }, [filteredPersistedStatusRows, filteredUploadStatusRows]);
-
-  const rawYearDiagnostics = useMemo(() => {
-    const counts = new Map<string, YearKeyDiagnosticsRow>();
-
-    const addRow = (row: CoursePersistenceInputRow) => {
-      const rawYear = row.rawYear || "(blank)";
-      const key = `${row.source}::${rawYear}::${row.year}`;
+    courseRosterRows.forEach((row) => {
+      const key = `${row.source}::${row.reportingYear}`;
       const existing = counts.get(key);
       if (existing) {
         existing.total += 1;
-        if (row.isComplete) existing.finalized += 1;
+        if (row.isComplete) existing.completed += 1;
         else existing.active += 1;
         return;
       }
       counts.set(key, {
         source: row.source,
-        rawYear,
-        normalizedYear: row.year,
+        year: row.reportingYear,
         total: 1,
-        finalized: row.isComplete ? 1 : 0,
+        completed: row.isComplete ? 1 : 0,
         active: row.isComplete ? 0 : 1,
-        malformed: !isCleanFourDigitYear(rawYear),
       });
-    };
+    });
 
-    filteredUploadStatusRows.forEach(addRow);
-    filteredPersistedStatusRows.forEach(addRow);
+    return [...counts.values()].sort((a, b) => a.source.localeCompare(b.source) || compareYearLabel(a.year, b.year));
+  }, [courseRosterRows]);
 
-    return [...counts.values()].sort(
-      (a, b) =>
-        a.source.localeCompare(b.source) ||
-        compareYearLabel(a.normalizedYear, b.normalizedYear) ||
-        a.rawYear.localeCompare(b.rawYear),
-    );
-  }, [filteredPersistedStatusRows, filteredUploadStatusRows]);
+  const duplicateTitleGroups = useMemo(() => {
+    return [...previewProjects.byName.entries()]
+      .filter(([, variants]) => variants.length > 1)
+      .map(([nameKey, variants]): DuplicateTitleGroupRow => {
+        const sortedVariants = [...variants].sort((a, b) => compareYearLabel(a.reportingYear, b.reportingYear) || a.dataSource.localeCompare(b.dataSource));
+        const years = [...new Set(sortedVariants.map((variant) => variant.reportingYear || "Unknown"))];
+        const sources = [...new Set(sortedVariants.map((variant) => variant.dataSource))];
+        return {
+          key: nameKey,
+          courseName: sortedVariants[0]?.name || nameKey,
+          variantCount: sortedVariants.length,
+          years: years.join(", "),
+          sources: sources.join(", "),
+          variants: sortedVariants
+            .map((variant) => `${variant.reportingYear || "Unknown"} · ${variant.dataSource}`)
+            .join(" | "),
+        };
+      })
+      .sort((a, b) => a.courseName.localeCompare(b.courseName));
+  }, [previewProjects]);
 
   const timeIssueRows = useMemo(() => {
     if (!timeData) return [];
@@ -1050,9 +793,9 @@ export default function UploadData() {
       const blockingReasons: string[] = [];
       const reviewReasons: string[] = [];
       if (resolved.reason === "no_candidate") blockingReasons.push("No project matched this course name/date");
+      if (resolved.reason === "unresolved") blockingReasons.push("Duplicate title spans multiple reporting years");
       if (entry.hours === 0) blockingReasons.push("Zero hours detected");
       if (resolved.reason === "source_hint") reviewReasons.push("Matched by source hint");
-      if (resolved.reason === "fallback_latest") reviewReasons.push("Matched by fallback to latest year");
 
       return {
         index,
@@ -1065,6 +808,70 @@ export default function UploadData() {
       };
     });
   }, [timeData, previewProjects, previewProjectCandidates, timeOverrideKeys]);
+
+  const duplicateTitleTimeRows = useMemo(
+    () => timeIssueRows.filter((row) => row.suggestedCandidates.length > 1),
+    [timeIssueRows],
+  );
+
+  const duplicateTitleResolutionSummary = useMemo(() => {
+    const counts: Record<DuplicateTitleResolutionSummaryRow["reason"], number> = {
+      exact_year: 0,
+      source_hint: 0,
+      manual_override: 0,
+      unresolved: 0,
+    };
+
+    duplicateTitleTimeRows.forEach((row) => {
+      if (row.resolved.reason in counts) {
+        counts[row.resolved.reason as DuplicateTitleResolutionSummaryRow["reason"]] += 1;
+      }
+    });
+
+    const definitions: Omit<DuplicateTitleResolutionSummaryRow, "count">[] = [
+      {
+        reason: "exact_year",
+        label: "Exact-Year Match",
+        description: "Entry date year matched a duplicate-title project year directly.",
+      },
+      {
+        reason: "source_hint",
+        label: "Source-Hint Match",
+        description: "Entry year pointed uniquely to Legacy or Modern when no exact project year existed.",
+      },
+      {
+        reason: "manual_override",
+        label: "Manual Override",
+        description: "You chose the target project for a duplicate-title time row.",
+      },
+      {
+        reason: "unresolved",
+        label: "Needs Review",
+        description: "Multiple reporting-year candidates remain and the row should not auto-attach yet.",
+      },
+    ];
+
+    return definitions.map((definition) => ({
+      ...definition,
+      count: counts[definition.reason],
+    }));
+  }, [duplicateTitleTimeRows]);
+
+  const undatedAmbiguousTimeRows = useMemo(() => {
+    return duplicateTitleTimeRows
+      .filter((row) => row.resolved.reason === "unresolved" && parseEntryYear(row.entry.date) === null)
+      .map((row): UndatedAmbiguousTimeRow => ({
+        index: row.index,
+        courseName: row.entry.courseName,
+        date: row.entry.date || "(blank)",
+        hours: row.entry.hours,
+        candidateCount: row.suggestedCandidates.length,
+        candidateProjects: row.suggestedCandidates
+          .map((candidate) => `${candidate.reportingYear || "Unknown"} · ${candidate.dataSource}`)
+          .join(" | "),
+      }))
+      .sort((a, b) => a.courseName.localeCompare(b.courseName) || a.index - b.index);
+  }, [duplicateTitleTimeRows]);
 
   const surveyIssueRows = useMemo(() => {
     if (!smeData) return [];
@@ -1093,7 +900,7 @@ export default function UploadData() {
     () => surveyIssueRows.filter((row) => row.blockingReasons.length > 0 && surveyNoMatchKeys.has(row.matchKey)),
     [surveyIssueRows, surveyNoMatchKeys],
   );
-  const unmatchedTimeGroups = useMemo(() => {
+  const timeReviewGroups = useMemo(() => {
     const groups = new Map<string, {
       groupKey: string;
       courseName: string;
@@ -1102,10 +909,13 @@ export default function UploadData() {
       forceCandidates: PreviewProjectVariant[];
       activeOverrideKey: string | undefined;
       datePreview: string;
+      groupReason: Extract<TimeResolutionReason, "no_candidate" | "unresolved">;
+      allowCancel: boolean;
+      candidateProjects: string;
     }>();
 
     blockingTimeRows
-      .filter((row) => row.resolved.reason === "no_candidate")
+      .filter((row) => GROUPED_TIME_RESOLUTION_REASONS.has(row.resolved.reason))
       .forEach((row) => {
         const groupKey = normKey(row.entry.courseName);
         const existing = groups.get(groupKey);
@@ -1115,7 +925,7 @@ export default function UploadData() {
           return;
         }
         const dates = [row.entry.date, ...blockingTimeRows
-          .filter((candidate) => candidate.resolved.reason === "no_candidate" && normKey(candidate.entry.courseName) === groupKey)
+          .filter((candidate) => GROUPED_TIME_RESOLUTION_REASONS.has(candidate.resolved.reason) && normKey(candidate.entry.courseName) === groupKey)
           .map((candidate) => candidate.entry.date)]
           .filter(Boolean);
         groups.set(groupKey, {
@@ -1126,22 +936,27 @@ export default function UploadData() {
           forceCandidates: row.forceCandidates,
           activeOverrideKey: timeOverrideKeys[row.index],
           datePreview: [...new Set(dates)].slice(0, 3).join(", "),
+          groupReason: row.resolved.reason as Extract<TimeResolutionReason, "no_candidate" | "unresolved">,
+          allowCancel: row.resolved.reason === "no_candidate",
+          candidateProjects: row.suggestedCandidates.length > 0
+            ? row.suggestedCandidates.map((candidate) => `${candidate.reportingYear || "Unknown"} · ${candidate.dataSource}`).join(" | ")
+            : "No reporting-year candidates",
         });
       });
 
     return [...groups.values()].sort((a, b) => b.rows.length - a.rows.length || a.courseName.localeCompare(b.courseName));
   }, [blockingTimeRows, timeOverrideKeys]);
   const individualBlockingTimeRows = useMemo(
-    () => blockingTimeRows.filter((row) => row.resolved.reason !== "no_candidate"),
+    () => blockingTimeRows.filter((row) => !GROUPED_TIME_RESOLUTION_REASONS.has(row.resolved.reason)),
     [blockingTimeRows],
   );
   const hasReviewIssues = blockingTimeRows.length > 0 || blockingSurveyRows.length > 0;
 
   // Auto-detect previously canceled courses when unmatched groups change
   useEffect(() => {
-    if (canceledCoursesFromDb.length === 0 || unmatchedTimeGroups.length === 0) return;
+    if (canceledCoursesFromDb.length === 0 || timeReviewGroups.length === 0) return;
     const autoSet = new Set<string>();
-    for (const group of unmatchedTimeGroups) {
+    for (const group of timeReviewGroups.filter((candidate) => candidate.allowCancel)) {
       const nk = normKey(group.courseName);
       // Infer year from group entries
       const years = new Set<string>();
@@ -1163,13 +978,13 @@ export default function UploadData() {
       setCanceledGroups((prev) => new Set([...prev, ...autoSet]));
       setAutoCanceledGroups(autoSet);
     }
-  }, [canceledCoursesFromDb, unmatchedTimeGroups]);
+  }, [canceledCoursesFromDb, timeReviewGroups]);
 
   useEffect(() => {
-    if (timeMatchOverrideRecords.length === 0 || unmatchedTimeGroups.length === 0) return;
+    if (timeMatchOverrideRecords.length === 0 || timeReviewGroups.length === 0) return;
     const autoSet = new Set<string>();
     const nextOverrides: Record<number, string | undefined> = {};
-    unmatchedTimeGroups.forEach((group) => {
+    timeReviewGroups.forEach((group) => {
       const years = new Set<string>();
       group.rows.forEach((row) => {
         const year = parseEntryYear(row.entry.date);
@@ -1190,7 +1005,7 @@ export default function UploadData() {
       setTimeOverrideKeys((prev) => ({ ...nextOverrides, ...prev }));
       setAutoTimeOverrideGroups(autoSet);
     }
-  }, [timeMatchOverrideRecords, unmatchedTimeGroups]);
+  }, [timeMatchOverrideRecords, timeReviewGroups]);
 
   useEffect(() => {
     if (surveyNoMatchRecords.length === 0 || surveyIssueRows.length === 0) return;
@@ -1245,7 +1060,7 @@ export default function UploadData() {
         (modernData || []).forEach(c => modernMap.set(courseKey(c.courseName, c.reportingYear), c));
 
         const projectIdMap = new Map<string, string>();
-        const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
+        const projectCandidatesByName = new Map<string, TimelineProjectCandidate[]>();
         const importedCourseCount = new Set([
           ...legacyMap.keys(),
           ...modernMap.keys(),
@@ -1389,7 +1204,6 @@ export default function UploadData() {
 
         let timeCount = 0;
         let unresolvedCount = 0;
-        let fallbackCount = 0;
         let sourceHintCount = 0;
         const localTimeEntries = hasTimeFile
           ? []
@@ -1408,12 +1222,13 @@ export default function UploadData() {
         let retainedNoMatchSurveyCount = 0;
         // Build set of canceled course name keys to skip
         const canceledNameKeys = new Set<string>();
-        for (const group of unmatchedTimeGroups) {
+        for (const group of timeReviewGroups) {
+          if (!group.allowCancel) continue;
           if (canceledGroups.has(group.groupKey)) canceledNameKeys.add(group.groupKey);
         }
         let canceledSkipCount = 0;
 
-        const currentTimeOverrideRows = unmatchedTimeGroups
+        const currentTimeOverrideRows = timeReviewGroups
           .map((group) => {
             const years = new Set<string>();
             group.rows.forEach((row) => {
@@ -1463,7 +1278,6 @@ export default function UploadData() {
             }
             const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
             if (!resolved.key) unresolvedCount += 1;
-            if (resolved.reason === "fallback_latest") fallbackCount += 1;
             if (resolved.reason === "source_hint") sourceHintCount += 1;
             localTimeEntries.push({
               id: makeId(),
@@ -1603,7 +1417,6 @@ export default function UploadData() {
           unresolvedCount,
           unresolvedSurveyCount,
           retainedNoMatchSurveyCount,
-          fallbackCount,
           sourceHintCount,
         );
         resetUploadState();
@@ -1634,7 +1447,7 @@ export default function UploadData() {
 
       // Upsert projects
       const projectIdMap = new Map<string, string>();
-      const projectCandidatesByName = new Map<string, ProjectCandidate[]>();
+      const projectCandidatesByName = new Map<string, TimelineProjectCandidate[]>();
       const fileCourseKeys = new Set([
         ...legacyMap.keys(),
         ...modernMap.keys(),
@@ -1774,7 +1587,6 @@ export default function UploadData() {
       // Insert time entries from Time Spent file
       let timeCount = 0;
       let unresolvedCount = 0;
-      let fallbackCount = 0;
       let sourceHintCount = 0;
       let surveyCount = 0;
       let unresolvedSurveyCount = 0;
@@ -1784,7 +1596,8 @@ export default function UploadData() {
 
       // Build set of canceled course name keys to skip
       const canceledNameKeys = new Set<string>();
-      for (const group of unmatchedTimeGroups) {
+      for (const group of timeReviewGroups) {
+        if (!group.allowCancel) continue;
         if (canceledGroups.has(group.groupKey)) canceledNameKeys.add(group.groupKey);
       }
       let canceledSkipCount = 0;
@@ -1792,8 +1605,8 @@ export default function UploadData() {
       // Persist canceled courses to database
       if (canceledNameKeys.size > 0) {
         const canceledInserts: Array<{ course_name_key: string; reporting_year: string | null; original_course_name: string; user_id: string }> = [];
-        for (const group of unmatchedTimeGroups) {
-          if (!canceledGroups.has(group.groupKey)) continue;
+        for (const group of timeReviewGroups) {
+          if (!group.allowCancel || !canceledGroups.has(group.groupKey)) continue;
           const years = new Set<string>();
           group.rows.forEach((row) => {
             const y = parseEntryYear(row.entry.date);
@@ -1830,7 +1643,7 @@ export default function UploadData() {
         if (clearSurveyErr) throw clearSurveyErr;
       }
 
-      const currentTimeOverrideRows = unmatchedTimeGroups.map((group) => {
+      const currentTimeOverrideRows = timeReviewGroups.map((group) => {
         const years = new Set<string>();
         group.rows.forEach((row) => {
           const year = parseEntryYear(row.entry.date);
@@ -1904,7 +1717,6 @@ export default function UploadData() {
               }
               const resolved = resolveProjectKeyForTimeEntryWithOverride(e, projectCandidatesByName, timeOverrideKeys[index] || null);
               if (!resolved.key) unresolvedCount += 1;
-              if (resolved.reason === "fallback_latest") fallbackCount += 1;
               if (resolved.reason === "source_hint") sourceHintCount += 1;
               return {
                 project_id: resolved.key ? projectIdMap.get(resolved.key) || null : null,
@@ -1999,7 +1811,6 @@ export default function UploadData() {
         unresolvedCount,
         unresolvedSurveyCount,
         retainedNoMatchSurveyCount,
-        fallbackCount,
         sourceHintCount,
       );
       resetUploadState();
@@ -2206,56 +2017,41 @@ export default function UploadData() {
 
       {hasCourseFilesLoaded && (
         <Card>
-          <CardHeader className="space-y-3">
-            <div className="space-y-1">
-              <CardTitle className="text-base">Course Persistence &amp; Status Audit</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Legacy and Modern files define the authoritative course roster. The Projects page reads persisted `projects.status`, and that status is sourced from `[LCT] Status (M)` / `(L)` only.
-              </p>
-            </div>
-            <div className="w-full max-w-[220px]">
-              <Select value={statusDiagnosticYear} onValueChange={setStatusDiagnosticYear}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Filter by year" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Years</SelectItem>
-                  {availableStatusDiagnosticYears.map((year) => (
-                    <SelectItem key={year} value={year}>{year}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-base">Reporting-Year Timeline Review</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Legacy and Modern files define the authoritative course roster and project metadata. Time entries attach to those projects by development timeline, and project status still comes only from `[LCT] Status (M)` / `(L)`.
+            </p>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">Uploaded Legacy Rows</p>
-                <p className="text-2xl font-bold">{coursePersistenceSummary.uploadLegacyTotal}</p>
+                <p className="text-2xl font-bold">{courseRosterRows.filter((row) => row.source === "legacy").length}</p>
               </div>
               <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">Uploaded Modern Rows</p>
-                <p className="text-2xl font-bold">{coursePersistenceSummary.uploadModernTotal}</p>
+                <p className="text-2xl font-bold">{courseRosterRows.filter((row) => row.source === "modern").length}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Persisted Legacy Projects</p>
-                <p className="text-2xl font-bold">{coursePersistenceSummary.persistedLegacyTotal}</p>
+                <p className="text-xs text-muted-foreground">Duplicate Title Groups</p>
+                <p className="text-2xl font-bold">{duplicateTitleGroups.length}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Persisted Modern Projects</p>
-                <p className="text-2xl font-bold">{coursePersistenceSummary.persistedModernTotal}</p>
+                <p className="text-xs text-muted-foreground">Needs Timeline Review</p>
+                <p className="text-2xl font-bold">{duplicateTitleResolutionSummary.find((row) => row.reason === "unresolved")?.count ?? 0}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Audit Issues</p>
-                <p className="text-2xl font-bold">{coursePersistenceSummary.issueCount}</p>
+                <p className="text-xs text-muted-foreground">Source-Hint Matches</p>
+                <p className="text-2xl font-bold">{duplicateTitleResolutionSummary.find((row) => row.reason === "source_hint")?.count ?? 0}</p>
               </div>
             </div>
 
             <div className="space-y-2">
               <div>
-                <p className="font-medium">Source-Year Reconciliation</p>
+                <p className="font-medium">Uploaded Course Roster by Reporting Year</p>
                 <p className="text-sm text-muted-foreground">
-                  Compares uploaded Legacy/Modern rows to currently persisted Legacy/Modern projects by source and normalized reporting year.
+                  Each Legacy and Modern row contributes to the roster summary below using the normalized `reporting_year` that will drive project placement.
                 </p>
               </div>
               <div className="rounded-md border">
@@ -2264,69 +2060,24 @@ export default function UploadData() {
                     <TableRow>
                       <TableHead>Source</TableHead>
                       <TableHead>Year</TableHead>
-                      <TableHead>Uploaded Rows</TableHead>
-                      <TableHead>Uploaded Active</TableHead>
-                      <TableHead>Persisted Projects</TableHead>
-                      <TableHead>Persisted Active</TableHead>
+                      <TableHead>Rows</TableHead>
+                      <TableHead>Finalized</TableHead>
+                      <TableHead>Active</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {dashboardStatusDiagnostics.comparisonRows.length > 0 ? dashboardStatusDiagnostics.comparisonRows.map((row) => (
+                    {courseRosterSummary.length > 0 ? courseRosterSummary.map((row) => (
                       <TableRow key={`${row.source}-${row.year}`}>
                         <TableCell className="font-medium capitalize">{row.source}</TableCell>
                         <TableCell className="font-medium">{row.year}</TableCell>
-                        <TableCell>{row.uploadTotal}</TableCell>
-                        <TableCell>{row.uploadIncomplete}</TableCell>
-                        <TableCell>{row.persistedTotal}</TableCell>
-                        <TableCell>{row.persistedIncomplete}</TableCell>
-                      </TableRow>
-                    )) : (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground">
-                          Load Legacy and/or Modern files to compare uploaded rows against persisted projects.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div>
-                <p className="font-medium">Raw Reporting Year Keys</p>
-                <p className="text-sm text-muted-foreground">
-                  Surfaces raw year values exactly as loaded or stored so values like `2026 Courses`, blank years, or malformed keys stand out.
-                </p>
-              </div>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Raw Year</TableHead>
-                      <TableHead>Normalized Year</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Finalized</TableHead>
-                      <TableHead>Active</TableHead>
-                      <TableHead>Malformed</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rawYearDiagnostics.length > 0 ? rawYearDiagnostics.map((row) => (
-                      <TableRow key={`${row.source}-${row.rawYear}-${row.normalizedYear}`}>
-                        <TableCell className="font-medium capitalize">{row.source}</TableCell>
-                        <TableCell>{row.rawYear}</TableCell>
-                        <TableCell>{row.normalizedYear}</TableCell>
                         <TableCell>{row.total}</TableCell>
-                        <TableCell>{row.finalized}</TableCell>
+                        <TableCell>{row.completed}</TableCell>
                         <TableCell>{row.active}</TableCell>
-                        <TableCell>{row.malformed ? "Yes" : "No"}</TableCell>
                       </TableRow>
                     )) : (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center text-muted-foreground">
-                          No year-key diagnostics are available yet.
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          Load Legacy and/or Modern files to summarize the uploaded course roster.
                         </TableCell>
                       </TableRow>
                     )}
@@ -2337,43 +2088,109 @@ export default function UploadData() {
 
             <div className="space-y-2">
               <div>
-                <p className="font-medium">Course Key Audit</p>
+                <p className="font-medium">Duplicate Title Groups</p>
                 <p className="text-sm text-muted-foreground">
-                  One row per Course Name + Reporting Year key, showing whether the uploaded course is currently persisted and the exact reason when it is not.
+                  If the same course title appears in multiple reporting years, time entries should resolve by dated development timeline instead of silently attaching to the latest project.
                 </p>
               </div>
-              <div className="rounded-md border max-h-[520px] overflow-auto">
+              <div className="rounded-md border max-h-[360px] overflow-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Course</TableHead>
-                      <TableHead>Year</TableHead>
-                      <TableHead>Raw Year</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Upload Rows</TableHead>
-                      <TableHead>Uploaded Status</TableHead>
-                      <TableHead>Persisted</TableHead>
-                      <TableHead>Persisted Status</TableHead>
-                      <TableHead>Reason</TableHead>
+                      <TableHead>Variants</TableHead>
+                      <TableHead>Reporting Years</TableHead>
+                      <TableHead>Sources</TableHead>
+                      <TableHead>Projects</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {coursePersistenceAuditRows.length > 0 ? coursePersistenceAuditRows.map((row: CoursePersistenceAuditRow) => (
-                      <TableRow key={`${row.key}-${row.reason}`}>
+                    {duplicateTitleGroups.length > 0 ? duplicateTitleGroups.map((row) => (
+                      <TableRow key={row.key}>
                         <TableCell className="font-medium">{row.courseName}</TableCell>
-                        <TableCell>{row.year}</TableCell>
-                        <TableCell>{row.rawYear}</TableCell>
-                        <TableCell className="capitalize">{row.source}</TableCell>
-                        <TableCell>{row.uploadRowCount}</TableCell>
-                        <TableCell>{row.uploadStatus}</TableCell>
-                        <TableCell>{row.persisted ? "Yes" : "No"}</TableCell>
-                        <TableCell>{row.persistedStatus}</TableCell>
-                        <TableCell>{row.reason}</TableCell>
+                        <TableCell>{row.variantCount}</TableCell>
+                        <TableCell>{row.years}</TableCell>
+                        <TableCell className="capitalize">{row.sources}</TableCell>
+                        <TableCell>{row.variants}</TableCell>
                       </TableRow>
                     )) : (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center text-muted-foreground">
-                          Load Legacy and/or Modern files to audit uploaded course keys against persisted projects.
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No duplicate course titles are loaded in the current course files.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <p className="font-medium">Duplicate-Title Time Resolution</p>
+                <p className="text-sm text-muted-foreground">
+                  These counts show how duplicate-title time rows are resolving right now: exact year, source hint, manual override, or still needing review.
+                </p>
+              </div>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Outcome</TableHead>
+                      <TableHead>Count</TableHead>
+                      <TableHead>Meaning</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {duplicateTitleResolutionSummary.some((row) => row.count > 0) ? duplicateTitleResolutionSummary.map((row) => (
+                      <TableRow key={row.reason}>
+                        <TableCell className="font-medium">{row.label}</TableCell>
+                        <TableCell>{row.count}</TableCell>
+                        <TableCell>{row.description}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center text-muted-foreground">
+                          Load time entries alongside duplicate-title courses to review timeline resolution outcomes.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <p className="font-medium">Undated Duplicate-Year Time Rows Needing Review</p>
+                <p className="text-sm text-muted-foreground">
+                  These rows match multiple reporting-year projects but do not have a usable entry date year, so they stay unresolved until you choose the correct project.
+                </p>
+              </div>
+              <div className="rounded-md border max-h-[360px] overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Time Row</TableHead>
+                      <TableHead>Course</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Hours</TableHead>
+                      <TableHead>Candidate Projects</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {undatedAmbiguousTimeRows.length > 0 ? undatedAmbiguousTimeRows.map((row) => (
+                      <TableRow key={`undated-ambiguous-${row.index}`}>
+                        <TableCell className="font-medium">#{row.index + 1}</TableCell>
+                        <TableCell>{row.courseName}</TableCell>
+                        <TableCell>{row.date}</TableCell>
+                        <TableCell>{row.hours}</TableCell>
+                        <TableCell>{row.candidateProjects}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No undated duplicate-year time rows need review in the current upload.
                         </TableCell>
                       </TableRow>
                     )}
@@ -2458,13 +2275,16 @@ export default function UploadData() {
 
                         <div className="space-y-1">
                           <p className="text-sm font-medium">Time Spent Data</p>
-                          <p className="text-xs text-muted-foreground">Unmatched time rows, canceled projects, and remembered default project matches.</p>
+                          <p className="text-xs text-muted-foreground">Timeline review for unmatched titles, duplicate reporting-year matches, canceled projects, and remembered default project matches.</p>
                         </div>
 
-                        {unmatchedTimeGroups.slice(0, showMore.blockingTime).map((group) => {
+                        {timeReviewGroups.slice(0, showMore.blockingTime).map((group) => {
                           const isCanceled = canceledGroups.has(group.groupKey);
                           const wasAutoCanceled = autoCanceledGroups.has(group.groupKey);
                           const hasAutoOverride = autoTimeOverrideGroups.has(group.groupKey) && !!group.activeOverrideKey;
+                          const groupBadgeLabel = group.groupReason === "unresolved"
+                            ? "Needs reporting-year review"
+                            : "No project matched this course name/date";
                           return (
                           <div key={`blocking-time-group-${group.groupKey}`} className={cn("rounded-md border p-3 space-y-3", isCanceled && "opacity-60")}>
                             <div className="flex items-center justify-between gap-2">
@@ -2473,7 +2293,7 @@ export default function UploadData() {
                                 {isCanceled ? (
                                   <Badge variant="secondary">Canceled Project</Badge>
                                 ) : (
-                                  <Badge variant="outline">No project matched this course name/date</Badge>
+                                  <Badge variant="outline">{groupBadgeLabel}</Badge>
                                 )}
                                 {wasAutoCanceled && isCanceled && (
                                   <span className="text-xs text-muted-foreground italic">Previously marked as canceled</span>
@@ -2482,21 +2302,25 @@ export default function UploadData() {
                                   <span className="text-xs text-muted-foreground italic">Previous default project match applied</span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2">
-                                <Checkbox
-                                  id={`cancel-${group.groupKey}`}
-                                  checked={isCanceled}
-                                  onCheckedChange={() => toggleCanceledGroup(group.groupKey)}
-                                />
-                                <label htmlFor={`cancel-${group.groupKey}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
-                                  Canceled Project
-                                </label>
-                              </div>
+                              {group.allowCancel && (
+                                <div className="flex items-center gap-2">
+                                  <Checkbox
+                                    id={`cancel-${group.groupKey}`}
+                                    checked={isCanceled}
+                                    onCheckedChange={() => toggleCanceledGroup(group.groupKey)}
+                                  />
+                                  <label htmlFor={`cancel-${group.groupKey}`} className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
+                                    Canceled Project
+                                  </label>
+                                </div>
+                              )}
                             </div>
                             {!isCanceled && (
                               <>
                             <p className="text-xs text-muted-foreground">
-                              Apply one match here to update all {group.rows.length} rows for this course in the current upload batch.
+                              {group.groupReason === "unresolved"
+                                ? `These rows match multiple projects for the same title. Choose the correct reporting-year project to attach all ${group.rows.length} rows without changing the source dates.`
+                                : `Apply one match here to update all ${group.rows.length} rows for this course in the current upload batch.`}
                             </p>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div className="space-y-1">
@@ -2519,6 +2343,12 @@ export default function UploadData() {
                                 </div>
                               </div>
                             </div>
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground">Candidate Projects</p>
+                              <div className="min-h-10 rounded-md border px-3 py-2 text-sm bg-muted/30 flex items-center">
+                                {group.candidateProjects}
+                              </div>
+                            </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground">Apply Suggested Match to All Rows</p>
@@ -2532,10 +2362,7 @@ export default function UploadData() {
                                     if (!selected) return;
                                     const indexes = group.rows.map((row) => row.index);
                                     setTimeOverrides(indexes, selected.key);
-                                    updateTimeEntries(indexes, (entry) => ({
-                                      courseName: selected.name,
-                                      date: replaceDateYear(entry.date, selected.reportingYear),
-                                    }));
+                                    updateTimeEntries(indexes, () => ({ courseName: selected.name }));
                                   }}
                                 />
                               </div>
@@ -2602,10 +2429,7 @@ export default function UploadData() {
                                     const selected = row.suggestedCandidates.find((candidate) => candidate.key === value);
                                     if (!selected) return;
                                     setTimeOverride(row.index, selected.key);
-                                    updateTimeEntry(row.index, {
-                                      courseName: selected.name,
-                                      date: replaceDateYear(row.entry.date, selected.reportingYear),
-                                    });
+                                    updateTimeEntry(row.index, { courseName: selected.name });
                                   }}
                                 />
                               </div>
@@ -2628,7 +2452,7 @@ export default function UploadData() {
                             )}
                           </div>
                         ))}
-                        {unmatchedTimeGroups.length + individualBlockingTimeRows.length > showMore.blockingTime && (
+                        {timeReviewGroups.length + individualBlockingTimeRows.length > showMore.blockingTime && (
                           <Button variant="outline" onClick={() => setShowMore((current) => ({ ...current, blockingTime: current.blockingTime + 10 }))}>
                             Show More Time Fixes
                           </Button>

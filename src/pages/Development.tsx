@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useProjects, useTimeEntries } from "@/hooks/use-time-data";
 import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { isCompletedProjectStatus, normalizeProjectStatus } from "@/lib/project-status";
+import { isCarryoverFromTimeline, parseReportingYear } from "@/lib/project-timeline";
 import { ChartActions } from "@/components/ChartActions";
 import { ChartDataTable } from "@/components/ChartDataTable";
 import {
@@ -112,6 +113,17 @@ export default function Development() {
   const toggleDataVisible = (key: string) => setShowChartData((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const projectMap = useMemo(() => new Map(projects.map((p: any) => [p.id, p] as [string, any])), [projects]);
+  const entryDatesByProjectId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    (entries as any[]).forEach((entry: any) => {
+      const projectId = clean(entry.project_id);
+      if (!projectId) return;
+      const existing = map.get(projectId) || [];
+      if (entry.entry_date) existing.push(String(entry.entry_date));
+      map.set(projectId, existing);
+    });
+    return map;
+  }, [entries]);
 
   const statusCounts = useMemo(() => {
     const numericYears = projects
@@ -172,23 +184,24 @@ export default function Development() {
     const rows = (projects as any[]).filter((p: any) => matchesFilters(p, statusFilters));
     const activeRows = rows.filter((p: any) => !isCompletedProjectStatus(p.status));
     const numericYears = activeRows
-      .map((p: any) => Number.parseInt(clean(p.reporting_year), 10))
-      .filter((y) => Number.isFinite(y));
+      .map((p: any) => parseReportingYear(p.reporting_year))
+      .filter((y): y is number => y !== null);
     const currentYear = numericYears.length ? Math.max(...numericYears) : null;
-    const priorYear = currentYear ? currentYear - 1 : null;
+    const currentYearRows = currentYear === null
+      ? []
+      : activeRows.filter((project: any) => parseReportingYear(project.reporting_year) === currentYear);
 
     const byType: Record<string, { current: number; carryover: number }> = {};
     TREND_TYPE_OPTIONS.forEach((type) => {
       byType[type] = { current: 0, carryover: 0 };
     });
 
-    activeRows.forEach((p: any) => {
+    currentYearRows.forEach((p: any) => {
       const type = normalizeCourseType(p.course_type);
       if (!(type in byType)) return;
-      const year = Number.parseInt(clean(p.reporting_year), 10);
-      if (!Number.isFinite(year)) return;
-      if (currentYear && year === currentYear) byType[type].current += 1;
-      else if (priorYear && year === priorYear) byType[type].carryover += 1;
+      const entryDates = entryDatesByProjectId.get(String(p.id || "")) || [];
+      if (isCarryoverFromTimeline(p.reporting_year, entryDates)) byType[type].carryover += 1;
+      else byType[type].current += 1;
     });
 
     const data = TREND_TYPE_OPTIONS.map((type) => {
@@ -204,10 +217,9 @@ export default function Development() {
 
     return {
       currentYear,
-      priorYear,
       data,
     };
-  }, [projects, statusFilters]);
+  }, [entryDatesByProjectId, projects, statusFilters]);
 
   function matchesFilters(project: any, filters: ChartFilters): boolean {
     const reportingYear = clean(project.reporting_year || "");
@@ -604,21 +616,21 @@ export default function Development() {
                     <Tooltip
                       formatter={(v: any, _n: any, item: any) =>
                         item?.dataKey === "carryover"
-                          ? [v, `${activeBacklogByYear.priorYear ?? "Prior Year"} Carryover`]
-                          : [v, `${activeBacklogByYear.currentYear ?? "Current Year"} Active`]
+                          ? [v, `Carryover Into ${activeBacklogByYear.currentYear ?? "Current Year"}`]
+                          : [v, `${activeBacklogByYear.currentYear ?? "Current Year"} Started`]
                       }
                     />
                     <Legend />
                     <Bar
                       dataKey="current"
-                      name={`${activeBacklogByYear.currentYear ?? "Current Year"} Active`}
+                      name={`${activeBacklogByYear.currentYear ?? "Current Year"} Started`}
                       stackId="active-stack"
                       fill="hsl(var(--chart-1))"
                       radius={[4, 4, 0, 0]}
                     />
                     <Bar
                       dataKey="carryover"
-                      name={`${activeBacklogByYear.priorYear ?? "Prior Year"} Carryover`}
+                      name={`Carryover Into ${activeBacklogByYear.currentYear ?? "Current Year"}`}
                       stackId="active-stack"
                       fill="hsl(var(--chart-4))"
                       radius={[4, 4, 0, 0]}
@@ -632,15 +644,15 @@ export default function Development() {
                 rows={activeBacklogByYear.data}
                 columns={[
                   { key: "category", label: "Category" },
-                  { key: "current", label: `${activeBacklogByYear.currentYear ?? "Current Year"} Active` },
-                  { key: "carryover", label: `${activeBacklogByYear.priorYear ?? "Prior Year"} Carryover` },
+                  { key: "current", label: `${activeBacklogByYear.currentYear ?? "Current Year"} Started` },
+                  { key: "carryover", label: `Carryover Into ${activeBacklogByYear.currentYear ?? "Current Year"}` },
                   { key: "total", label: "Total Active" },
                 ]}
               />
             )}
             {activeBacklogByYear.data.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Carryover indicates active courses from {activeBacklogByYear.priorYear ?? "the prior year"}.
+                Carryover indicates active courses with dated development work before reporting year {activeBacklogByYear.currentYear ?? "the current year"}. Projects without usable dated entries stay in the started-this-year bucket.
               </p>
             )}
           </div>
