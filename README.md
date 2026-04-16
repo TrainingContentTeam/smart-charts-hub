@@ -49,6 +49,8 @@ This bypass is only active for local Vite development (`import.meta.env.DEV`).
 
 When bypass mode is enabled, `Import All` persists imported data to browser `localStorage` so charts remain available as you navigate pages locally.
 
+This app is designed around one shared analytics dataset in hosted environments. Admin uploads replace the shared import-backed data for everyone, while `upload_history.user_id` is kept only for audit attribution.
+
 ## Data Import Contract
 
 The upload flow expects 3 files:
@@ -87,9 +89,18 @@ The upload flow expects 3 files:
 - Time Spent file can contain many rows per course; rows are preserved as separate detail entries.
 - Legacy summary rows are **not** inserted into `time_entries`, preventing duplicate total counting during import.
 
-### Stale project cleanup
+### Which charts should change
+
+- Dashboard summary charts are driven mostly by `projects`.
+- Detail and team views such as `Projects`, `Development`, `External Teams`, and `Data Explorer` are driven by `time_entries`.
+- SME collaboration charts are driven by `sme_collaboration_surveys`.
+- Uploading only course files can change summary charts without changing time-driven detail charts.
+- Uploading only the Time Spent file can change detail and team charts without changing project totals.
+
+### Shared dataset replacement
 
 During upload, the app automatically removes projects from the database whose `data_source` is `legacy` or `modern` but whose Course Name + Year key is **not** present in the current CSV files. Related time entries and SME survey rows are also deleted. This ensures the database is an exact mirror of the source files after every upload — no stale leftovers from prior imports.
+In hosted environments, that replacement applies to the shared dataset used by all authenticated viewers, not a private per-uploader copy.
 
 ### Duplicate-title diagnostics
 

@@ -24,6 +24,23 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+type UploadDiagnostics = {
+  updatedProjects: number;
+  insertedProjects: number;
+  deletedProjects: number;
+  clearedTimeEntries: number;
+  insertedTimeEntries: number;
+  clearedSurveyRows: number;
+  insertedSurveyRows: number;
+};
+
+type UploadUser = {
+  user_id: string;
+  email: string;
+  role: string;
+  created_at: string;
+};
+
 interface DropZoneProps {
   label: string;
   description: string;
@@ -304,6 +321,36 @@ function describeSurveyResolution(reason: SurveyResolveResult["reason"]): string
   }
 }
 
+function getRefreshedDatasetType(hasCourseFiles: boolean, hasTimeFile: boolean, hasSmeFile: boolean): string {
+  const parts: string[] = [];
+  if (hasCourseFiles) parts.push("courses");
+  if (hasTimeFile) parts.push("time_entries");
+  if (hasSmeFile) parts.push("sme_surveys");
+  return parts.join(",") || "unknown";
+}
+
+function parseDatasetType(value: string | null | undefined): string[] {
+  return String(value || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function formatDatasetLabel(key: string): string {
+  switch (key) {
+    case "courses":
+      return "Courses";
+    case "time_entries":
+      return "Time Entries";
+    case "sme_surveys":
+      return "SME Surveys";
+    case "project_batch":
+      return "Project Batch";
+    default:
+      return key;
+  }
+}
+
 export default function UploadData() {
   const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
   const [legacyFile, setLegacyFile] = useState("");
@@ -388,6 +435,112 @@ export default function UploadData() {
       return (data || []) as unknown as TimeMatchOverrideRecord[];
     },
   });
+
+  const { data: uploadUsers = [] } = useQuery({
+    queryKey: ["upload_history_users"],
+    queryFn: async () => {
+      if (DEV_BYPASS_AUTH) {
+        return user?.id && user.email
+          ? [{ user_id: user.id, email: user.email, role: "admin", created_at: new Date().toISOString() }]
+          : [];
+      }
+      const { data, error } = await supabase.rpc("get_all_users_with_roles");
+      if (error) throw error;
+      return (data || []) as UploadUser[];
+    },
+  });
+
+  const userEmailById = useMemo(() => {
+    const map = new Map<string, string>();
+    uploadUsers.forEach((entry) => {
+      if (entry.user_id && entry.email) map.set(entry.user_id, entry.email);
+    });
+    if (user?.id && user.email) map.set(user.id, user.email);
+    return map;
+  }, [uploadUsers, user?.email, user?.id]);
+
+  const latestCompletedImport = useMemo(() => {
+    const rows = [...history]
+      .filter((row: any) => String(row.status || "").toLowerCase() === "completed")
+      .sort((a: any, b: any) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    return rows[0] || null;
+  }, [history]);
+
+  const latestImportDatasets = useMemo(
+    () => parseDatasetType(latestCompletedImport?.dataset_type),
+    [latestCompletedImport],
+  );
+
+  const latestImportUploader = useMemo(() => {
+    if (!latestCompletedImport) return "Unknown uploader";
+    const uploaderId = String(latestCompletedImport.user_id || "").trim();
+    if (!uploaderId) return "Unknown uploader";
+    const email = userEmailById.get(uploaderId);
+    if (email) return email;
+    if (user?.id === uploaderId && user.email) return user.email;
+    return uploaderId;
+  }, [latestCompletedImport, user?.email, user?.id, userEmailById]);
+
+  const resetUploadState = useCallback(() => {
+    setLegacyData(null); setModernData(null); setTimeData(null); setSmeData(null);
+    setLegacyFile(""); setModernFile(""); setTimeFile(""); setSmeFile("");
+    setWarnings([]);
+    setTimeOverrideKeys({});
+    setSurveyOverrideKeys({});
+    setCanceledGroups(new Set());
+    setAutoCanceledGroups(new Set());
+    setSurveyNoMatchKeys(new Set());
+    setAutoSurveyNoMatchKeys(new Set());
+    setAutoTimeOverrideGroups(new Set());
+  }, []);
+
+  const invalidateImportedQueries = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["time_entries"] });
+    queryClient.invalidateQueries({ queryKey: ["projects"] });
+    queryClient.invalidateQueries({ queryKey: ["upload_history"] });
+    queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
+    queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
+    queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
+    queryClient.invalidateQueries({ queryKey: ["canceled_courses"] });
+    queryClient.invalidateQueries({ queryKey: ["lms_course_info"] });
+    queryClient.invalidateQueries({ queryKey: ["lms_course_versions"] });
+  }, [queryClient]);
+
+  const showImportDiagnostics = useCallback((
+    diagnostics: UploadDiagnostics,
+    importedCourseCount: number,
+    canceledSkipCount: number,
+    unresolvedCount: number,
+    unresolvedSurveyCount: number,
+    retainedNoMatchSurveyCount: number,
+    fallbackCount: number,
+    sourceHintCount: number,
+  ) => {
+    toast.success(
+      `Shared dataset refreshed. Courses ${importedCourseCount} imported, ${diagnostics.updatedProjects} updated, ${diagnostics.insertedProjects} added, ${diagnostics.deletedProjects} removed.`
+    );
+    toast.message(
+      `Time entries: ${diagnostics.clearedTimeEntries} cleared, ${diagnostics.insertedTimeEntries} inserted. SME surveys: ${diagnostics.clearedSurveyRows} cleared, ${diagnostics.insertedSurveyRows} inserted.`
+    );
+    if (canceledSkipCount > 0) {
+      toast.message(`${canceledSkipCount} time entries skipped from canceled projects.`);
+    }
+    if (unresolvedCount > 0) {
+      toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
+    }
+    if (unresolvedSurveyCount > 0) {
+      toast.warning(`${unresolvedSurveyCount} SME survey rows could not be matched by Course Name + Year.`);
+    }
+    if (retainedNoMatchSurveyCount > 0) {
+      toast.message(`${retainedNoMatchSurveyCount} SME survey rows were retained as no-match records.`);
+    }
+    if (fallbackCount > 0) {
+      toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
+    }
+    if (sourceHintCount > 0) {
+      toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
+    }
+  }, []);
   const handleLegacy = useCallback(async (file: File) => {
     setLegacyFile(file.name);
     setTimeOverrideKeys({});
@@ -752,6 +905,7 @@ export default function UploadData() {
       const hasCourseFiles = !!legacyData || !!modernData;
       const hasTimeFile = !!timeData;
       const hasSmeFile = !!smeData;
+      const datasetType = getRefreshedDatasetType(hasCourseFiles, hasTimeFile, hasSmeFile);
 
       if (DEV_BYPASS_AUTH) {
         const now = new Date().toISOString();
@@ -759,6 +913,10 @@ export default function UploadData() {
         const local = await readLocalStore();
         const existingProjects = [...local.projects];
         const existingMap = new Map(existingProjects.map((p) => [courseKey(p.name, p.reporting_year), p]));
+        const originalTimeCount = local.time_entries.length;
+        const originalSurveyCount = local.sme_surveys.length;
+        let updatedProjectCount = 0;
+        let insertedProjectCount = 0;
 
         // Build course index with composite key: Course Name + Reporting Year
         const legacyMap = new Map<string, LegacyCourse>();
@@ -844,6 +1002,7 @@ export default function UploadData() {
               ...meta,
             };
             if (idx >= 0) existingProjects[idx] = updated as any;
+            updatedProjectCount += 1;
             projectIdMap.set(key, existing.id);
             const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
             candidates.push({
@@ -868,6 +1027,7 @@ export default function UploadData() {
             };
             existingProjects.push(inserted);
             existingMap.set(key, inserted);
+            insertedProjectCount += 1;
             projectIdMap.set(key, insertedId);
             const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
             candidates.push({
@@ -906,6 +1066,7 @@ export default function UploadData() {
         const retainedProjects = staleProjectIds.length > 0
           ? existingProjects.filter((project) => !staleProjectIds.includes(project.id))
           : existingProjects;
+        const deletedProjectCount = staleProjectIds.length;
 
         let timeCount = 0;
         let unresolvedCount = 0;
@@ -1092,7 +1253,7 @@ export default function UploadData() {
             file_name: combinedFileName,
             row_count: totalRows,
             status: "completed",
-            dataset_type: "project_batch",
+            dataset_type: datasetType,
             user_id: user?.id,
             created_at: now,
           },
@@ -1108,51 +1269,33 @@ export default function UploadData() {
           time_match_overrides: retainedTimeOverrides as any,
         });
 
-        toast.success(`Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`);
-        if (canceledSkipCount > 0) {
-          toast.message(`${canceledSkipCount} time entries skipped from canceled projects.`);
-        }
-        if (unresolvedCount > 0) {
-          toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
-        }
-        if (unresolvedSurveyCount > 0) {
-          toast.warning(`${unresolvedSurveyCount} SME survey rows could not be matched by Course Name + Year.`);
-        }
-        if (retainedNoMatchSurveyCount > 0) {
-          toast.message(`${retainedNoMatchSurveyCount} SME survey rows were retained as no-match records.`);
-        }
-        if (fallbackCount > 0) {
-          toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
-        }
-        if (sourceHintCount > 0) {
-          toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
-        }
-        setLegacyData(null); setModernData(null); setTimeData(null); setSmeData(null);
-        setLegacyFile(""); setModernFile(""); setTimeFile(""); setSmeFile("");
-        setWarnings([]);
-        setTimeOverrideKeys({});
-        setSurveyOverrideKeys({});
-        setCanceledGroups(new Set());
-        setAutoCanceledGroups(new Set());
-        setSurveyNoMatchKeys(new Set());
-        setAutoSurveyNoMatchKeys(new Set());
-        setAutoTimeOverrideGroups(new Set());
-        queryClient.invalidateQueries({ queryKey: ["time_entries"] });
-        queryClient.invalidateQueries({ queryKey: ["projects"] });
-        queryClient.invalidateQueries({ queryKey: ["upload_history"] });
-        queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
-        queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
-        queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
-        queryClient.invalidateQueries({ queryKey: ["canceled_courses"] });
-        queryClient.invalidateQueries({ queryKey: ["lms_course_info"] });
-        queryClient.invalidateQueries({ queryKey: ["lms_course_versions"] });
+        showImportDiagnostics(
+          {
+            updatedProjects: updatedProjectCount,
+            insertedProjects: insertedProjectCount,
+            deletedProjects: deletedProjectCount,
+            clearedTimeEntries: hasTimeFile ? originalTimeCount : 0,
+            insertedTimeEntries: timeCount,
+            clearedSurveyRows: hasSmeFile ? originalSurveyCount : 0,
+            insertedSurveyRows: surveyCount,
+          },
+          importedCourseCount,
+          canceledSkipCount,
+          unresolvedCount,
+          unresolvedSurveyCount,
+          retainedNoMatchSurveyCount,
+          fallbackCount,
+          sourceHintCount,
+        );
+        resetUploadState();
+        invalidateImportedQueries();
         return;
       }
 
       // Upload history
       const { data: upload, error: uploadErr } = await supabase
         .from("upload_history")
-        .insert({ file_name: combinedFileName, row_count: totalRows, dataset_type: "project_batch", user_id: user!.id })
+        .insert({ file_name: combinedFileName, row_count: totalRows, dataset_type: datasetType, user_id: user!.id })
         .select()
         .single();
       if (uploadErr) throw uploadErr;
@@ -1167,6 +1310,8 @@ export default function UploadData() {
       // Get existing projects keyed the same way (Course Name + reporting_year)
       const existingProjects = (await supabase.from("projects").select("*")).data || [];
       const existingMap = new Map(existingProjects.map((p: any) => [courseKey(p.name, p.reporting_year), p]));
+      let updatedProjectCount = 0;
+      let insertedProjectCount = 0;
 
       // Upsert projects
       const projectIdMap = new Map<string, string>();
@@ -1238,6 +1383,7 @@ export default function UploadData() {
             .from("projects")
             .update({ status, total_hours: totalHours, data_source: dataSource, user_id: user!.id, ...meta } as any)
             .eq("id", existing.id);
+          updatedProjectCount += 1;
           projectIdMap.set(key, existing.id);
           const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
           candidates.push({
@@ -1254,6 +1400,7 @@ export default function UploadData() {
             .select()
             .single();
           if (inserted) {
+            insertedProjectCount += 1;
             projectIdMap.set(key, inserted.id);
             existingMap.set(key, inserted);
             const candidates = projectCandidatesByName.get(nameOnlyKey) || [];
@@ -1303,6 +1450,7 @@ export default function UploadData() {
           await supabase.from("projects").delete().in("id", batch);
         }
       }
+      const deletedProjectCount = staleProjectIds.length;
 
       // Insert time entries from Time Spent file
       let timeCount = 0;
@@ -1312,6 +1460,8 @@ export default function UploadData() {
       let surveyCount = 0;
       let unresolvedSurveyCount = 0;
       let retainedNoMatchSurveyCount = 0;
+      let clearedTimeCount = 0;
+      let clearedSurveyCount = 0;
 
       // Build set of canceled course name keys to skip
       const canceledNameKeys = new Set<string>();
@@ -1344,11 +1494,19 @@ export default function UploadData() {
       }
 
       if (hasTimeFile) {
+        const { count: existingTimeCount } = await supabase
+          .from("time_entries")
+          .select("id", { count: "exact", head: true });
+        clearedTimeCount = existingTimeCount || 0;
         const { error: clearTimeErr } = await supabase.from("time_entries").delete().not("id", "is", null);
         if (clearTimeErr) throw clearTimeErr;
       }
 
       if (hasSmeFile) {
+        const { count: existingSurveyCount } = await supabase
+          .from("sme_collaboration_surveys")
+          .select("id", { count: "exact", head: true });
+        clearedSurveyCount = existingSurveyCount || 0;
         const { error: clearSurveyErr } = await supabase.from("sme_collaboration_surveys").delete().not("id", "is", null);
         if (clearSurveyErr) throw clearSurveyErr;
       }
@@ -1507,48 +1665,26 @@ export default function UploadData() {
         }
       }
 
-      toast.success(
-        `Imported ${importedCourseCount} courses, ${timeCount} category time entries, ${surveyCount} SME survey rows.`
+      showImportDiagnostics(
+        {
+          updatedProjects: updatedProjectCount,
+          insertedProjects: insertedProjectCount,
+          deletedProjects: deletedProjectCount,
+          clearedTimeEntries: clearedTimeCount,
+          insertedTimeEntries: timeCount,
+          clearedSurveyRows: clearedSurveyCount,
+          insertedSurveyRows: surveyCount,
+        },
+        importedCourseCount,
+        canceledSkipCount,
+        unresolvedCount,
+        unresolvedSurveyCount,
+        retainedNoMatchSurveyCount,
+        fallbackCount,
+        sourceHintCount,
       );
-      if (canceledSkipCount > 0) {
-        toast.message(`${canceledSkipCount} time entries skipped from canceled projects.`);
-      }
-      if (unresolvedCount > 0) {
-        toast.warning(`${unresolvedCount} time entries could not be matched to a project.`);
-      }
-      if (unresolvedSurveyCount > 0) {
-        toast.warning(`${unresolvedSurveyCount} SME survey rows could not be matched by Course Name + Year.`);
-      }
-      if (retainedNoMatchSurveyCount > 0) {
-        toast.message(`${retainedNoMatchSurveyCount} SME survey rows were retained as no-match records.`);
-      }
-      if (fallbackCount > 0) {
-        toast.warning(`${fallbackCount} time entries used fallback mapping on duplicate course titles.`);
-      }
-      if (sourceHintCount > 0) {
-        toast.message(`${sourceHintCount} time entries were disambiguated by date-year source hint.`);
-      }
-      setLegacyData(null); setModernData(null); setTimeData(null); setSmeData(null);
-      setLegacyFile(""); setModernFile(""); setTimeFile(""); setSmeFile("");
-      setWarnings([]);
-      setTimeOverrideKeys({});
-      setSurveyOverrideKeys({});
-      setCanceledGroups(new Set());
-      setAutoCanceledGroups(new Set());
-      setSurveyNoMatchKeys(new Set());
-      setAutoSurveyNoMatchKeys(new Set());
-      setAutoTimeOverrideGroups(new Set());
-      queryClient.invalidateQueries({ queryKey: ["time_entries"] });
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      queryClient.invalidateQueries({ queryKey: ["upload_history"] });
-      queryClient.invalidateQueries({ queryKey: ["sme_surveys"] });
-      queryClient.invalidateQueries({ queryKey: ["canceled_courses"] });
-      queryClient.invalidateQueries({ queryKey: ["lms_course_info"] });
-      queryClient.invalidateQueries({ queryKey: ["lms_course_versions"] });
-      queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
-      queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
-      queryClient.invalidateQueries({ queryKey: ["survey_no_match_records"] });
-      queryClient.invalidateQueries({ queryKey: ["time_match_overrides"] });
+      resetUploadState();
+      invalidateImportedQueries();
     } catch (err: any) {
       toast.error("Import failed: " + (err.message || "Unknown error"));
     } finally {
@@ -1557,6 +1693,7 @@ export default function UploadData() {
   };
 
   const hasAnything = legacyData || modernData || timeData || smeData;
+  const hasCourseFilesLoaded = !!legacyData || !!modernData;
 
   const sortedLegacyData = useMemo(() => {
     const rows = [...(legacyData || [])];
@@ -1646,8 +1783,40 @@ export default function UploadData() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Upload Data</h1>
-        <p className="text-muted-foreground">Import Legacy, Modern, Time Spent, and SME survey files. Review and correct only the current upload batch before import.</p>
+        <p className="text-muted-foreground">Import Legacy, Modern, Time Spent, and SME survey files into the shared analytics dataset. Review and correct only the current upload batch before import.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Dashboard summary charts read mostly from `projects`. Detail and team views such as `Projects`, `Development`, `External Teams`, and `Data Explorer` read from `time_entries`. SME charts read from `sme_collaboration_surveys`.</p>
       </div>
+
+      {latestCompletedImport && (
+        <Card>
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-base">Last Completed Import</CardTitle>
+            <p className="text-sm text-muted-foreground">Most recent shared dataset refresh recorded in upload history.</p>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Completed</p>
+              <p className="font-medium">{new Date(latestCompletedImport.created_at).toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Uploader</p>
+              <p className="font-medium break-all">{latestImportUploader}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Rows Imported</p>
+              <p className="font-medium">{latestCompletedImport.row_count}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Data Refreshed</p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {latestImportDatasets.length > 0 ? latestImportDatasets.map((dataset) => (
+                  <Badge key={dataset} variant="secondary">{formatDatasetLabel(dataset)}</Badge>
+                )) : <span className="text-sm text-muted-foreground">Unknown</span>}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Upload drop zones */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -1666,13 +1835,18 @@ export default function UploadData() {
                 <Link2 className="h-5 w-5 text-primary" />
                 <CardTitle className="text-base">Current Upload Summary</CardTitle>
               </div>
-              <p className="text-sm text-muted-foreground">These counts reflect the files currently loaded on this page. Corrections below affect this batch only.</p>
+              <p className="text-sm text-muted-foreground">These counts reflect the files currently loaded on this page. Importing will refresh the shared dataset for all users. Corrections below affect this batch only.</p>
             </div>
             <Button onClick={importData} disabled={importing || !hasAnything}>
               {importing ? "Importing…" : "Import All"}
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">
+            {hasCourseFilesLoaded && !timeData && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                Course files will refresh summary charts driven by `projects`, but time-driven detail charts will stay unchanged until a Time Spent file is uploaded.
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-4 text-center">
               <div>
                 <p className="text-2xl font-bold">{matchInfo.legacyCount}</p>
@@ -2315,6 +2489,7 @@ export default function UploadData() {
                   if (historySortKey === "date") setHistorySortAsc((v) => !v);
                   else { setHistorySortKey("date"); setHistorySortAsc(true); }
                 }}><span className="flex items-center gap-1">Date <ArrowUpDown className="h-3 w-3" /></span></TableHead>
+                <TableHead>Data Refreshed</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {sortedHistory.map((h) => (
@@ -2331,6 +2506,13 @@ export default function UploadData() {
                       </span>
                     </TableCell>
                     <TableCell>{new Date(h.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {parseDatasetType(h.dataset_type).map((dataset) => (
+                          <Badge key={`${h.id}-${dataset}`} variant="outline">{formatDatasetLabel(dataset)}</Badge>
+                        ))}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
