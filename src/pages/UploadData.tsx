@@ -16,6 +16,11 @@ import { parseSmeSurveyFile, type SmeCollaborationSurveyImport } from "@/lib/par
 import { parseTimeSpentFile, type TimeSpentEntry } from "@/lib/parse-time-spent";
 import { makeId, readLocalStore, writeLocalStore } from "@/lib/local-data-store";
 import { normalizeProjectStatus } from "@/lib/project-status";
+import {
+  buildCoursePersistenceAuditRows,
+  type CoursePersistenceAuditRow,
+  type CoursePersistenceInputRow,
+} from "@/lib/course-persistence-audit";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useProjects, useUploadHistory } from "@/hooks/use-time-data";
@@ -87,24 +92,6 @@ type YearKeyDiagnosticsRow = {
   finalized: number;
   active: number;
   malformed: boolean;
-};
-
-type PersistedYearAuditRow = {
-  year: string;
-  total: number;
-  finalized: number;
-  active: number;
-  statuses: string;
-};
-
-type StatusDiagnosticCourseRow = {
-  key: string;
-  courseName: string;
-  year: string;
-  rawYear: string;
-  source: string;
-  rawStatus: string;
-  isComplete: boolean;
 };
 
 interface DropZoneProps {
@@ -808,7 +795,7 @@ export default function UploadData() {
   }, [matchInfo]);
 
   const uploadStatusRows = useMemo(() => {
-    const rows: StatusDiagnosticCourseRow[] = [];
+    const rows: CoursePersistenceInputRow[] = [];
 
     (legacyData || []).forEach((course) => {
       rows.push({
@@ -870,6 +857,24 @@ export default function UploadData() {
     () => persistedStatusRows.filter((row) => statusDiagnosticYear === "all" || row.year === statusDiagnosticYear),
     [persistedStatusRows, statusDiagnosticYear],
   );
+
+  const coursePersistenceAuditRows = useMemo(
+    () => buildCoursePersistenceAuditRows(filteredUploadStatusRows, filteredPersistedStatusRows),
+    [filteredPersistedStatusRows, filteredUploadStatusRows],
+  );
+
+  const coursePersistenceSummary = useMemo(() => {
+    const countBySource = (rows: CoursePersistenceInputRow[], source: string) =>
+      rows.filter((row) => row.source === source).length;
+
+    return {
+      uploadLegacyTotal: countBySource(filteredUploadStatusRows, "legacy"),
+      uploadModernTotal: countBySource(filteredUploadStatusRows, "modern"),
+      persistedLegacyTotal: countBySource(filteredPersistedStatusRows, "legacy"),
+      persistedModernTotal: countBySource(filteredPersistedStatusRows, "modern"),
+      issueCount: coursePersistenceAuditRows.filter((row) => row.reason !== "Persisted").length,
+    };
+  }, [coursePersistenceAuditRows, filteredPersistedStatusRows, filteredUploadStatusRows]);
 
   const dashboardStatusDiagnostics = useMemo(() => {
     const uploadMap = new Map(filteredUploadStatusRows.map((row) => [row.key, row]));
@@ -1005,7 +1010,7 @@ export default function UploadData() {
   const rawYearDiagnostics = useMemo(() => {
     const counts = new Map<string, YearKeyDiagnosticsRow>();
 
-    const addRow = (row: StatusDiagnosticCourseRow) => {
+    const addRow = (row: CoursePersistenceInputRow) => {
       const rawYear = row.rawYear || "(blank)";
       const key = `${row.source}::${rawYear}::${row.year}`;
       const existing = counts.get(key);
@@ -1026,8 +1031,8 @@ export default function UploadData() {
       });
     };
 
-    uploadStatusRows.forEach(addRow);
-    persistedStatusRows.forEach(addRow);
+    filteredUploadStatusRows.forEach(addRow);
+    filteredPersistedStatusRows.forEach(addRow);
 
     return [...counts.values()].sort(
       (a, b) =>
@@ -1035,37 +1040,7 @@ export default function UploadData() {
         compareYearLabel(a.normalizedYear, b.normalizedYear) ||
         a.rawYear.localeCompare(b.rawYear),
     );
-  }, [persistedStatusRows, uploadStatusRows]);
-
-  const persistedYearAudit = useMemo(() => {
-    const counts = new Map<string, { total: number; finalized: number; active: number; statuses: Set<string> }>();
-
-    persistedStatusRows.forEach((row) => {
-      const existing = counts.get(row.year) || { total: 0, finalized: 0, active: 0, statuses: new Set<string>() };
-      existing.total += 1;
-      if (row.isComplete) existing.finalized += 1;
-      else existing.active += 1;
-      existing.statuses.add(row.rawStatus || "(blank)");
-      counts.set(row.year, existing);
-    });
-
-    return [...counts.entries()]
-      .map(([year, value]) => ({
-        year,
-        total: value.total,
-        finalized: value.finalized,
-        active: value.active,
-        statuses: [...value.statuses].sort().join(", "),
-      }))
-      .sort((a, b) => compareYearLabel(a.year, b.year));
-  }, [persistedStatusRows]);
-
-  const persisted2026Sample = useMemo(() => {
-    return persistedStatusRows
-      .filter((row) => row.year === "2026" || row.rawYear === "2026")
-      .sort((a, b) => a.courseName.localeCompare(b.courseName))
-      .slice(0, 20);
-  }, [persistedStatusRows]);
+  }, [filteredPersistedStatusRows, filteredUploadStatusRows]);
 
   const timeIssueRows = useMemo(() => {
     if (!timeData) return [];
@@ -2233,9 +2208,9 @@ export default function UploadData() {
         <Card>
           <CardHeader className="space-y-3">
             <div className="space-y-1">
-              <CardTitle className="text-base">Dashboard Status Diagnostics</CardTitle>
+              <CardTitle className="text-base">Course Persistence &amp; Status Audit</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Uses the same completion rule as the Dashboard donut: finalized statuses count as complete, including `Completed`, `Published`, `Ready for Loading`, and `Ready to Publish`.
+                Legacy and Modern files define the authoritative course roster. The Projects page reads persisted `projects.status`, and that status is sourced from `[LCT] Status (M)` / `(L)` only.
               </p>
             </div>
             <div className="w-full max-w-[220px]">
@@ -2253,89 +2228,62 @@ export default function UploadData() {
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Upload Courses</p>
-                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.uploadTotal}</p>
+                <p className="text-xs text-muted-foreground">Uploaded Legacy Rows</p>
+                <p className="text-2xl font-bold">{coursePersistenceSummary.uploadLegacyTotal}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Upload Not Complete</p>
-                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.uploadIncomplete}</p>
+                <p className="text-xs text-muted-foreground">Uploaded Modern Rows</p>
+                <p className="text-2xl font-bold">{coursePersistenceSummary.uploadModernTotal}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Persisted Courses</p>
-                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.persistedTotal}</p>
+                <p className="text-xs text-muted-foreground">Persisted Legacy Projects</p>
+                <p className="text-2xl font-bold">{coursePersistenceSummary.persistedLegacyTotal}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">Dashboard Not Complete</p>
-                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.dashboardDonutIncomplete}</p>
+                <p className="text-xs text-muted-foreground">Persisted Modern Projects</p>
+                <p className="text-2xl font-bold">{coursePersistenceSummary.persistedModernTotal}</p>
               </div>
-            </div>
-
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Source</TableHead>
-                    <TableHead>Year</TableHead>
-                    <TableHead>Upload Total</TableHead>
-                    <TableHead>Upload Not Complete</TableHead>
-                    <TableHead>Persisted Total</TableHead>
-                    <TableHead>Persisted Not Complete</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {dashboardStatusDiagnostics.comparisonRows.length > 0 ? dashboardStatusDiagnostics.comparisonRows.map((row) => (
-                    <TableRow key={`${row.source}-${row.year}`}>
-                      <TableCell className="font-medium capitalize">{row.source}</TableCell>
-                      <TableCell>{row.year}</TableCell>
-                      <TableCell>{row.uploadTotal}</TableCell>
-                      <TableCell>{row.uploadIncomplete}</TableCell>
-                      <TableCell>{row.persistedTotal}</TableCell>
-                      <TableCell>{row.persistedIncomplete}</TableCell>
-                    </TableRow>
-                  )) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
-                        Load Legacy and/or Modern files to compare uploaded status counts against persisted projects.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Audit Issues</p>
+                <p className="text-2xl font-bold">{coursePersistenceSummary.issueCount}</p>
+              </div>
             </div>
 
             <div className="space-y-2">
               <div>
-                <p className="font-medium">Yearly Course Volume Comparison</p>
+                <p className="font-medium">Source-Year Reconciliation</p>
                 <p className="text-sm text-muted-foreground">
-                  Mirrors the Dashboard `Yearly Course Volume: Completed vs Active` chart using upload rows versus persisted `projects`.
+                  Compares uploaded Legacy/Modern rows to currently persisted Legacy/Modern projects by source and normalized reporting year.
                 </p>
               </div>
               <div className="rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Source</TableHead>
                       <TableHead>Year</TableHead>
-                      <TableHead>Upload Completed</TableHead>
-                      <TableHead>Upload Active</TableHead>
-                      <TableHead>Persisted Completed</TableHead>
+                      <TableHead>Uploaded Rows</TableHead>
+                      <TableHead>Uploaded Active</TableHead>
+                      <TableHead>Persisted Projects</TableHead>
                       <TableHead>Persisted Active</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {dashboardStatusDiagnostics.yearlyRows.length > 0 ? dashboardStatusDiagnostics.yearlyRows.map((row) => (
-                      <TableRow key={`yearly-${row.year}`}>
+                    {dashboardStatusDiagnostics.comparisonRows.length > 0 ? dashboardStatusDiagnostics.comparisonRows.map((row) => (
+                      <TableRow key={`${row.source}-${row.year}`}>
+                        <TableCell className="font-medium capitalize">{row.source}</TableCell>
                         <TableCell className="font-medium">{row.year}</TableCell>
-                        <TableCell>{row.uploadCompleted}</TableCell>
-                        <TableCell>{row.uploadActive}</TableCell>
-                        <TableCell>{row.persistedCompleted}</TableCell>
-                        <TableCell>{row.persistedActive}</TableCell>
+                        <TableCell>{row.uploadTotal}</TableCell>
+                        <TableCell>{row.uploadIncomplete}</TableCell>
+                        <TableCell>{row.persistedTotal}</TableCell>
+                        <TableCell>{row.persistedIncomplete}</TableCell>
                       </TableRow>
                     )) : (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground">
-                          No yearly comparison is available yet for the selected filter.
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                          Load Legacy and/or Modern files to compare uploaded rows against persisted projects.
                         </TableCell>
                       </TableRow>
                     )}
@@ -2389,90 +2337,12 @@ export default function UploadData() {
 
             <div className="space-y-2">
               <div>
-                <p className="font-medium">Persisted Projects by Year</p>
+                <p className="font-medium">Course Key Audit</p>
                 <p className="text-sm text-muted-foreground">
-                  Reconciles persisted `projects` by normalized year, including finalized vs active counts and raw status values present for each year.
+                  One row per Course Name + Reporting Year key, showing whether the uploaded course is currently persisted and the exact reason when it is not.
                 </p>
               </div>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Year</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Finalized</TableHead>
-                      <TableHead>Active</TableHead>
-                      <TableHead>Statuses Present</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {persistedYearAudit.length > 0 ? persistedYearAudit.map((row) => (
-                      <TableRow key={`persisted-year-${row.year}`}>
-                        <TableCell className="font-medium">{row.year}</TableCell>
-                        <TableCell>{row.total}</TableCell>
-                        <TableCell>{row.finalized}</TableCell>
-                        <TableCell>{row.active}</TableCell>
-                        <TableCell>{row.statuses}</TableCell>
-                      </TableRow>
-                    )) : (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground">
-                          No persisted year audit is available yet.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div>
-                <p className="font-medium">Persisted 2026 Sample</p>
-                <p className="text-sm text-muted-foreground">
-                  Small sample of persisted rows currently landing in reporting year `2026`, including their raw status and finalized bucket result.
-                </p>
-              </div>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Course</TableHead>
-                      <TableHead>Reporting Year</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Raw Status</TableHead>
-                      <TableHead>Finalized</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {persisted2026Sample.length > 0 ? persisted2026Sample.map((row) => (
-                      <TableRow key={`persisted-2026-${row.key}`}>
-                        <TableCell className="font-medium">{row.courseName}</TableCell>
-                        <TableCell>{row.rawYear || row.year}</TableCell>
-                        <TableCell className="capitalize">{row.source}</TableCell>
-                        <TableCell>{row.rawStatus || "(blank)"}</TableCell>
-                        <TableCell>{row.isComplete ? "Yes" : "No"}</TableCell>
-                      </TableRow>
-                    )) : (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground">
-                          No persisted 2026 rows were found with the current data.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div>
-                <p className="font-medium">Sample Mismatches</p>
-                <p className="text-sm text-muted-foreground">
-                  Missing rows, extra persisted rows, or statuses that land in a different completion bucket than the current upload.
-                </p>
-              </div>
-              <div className="rounded-md border">
+              <div className="rounded-md border max-h-[520px] overflow-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -2480,26 +2350,30 @@ export default function UploadData() {
                       <TableHead>Year</TableHead>
                       <TableHead>Raw Year</TableHead>
                       <TableHead>Source</TableHead>
-                      <TableHead>Issue</TableHead>
-                      <TableHead>Upload Status</TableHead>
+                      <TableHead>Upload Rows</TableHead>
+                      <TableHead>Uploaded Status</TableHead>
+                      <TableHead>Persisted</TableHead>
                       <TableHead>Persisted Status</TableHead>
+                      <TableHead>Reason</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {dashboardStatusDiagnostics.mismatchRows.length > 0 ? dashboardStatusDiagnostics.mismatchRows.slice(0, 12).map((row) => (
-                      <TableRow key={`${row.key}-${row.issue}`}>
+                    {coursePersistenceAuditRows.length > 0 ? coursePersistenceAuditRows.map((row: CoursePersistenceAuditRow) => (
+                      <TableRow key={`${row.key}-${row.reason}`}>
                         <TableCell className="font-medium">{row.courseName}</TableCell>
                         <TableCell>{row.year}</TableCell>
                         <TableCell>{row.rawYear}</TableCell>
                         <TableCell className="capitalize">{row.source}</TableCell>
-                        <TableCell>{row.issue}</TableCell>
+                        <TableCell>{row.uploadRowCount}</TableCell>
                         <TableCell>{row.uploadStatus}</TableCell>
+                        <TableCell>{row.persisted ? "Yes" : "No"}</TableCell>
                         <TableCell>{row.persistedStatus}</TableCell>
+                        <TableCell>{row.reason}</TableCell>
                       </TableRow>
                     )) : (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center text-muted-foreground">
-                          No mismatches found for the selected year filter.
+                        <TableCell colSpan={9} className="text-center text-muted-foreground">
+                          Load Legacy and/or Modern files to audit uploaded course keys against persisted projects.
                         </TableCell>
                       </TableRow>
                     )}

@@ -49,7 +49,7 @@ describe("course file parsers", () => {
     expect(row.reportingYear).toBe("2025");
   });
 
-  it("uses generic Status when no LCT status column is present", async () => {
+  it("returns blank when no LCT status column is present", async () => {
     const file = makeFile([
       {
         "Course Name": "Generic Status Course",
