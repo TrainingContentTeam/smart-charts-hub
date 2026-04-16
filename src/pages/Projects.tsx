@@ -2,10 +2,19 @@ import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useSmeSurveys, useTimeEntries, useProjects } from "@/hooks/use-time-data";
 import { isCompletedProjectStatus } from "@/lib/project-status";
+import {
+  buildProjectFilterOptions,
+  DEFAULT_PROJECT_MULTI_FILTERS,
+  matchesProjectMultiFilters,
+  type ProjectFilterField,
+  type ProjectMultiFilters,
+} from "@/lib/project-filtering";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -14,6 +23,7 @@ import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { ChartActions } from "@/components/ChartActions";
 import { ChartDataTable } from "@/components/ChartDataTable";
 import { useSearchParams } from "react-router-dom";
+import { cn } from "@/lib/utils";
 
 function text(v: unknown): string {
   return String(v || "").trim();
@@ -78,30 +88,6 @@ const ID_SCORE_KEYS = [
   "id_assistance_interactions_score",
 ];
 
-type ProjectFilters = {
-  year: string;
-  status: string;
-  type: string;
-  tool: string;
-  vertical: string;
-  assignedId: string;
-  length: string;
-  source: string;
-  completion: "all" | "completed" | "not_completed";
-};
-
-const DEFAULT_FILTERS: ProjectFilters = {
-  year: "all",
-  status: "all",
-  type: "all",
-  tool: "all",
-  vertical: "all",
-  assignedId: "all",
-  length: "all",
-  source: "all",
-  completion: "all",
-};
-
 export default function Projects() {
   const { data: entries = [] } = useTimeEntries();
   const { data: projects = [] } = useProjects();
@@ -109,7 +95,7 @@ export default function Projects() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [filters, setFilters] = useState<ProjectFilters>({ ...DEFAULT_FILTERS });
+  const [filters, setFilters] = useState<ProjectMultiFilters>({ ...DEFAULT_PROJECT_MULTI_FILTERS });
   const [detailSortKey, setDetailSortKey] = useState<"category" | "hours" | "date" | "user">("date");
   const [detailSortAsc, setDetailSortAsc] = useState(false);
   const [showCategoryChartData, setShowCategoryChartData] = useState(false);
@@ -166,18 +152,7 @@ export default function Projects() {
   }, [entries]);
 
   const filterOptions = useMemo(() => {
-    const unique = (getter: (p: any) => string) =>
-      [...new Set(projectsWithRelativePosition.map(getter).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    return {
-      year: unique((p) => text(p.reporting_year || "Unknown")),
-      status: unique((p) => text(p.status || "Unknown")),
-      type: unique((p) => text(p.course_type || "Unknown")),
-      tool: unique((p) => text(p.authoring_tool || "Unknown")),
-      vertical: unique((p) => text(p.vertical || "Unknown")),
-      assignedId: unique((p) => text(p.id_assigned || "Unknown")),
-      length: unique((p) => text(p.course_length || "Unknown")),
-      source: unique((p) => text(p.data_source || "Unknown")),
-    };
+    return buildProjectFilterOptions(projectsWithRelativePosition);
   }, [projectsWithRelativePosition]);
 
   const filteredProjects = useMemo(() => {
@@ -185,17 +160,7 @@ export default function Projects() {
     return projectsWithRelativePosition
       .filter((p: any) => {
         if (q && !text(p.name).toLowerCase().includes(q)) return false;
-        if (filters.year !== "all" && text(p.reporting_year || "Unknown") !== filters.year) return false;
-        if (filters.status !== "all" && text(p.status || "Unknown") !== filters.status) return false;
-        if (filters.type !== "all" && text(p.course_type || "Unknown") !== filters.type) return false;
-        if (filters.tool !== "all" && text(p.authoring_tool || "Unknown") !== filters.tool) return false;
-        if (filters.vertical !== "all" && text(p.vertical || "Unknown") !== filters.vertical) return false;
-        if (filters.assignedId !== "all" && text(p.id_assigned || "Unknown") !== filters.assignedId) return false;
-        if (filters.length !== "all" && text(p.course_length || "Unknown") !== filters.length) return false;
-        if (filters.source !== "all" && text(p.data_source || "Unknown") !== filters.source) return false;
-        if (filters.completion === "completed" && !isCompletedProjectStatus(p.status)) return false;
-        if (filters.completion === "not_completed" && isCompletedProjectStatus(p.status)) return false;
-        return true;
+        return matchesProjectMultiFilters(p, filters);
       })
       .sort((a: any, b: any) => {
         const aActivity = latestActivityByProjectId.get(a.id) || 0;
@@ -356,6 +321,15 @@ export default function Projects() {
       </span>
     </TableHead>
   );
+
+  const setFilterValues = (field: ProjectFilterField, values: string[]) => {
+    setFilters((prev) => ({ ...prev, [field]: values }));
+  };
+
+  const clearAllFilters = () => {
+    setSearch("");
+    setFilters({ ...DEFAULT_PROJECT_MULTI_FILTERS });
+  };
 
   if (selected) {
     const m = selected as any;
@@ -612,25 +586,64 @@ export default function Projects() {
                 />
               </div>
             </div>
-            <FilterSelect label="Reporting Year" value={filters.year} onValueChange={(value) => setFilters((f) => ({ ...f, year: value }))} options={filterOptions.year} />
-            <FilterSelect label="Assigned ID" value={filters.assignedId} onValueChange={(value) => setFilters((f) => ({ ...f, assignedId: value }))} options={filterOptions.assignedId} />
+            <MultiSelectFilter
+              label="Reporting Year"
+              selectedValues={filters.year}
+              onChange={(values) => setFilterValues("year", values)}
+              options={filterOptions.year}
+            />
+            <MultiSelectFilter
+              label="Assigned ID"
+              selectedValues={filters.assignedId}
+              onChange={(values) => setFilterValues("assignedId", values)}
+              options={filterOptions.assignedId}
+            />
           </div>
 
           <Collapsible open={filtersExpanded} onOpenChange={setFiltersExpanded}>
             <CollapsibleContent className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                <FilterSelect label="Status" value={filters.status} onValueChange={(value) => setFilters((f) => ({ ...f, status: value }))} options={filterOptions.status} />
-                <FilterSelect label="Completion" value={filters.completion} onValueChange={(value) => setFilters((f) => ({ ...f, completion: value as ProjectFilters["completion"] }))} options={["completed", "not_completed"]} />
-                <FilterSelect label="Course Type" value={filters.type} onValueChange={(value) => setFilters((f) => ({ ...f, type: value }))} options={filterOptions.type} />
-                <FilterSelect label="Authoring Tool" value={filters.tool} onValueChange={(value) => setFilters((f) => ({ ...f, tool: value }))} options={filterOptions.tool} />
-                <FilterSelect label="Course Length" value={filters.length} onValueChange={(value) => setFilters((f) => ({ ...f, length: value }))} options={filterOptions.length} />
-                <FilterSelect label="Vertical" value={filters.vertical} onValueChange={(value) => setFilters((f) => ({ ...f, vertical: value }))} options={filterOptions.vertical} />
-                <FilterSelect label="Data Source" value={filters.source} onValueChange={(value) => setFilters((f) => ({ ...f, source: value }))} options={filterOptions.source} />
+                <MultiSelectFilter
+                  label="Status"
+                  selectedValues={filters.status}
+                  onChange={(values) => setFilterValues("status", values)}
+                  options={filterOptions.status}
+                />
+                <MultiSelectFilter
+                  label="Course Type"
+                  selectedValues={filters.type}
+                  onChange={(values) => setFilterValues("type", values)}
+                  options={filterOptions.type}
+                />
+                <MultiSelectFilter
+                  label="Authoring Tool"
+                  selectedValues={filters.tool}
+                  onChange={(values) => setFilterValues("tool", values)}
+                  options={filterOptions.tool}
+                />
+                <MultiSelectFilter
+                  label="Course Length"
+                  selectedValues={filters.length}
+                  onChange={(values) => setFilterValues("length", values)}
+                  options={filterOptions.length}
+                />
+                <MultiSelectFilter
+                  label="Vertical"
+                  selectedValues={filters.vertical}
+                  onChange={(values) => setFilterValues("vertical", values)}
+                  options={filterOptions.vertical}
+                />
+                <MultiSelectFilter
+                  label="Data Source"
+                  selectedValues={filters.source}
+                  onChange={(values) => setFilterValues("source", values)}
+                  options={filterOptions.source}
+                />
               </div>
             </CollapsibleContent>
           </Collapsible>
           <div>
-            <Button variant="outline" size="sm" onClick={() => setFilters({ ...DEFAULT_FILTERS })}>
+            <Button variant="outline" size="sm" onClick={clearAllFilters}>
               Clear Filters
             </Button>
           </div>
@@ -710,33 +723,83 @@ export default function Projects() {
   );
 }
 
-function FilterSelect({
+function formatFilterSummary(label: string, selectedValues: string[]) {
+  if (selectedValues.length === 0) return `All ${label}`;
+  if (selectedValues.length === 1) return selectedValues[0];
+  return `${selectedValues.length} selected`;
+}
+
+function MultiSelectFilter({
   label,
-  value,
-  onValueChange,
+  selectedValues,
+  onChange,
   options,
 }: {
   label: string;
-  value: string;
-  onValueChange: (value: string) => void;
+  selectedValues: string[];
+  onChange: (value: string[]) => void;
   options: string[];
 }) {
+  const toggleValue = (value: string) => {
+    onChange(
+      selectedValues.includes(value)
+        ? selectedValues.filter((item) => item !== value)
+        : [...selectedValues, value],
+    );
+  };
+
+  const summary = formatFilterSummary(label, selectedValues);
+
   return (
     <div className="space-y-1">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger className="h-8">
-          <SelectValue placeholder={`All ${label}`} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All</SelectItem>
-          {options.map((opt) => (
-            <SelectItem key={opt} value={opt}>
-              {opt}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" className="h-8 w-full justify-between px-3 font-normal">
+            <span className={cn("truncate text-left", selectedValues.length === 0 && "text-muted-foreground")}>
+              {summary}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[260px] p-0" align="start">
+          <Command>
+            <CommandInput placeholder={`Search ${label.toLowerCase()}...`} />
+            <CommandList>
+              <CommandEmpty>No options found.</CommandEmpty>
+              {options.map((opt) => {
+                const checked = selectedValues.includes(opt);
+                return (
+                  <CommandItem
+                    key={opt}
+                    value={`${label} ${opt}`}
+                    onSelect={() => toggleValue(opt)}
+                    className="gap-2"
+                  >
+                    <Checkbox checked={checked} className="pointer-events-none" aria-hidden="true" />
+                    <span className="truncate">{opt}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandList>
+          </Command>
+          <div className="flex items-center justify-between border-t px-3 py-2">
+            <span className="text-xs text-muted-foreground">
+              {selectedValues.length === 0 ? "No filters applied" : `${selectedValues.length} selected`}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => onChange([])}
+              disabled={selectedValues.length === 0}
+            >
+              Clear
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
