@@ -25,6 +25,15 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { isCompletedProjectStatus } from "@/lib/project-status";
 
+function compareYearLabel(a: string, b: string): number {
+  const aYear = /^\d{4}$/.test(a) ? Number(a) : Number.NaN;
+  const bYear = /^\d{4}$/.test(b) ? Number(b) : Number.NaN;
+  if (!Number.isNaN(aYear) && !Number.isNaN(bYear)) return aYear - bYear;
+  if (!Number.isNaN(aYear)) return -1;
+  if (!Number.isNaN(bYear)) return 1;
+  return a.localeCompare(b);
+}
+
 type UploadDiagnostics = {
   updatedProjects: number;
   insertedProjects: number;
