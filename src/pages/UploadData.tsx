@@ -63,10 +63,39 @@ type StatusMismatchRow = {
   key: string;
   courseName: string;
   year: string;
+  rawYear: string;
   source: string;
   issue: string;
   uploadStatus: string;
   persistedStatus: string;
+};
+
+type YearKeyDiagnosticsRow = {
+  source: string;
+  rawYear: string;
+  normalizedYear: string;
+  total: number;
+  finalized: number;
+  active: number;
+  malformed: boolean;
+};
+
+type PersistedYearAuditRow = {
+  year: string;
+  total: number;
+  finalized: number;
+  active: number;
+  statuses: string;
+};
+
+type StatusDiagnosticCourseRow = {
+  key: string;
+  courseName: string;
+  year: string;
+  rawYear: string;
+  source: string;
+  rawStatus: string;
+  isComplete: boolean;
 };
 
 interface DropZoneProps {
@@ -389,6 +418,10 @@ function normalizeSourceLabel(value: unknown): string {
   if (source === "legacy") return "legacy";
   if (source === "modern") return "modern";
   return source || "unknown";
+}
+
+function isCleanFourDigitYear(value: unknown): boolean {
+  return /^\d{4}$/.test(String(value || "").trim());
 }
 
 export default function UploadData() {
@@ -766,20 +799,14 @@ export default function UploadData() {
   }, [matchInfo]);
 
   const uploadStatusRows = useMemo(() => {
-    const rows: Array<{
-      key: string;
-      courseName: string;
-      year: string;
-      source: string;
-      rawStatus: string;
-      isComplete: boolean;
-    }> = [];
+    const rows: StatusDiagnosticCourseRow[] = [];
 
     (legacyData || []).forEach((course) => {
       rows.push({
         key: courseKey(course.courseName, course.reportingYear),
         courseName: course.courseName,
         year: normalizeYearLabel(course.reportingYear),
+        rawYear: String(course.reportingYear || "").trim(),
         source: "legacy",
         rawStatus: String(course.status || "").trim(),
         isComplete: isCompletedProjectStatus(course.status),
@@ -791,6 +818,7 @@ export default function UploadData() {
         key: courseKey(course.courseName, course.reportingYear),
         courseName: course.courseName,
         year: normalizeYearLabel(course.reportingYear),
+        rawYear: String(course.reportingYear || "").trim(),
         source: "modern",
         rawStatus: String(course.status || "").trim(),
         isComplete: isCompletedProjectStatus(course.status),
@@ -810,6 +838,7 @@ export default function UploadData() {
         key: courseKey(project.name, project.reporting_year),
         courseName: String(project.name || "").trim(),
         year: normalizeYearLabel(project.reporting_year),
+        rawYear: String(project.reporting_year || "").trim(),
         source: normalizeSourceLabel(project.data_source),
         rawStatus: String(project.status || "").trim(),
         isComplete: isCompletedProjectStatus(project.status),
@@ -892,6 +921,7 @@ export default function UploadData() {
           key,
           courseName: upload.courseName,
           year: upload.year,
+          rawYear: upload.rawYear || "(blank)",
           source: upload.source,
           issue: "Missing from persisted projects",
           uploadStatus: upload.rawStatus || "(blank)",
@@ -904,6 +934,7 @@ export default function UploadData() {
           key,
           courseName: persisted.courseName,
           year: persisted.year,
+          rawYear: persisted.rawYear || "(blank)",
           source: persisted.source,
           issue: "Extra persisted project not in current upload",
           uploadStatus: "(missing)",
@@ -912,13 +943,22 @@ export default function UploadData() {
         return;
       }
       if (!upload || !persisted) return;
-      if (upload.isComplete !== persisted.isComplete || upload.rawStatus !== persisted.rawStatus) {
+      if (
+        upload.isComplete !== persisted.isComplete ||
+        upload.rawStatus !== persisted.rawStatus ||
+        upload.rawYear !== persisted.rawYear
+      ) {
         mismatches.push({
           key,
           courseName: upload.courseName,
           year: upload.year,
+          rawYear: persisted.rawYear || upload.rawYear || "(blank)",
           source: upload.source,
-          issue: upload.isComplete !== persisted.isComplete ? "Completion bucket mismatch" : "Raw status text mismatch",
+          issue: upload.rawYear !== persisted.rawYear
+            ? "Reporting year mismatch"
+            : upload.isComplete !== persisted.isComplete
+              ? "Completion bucket mismatch"
+              : "Raw status text mismatch",
           uploadStatus: upload.rawStatus || "(blank)",
           persistedStatus: persisted.rawStatus || "(blank)",
         });
@@ -952,6 +992,71 @@ export default function UploadData() {
       mismatchRows: mismatches.sort((a, b) => compareYearLabel(a.year, b.year) || a.courseName.localeCompare(b.courseName)),
     };
   }, [filteredPersistedStatusRows, filteredUploadStatusRows]);
+
+  const rawYearDiagnostics = useMemo(() => {
+    const counts = new Map<string, YearKeyDiagnosticsRow>();
+
+    const addRow = (row: StatusDiagnosticCourseRow) => {
+      const rawYear = row.rawYear || "(blank)";
+      const key = `${row.source}::${rawYear}::${row.year}`;
+      const existing = counts.get(key);
+      if (existing) {
+        existing.total += 1;
+        if (row.isComplete) existing.finalized += 1;
+        else existing.active += 1;
+        return;
+      }
+      counts.set(key, {
+        source: row.source,
+        rawYear,
+        normalizedYear: row.year,
+        total: 1,
+        finalized: row.isComplete ? 1 : 0,
+        active: row.isComplete ? 0 : 1,
+        malformed: !isCleanFourDigitYear(rawYear),
+      });
+    };
+
+    uploadStatusRows.forEach(addRow);
+    persistedStatusRows.forEach(addRow);
+
+    return [...counts.values()].sort(
+      (a, b) =>
+        a.source.localeCompare(b.source) ||
+        compareYearLabel(a.normalizedYear, b.normalizedYear) ||
+        a.rawYear.localeCompare(b.rawYear),
+    );
+  }, [persistedStatusRows, uploadStatusRows]);
+
+  const persistedYearAudit = useMemo(() => {
+    const counts = new Map<string, { total: number; finalized: number; active: number; statuses: Set<string> }>();
+
+    persistedStatusRows.forEach((row) => {
+      const existing = counts.get(row.year) || { total: 0, finalized: 0, active: 0, statuses: new Set<string>() };
+      existing.total += 1;
+      if (row.isComplete) existing.finalized += 1;
+      else existing.active += 1;
+      existing.statuses.add(row.rawStatus || "(blank)");
+      counts.set(row.year, existing);
+    });
+
+    return [...counts.entries()]
+      .map(([year, value]) => ({
+        year,
+        total: value.total,
+        finalized: value.finalized,
+        active: value.active,
+        statuses: [...value.statuses].sort().join(", "),
+      }))
+      .sort((a, b) => compareYearLabel(a.year, b.year));
+  }, [persistedStatusRows]);
+
+  const persisted2026Sample = useMemo(() => {
+    return persistedStatusRows
+      .filter((row) => row.year === "2026" || row.rawYear === "2026")
+      .sort((a, b) => a.courseName.localeCompare(b.courseName))
+      .slice(0, 20);
+  }, [persistedStatusRows]);
 
   const timeIssueRows = useMemo(() => {
     if (!timeData) return [];
@@ -2232,6 +2337,127 @@ export default function UploadData() {
 
             <div className="space-y-2">
               <div>
+                <p className="font-medium">Raw Reporting Year Keys</p>
+                <p className="text-sm text-muted-foreground">
+                  Surfaces raw year values exactly as loaded or stored so values like `2026 Courses`, blank years, or malformed keys stand out.
+                </p>
+              </div>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Raw Year</TableHead>
+                      <TableHead>Normalized Year</TableHead>
+                      <TableHead>Total</TableHead>
+                      <TableHead>Finalized</TableHead>
+                      <TableHead>Active</TableHead>
+                      <TableHead>Malformed</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rawYearDiagnostics.length > 0 ? rawYearDiagnostics.map((row) => (
+                      <TableRow key={`${row.source}-${row.rawYear}-${row.normalizedYear}`}>
+                        <TableCell className="font-medium capitalize">{row.source}</TableCell>
+                        <TableCell>{row.rawYear}</TableCell>
+                        <TableCell>{row.normalizedYear}</TableCell>
+                        <TableCell>{row.total}</TableCell>
+                        <TableCell>{row.finalized}</TableCell>
+                        <TableCell>{row.active}</TableCell>
+                        <TableCell>{row.malformed ? "Yes" : "No"}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-muted-foreground">
+                          No year-key diagnostics are available yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <p className="font-medium">Persisted Projects by Year</p>
+                <p className="text-sm text-muted-foreground">
+                  Reconciles persisted `projects` by normalized year, including finalized vs active counts and raw status values present for each year.
+                </p>
+              </div>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Year</TableHead>
+                      <TableHead>Total</TableHead>
+                      <TableHead>Finalized</TableHead>
+                      <TableHead>Active</TableHead>
+                      <TableHead>Statuses Present</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {persistedYearAudit.length > 0 ? persistedYearAudit.map((row) => (
+                      <TableRow key={`persisted-year-${row.year}`}>
+                        <TableCell className="font-medium">{row.year}</TableCell>
+                        <TableCell>{row.total}</TableCell>
+                        <TableCell>{row.finalized}</TableCell>
+                        <TableCell>{row.active}</TableCell>
+                        <TableCell>{row.statuses}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No persisted year audit is available yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <p className="font-medium">Persisted 2026 Sample</p>
+                <p className="text-sm text-muted-foreground">
+                  Small sample of persisted rows currently landing in reporting year `2026`, including their raw status and finalized bucket result.
+                </p>
+              </div>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Course</TableHead>
+                      <TableHead>Reporting Year</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Raw Status</TableHead>
+                      <TableHead>Finalized</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {persisted2026Sample.length > 0 ? persisted2026Sample.map((row) => (
+                      <TableRow key={`persisted-2026-${row.key}`}>
+                        <TableCell className="font-medium">{row.courseName}</TableCell>
+                        <TableCell>{row.rawYear || row.year}</TableCell>
+                        <TableCell className="capitalize">{row.source}</TableCell>
+                        <TableCell>{row.rawStatus || "(blank)"}</TableCell>
+                        <TableCell>{row.isComplete ? "Yes" : "No"}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No persisted 2026 rows were found with the current data.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div>
                 <p className="font-medium">Sample Mismatches</p>
                 <p className="text-sm text-muted-foreground">
                   Missing rows, extra persisted rows, or statuses that land in a different completion bucket than the current upload.
@@ -2243,6 +2469,7 @@ export default function UploadData() {
                     <TableRow>
                       <TableHead>Course</TableHead>
                       <TableHead>Year</TableHead>
+                      <TableHead>Raw Year</TableHead>
                       <TableHead>Source</TableHead>
                       <TableHead>Issue</TableHead>
                       <TableHead>Upload Status</TableHead>
@@ -2254,6 +2481,7 @@ export default function UploadData() {
                       <TableRow key={`${row.key}-${row.issue}`}>
                         <TableCell className="font-medium">{row.courseName}</TableCell>
                         <TableCell>{row.year}</TableCell>
+                        <TableCell>{row.rawYear}</TableCell>
                         <TableCell className="capitalize">{row.source}</TableCell>
                         <TableCell>{row.issue}</TableCell>
                         <TableCell>{row.uploadStatus}</TableCell>
@@ -2261,7 +2489,7 @@ export default function UploadData() {
                       </TableRow>
                     )) : (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center text-muted-foreground">
                           No mismatches found for the selected year filter.
                         </TableCell>
                       </TableRow>
