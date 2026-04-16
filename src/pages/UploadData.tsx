@@ -18,11 +18,12 @@ import { makeId, readLocalStore, writeLocalStore } from "@/lib/local-data-store"
 import { normalizeProjectStatus } from "@/lib/project-status";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { useUploadHistory } from "@/hooks/use-time-data";
+import { useProjects, useUploadHistory } from "@/hooks/use-time-data";
 import { useAuth } from "@/hooks/use-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { isCompletedProjectStatus } from "@/lib/project-status";
 
 type UploadDiagnostics = {
   updatedProjects: number;
@@ -39,6 +40,33 @@ type UploadUser = {
   email: string;
   role: string;
   created_at: string;
+};
+
+type StatusComparisonRow = {
+  source: string;
+  year: string;
+  uploadTotal: number;
+  uploadIncomplete: number;
+  persistedTotal: number;
+  persistedIncomplete: number;
+};
+
+type YearlyStatusComparisonRow = {
+  year: string;
+  uploadCompleted: number;
+  uploadActive: number;
+  persistedCompleted: number;
+  persistedActive: number;
+};
+
+type StatusMismatchRow = {
+  key: string;
+  courseName: string;
+  year: string;
+  source: string;
+  issue: string;
+  uploadStatus: string;
+  persistedStatus: string;
 };
 
 interface DropZoneProps {
@@ -351,6 +379,18 @@ function formatDatasetLabel(key: string): string {
   }
 }
 
+function normalizeYearLabel(value: unknown): string {
+  const year = String(value || "").trim();
+  return year || "Unknown";
+}
+
+function normalizeSourceLabel(value: unknown): string {
+  const source = String(value || "").trim().toLowerCase();
+  if (source === "legacy") return "legacy";
+  if (source === "modern") return "modern";
+  return source || "unknown";
+}
+
 export default function UploadData() {
   const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === "true";
   const [legacyFile, setLegacyFile] = useState("");
@@ -389,7 +429,9 @@ export default function UploadData() {
   const [surveyNoMatchKeys, setSurveyNoMatchKeys] = useState<Set<string>>(new Set());
   const [autoSurveyNoMatchKeys, setAutoSurveyNoMatchKeys] = useState<Set<string>>(new Set());
   const [autoTimeOverrideGroups, setAutoTimeOverrideGroups] = useState<Set<string>>(new Set());
+  const [statusDiagnosticYear, setStatusDiagnosticYear] = useState<string>("all");
   const { data: history = [] } = useUploadHistory();
+  const { data: persistedProjects = [] } = useProjects();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -722,6 +764,194 @@ export default function UploadData() {
   useEffect(() => {
     setWarnings(matchInfo?.warn || []);
   }, [matchInfo]);
+
+  const uploadStatusRows = useMemo(() => {
+    const rows: Array<{
+      key: string;
+      courseName: string;
+      year: string;
+      source: string;
+      rawStatus: string;
+      isComplete: boolean;
+    }> = [];
+
+    (legacyData || []).forEach((course) => {
+      rows.push({
+        key: courseKey(course.courseName, course.reportingYear),
+        courseName: course.courseName,
+        year: normalizeYearLabel(course.reportingYear),
+        source: "legacy",
+        rawStatus: String(course.status || "").trim(),
+        isComplete: isCompletedProjectStatus(course.status),
+      });
+    });
+
+    (modernData || []).forEach((course) => {
+      rows.push({
+        key: courseKey(course.courseName, course.reportingYear),
+        courseName: course.courseName,
+        year: normalizeYearLabel(course.reportingYear),
+        source: "modern",
+        rawStatus: String(course.status || "").trim(),
+        isComplete: isCompletedProjectStatus(course.status),
+      });
+    });
+
+    return rows;
+  }, [legacyData, modernData]);
+
+  const persistedStatusRows = useMemo(() => {
+    return (persistedProjects as any[])
+      .filter((project: any) => {
+        const source = normalizeSourceLabel(project.data_source);
+        return source === "legacy" || source === "modern";
+      })
+      .map((project: any) => ({
+        key: courseKey(project.name, project.reporting_year),
+        courseName: String(project.name || "").trim(),
+        year: normalizeYearLabel(project.reporting_year),
+        source: normalizeSourceLabel(project.data_source),
+        rawStatus: String(project.status || "").trim(),
+        isComplete: isCompletedProjectStatus(project.status),
+      }));
+  }, [persistedProjects]);
+
+  const availableStatusDiagnosticYears = useMemo(() => {
+    const set = new Set<string>();
+    uploadStatusRows.forEach((row) => set.add(row.year));
+    persistedStatusRows.forEach((row) => set.add(row.year));
+    return [...set].sort(compareYearLabel);
+  }, [persistedStatusRows, uploadStatusRows]);
+
+  const filteredUploadStatusRows = useMemo(
+    () => uploadStatusRows.filter((row) => statusDiagnosticYear === "all" || row.year === statusDiagnosticYear),
+    [statusDiagnosticYear, uploadStatusRows],
+  );
+
+  const filteredPersistedStatusRows = useMemo(
+    () => persistedStatusRows.filter((row) => statusDiagnosticYear === "all" || row.year === statusDiagnosticYear),
+    [persistedStatusRows, statusDiagnosticYear],
+  );
+
+  const dashboardStatusDiagnostics = useMemo(() => {
+    const uploadMap = new Map(filteredUploadStatusRows.map((row) => [row.key, row]));
+    const persistedMap = new Map(filteredPersistedStatusRows.map((row) => [row.key, row]));
+    const counts = new Map<string, StatusComparisonRow>();
+
+    const ensureCount = (source: string, year: string) => {
+      const key = `${source}::${year}`;
+      const existing = counts.get(key);
+      if (existing) return existing;
+      const next: StatusComparisonRow = {
+        source,
+        year,
+        uploadTotal: 0,
+        uploadIncomplete: 0,
+        persistedTotal: 0,
+        persistedIncomplete: 0,
+      };
+      counts.set(key, next);
+      return next;
+    };
+
+    filteredUploadStatusRows.forEach((row) => {
+      const entry = ensureCount(row.source, row.year);
+      entry.uploadTotal += 1;
+      if (!row.isComplete) entry.uploadIncomplete += 1;
+    });
+
+    filteredPersistedStatusRows.forEach((row) => {
+      const entry = ensureCount(row.source, row.year);
+      entry.persistedTotal += 1;
+      if (!row.isComplete) entry.persistedIncomplete += 1;
+    });
+
+    const allKeys = new Set<string>([...uploadMap.keys(), ...persistedMap.keys()]);
+    const mismatches: StatusMismatchRow[] = [];
+    const yearlyCounts = new Map<string, YearlyStatusComparisonRow>();
+
+    const ensureYearlyCount = (year: string) => {
+      const existing = yearlyCounts.get(year);
+      if (existing) return existing;
+      const next: YearlyStatusComparisonRow = {
+        year,
+        uploadCompleted: 0,
+        uploadActive: 0,
+        persistedCompleted: 0,
+        persistedActive: 0,
+      };
+      yearlyCounts.set(year, next);
+      return next;
+    };
+
+    allKeys.forEach((key) => {
+      const upload = uploadMap.get(key);
+      const persisted = persistedMap.get(key);
+      if (upload && !persisted) {
+        mismatches.push({
+          key,
+          courseName: upload.courseName,
+          year: upload.year,
+          source: upload.source,
+          issue: "Missing from persisted projects",
+          uploadStatus: upload.rawStatus || "(blank)",
+          persistedStatus: "(missing)",
+        });
+        return;
+      }
+      if (!upload && persisted) {
+        mismatches.push({
+          key,
+          courseName: persisted.courseName,
+          year: persisted.year,
+          source: persisted.source,
+          issue: "Extra persisted project not in current upload",
+          uploadStatus: "(missing)",
+          persistedStatus: persisted.rawStatus || "(blank)",
+        });
+        return;
+      }
+      if (!upload || !persisted) return;
+      if (upload.isComplete !== persisted.isComplete || upload.rawStatus !== persisted.rawStatus) {
+        mismatches.push({
+          key,
+          courseName: upload.courseName,
+          year: upload.year,
+          source: upload.source,
+          issue: upload.isComplete !== persisted.isComplete ? "Completion bucket mismatch" : "Raw status text mismatch",
+          uploadStatus: upload.rawStatus || "(blank)",
+          persistedStatus: persisted.rawStatus || "(blank)",
+        });
+      }
+    });
+
+    filteredUploadStatusRows.forEach((row) => {
+      const entry = ensureYearlyCount(row.year);
+      if (row.isComplete) entry.uploadCompleted += 1;
+      else entry.uploadActive += 1;
+    });
+
+    filteredPersistedStatusRows.forEach((row) => {
+      const entry = ensureYearlyCount(row.year);
+      if (row.isComplete) entry.persistedCompleted += 1;
+      else entry.persistedActive += 1;
+    });
+
+    const uploadIncomplete = filteredUploadStatusRows.filter((row) => !row.isComplete).length;
+    const persistedIncomplete = filteredPersistedStatusRows.filter((row) => !row.isComplete).length;
+
+    return {
+      uploadTotal: filteredUploadStatusRows.length,
+      uploadIncomplete,
+      persistedTotal: filteredPersistedStatusRows.length,
+      persistedIncomplete,
+      dashboardDonutComplete: filteredPersistedStatusRows.length - persistedIncomplete,
+      dashboardDonutIncomplete: persistedIncomplete,
+      comparisonRows: [...counts.values()].sort((a, b) => a.source.localeCompare(b.source) || compareYearLabel(a.year, b.year)),
+      yearlyRows: [...yearlyCounts.values()].sort((a, b) => compareYearLabel(a.year, b.year)),
+      mismatchRows: mismatches.sort((a, b) => compareYearLabel(a.year, b.year) || a.courseName.localeCompare(b.courseName)),
+    };
+  }, [filteredPersistedStatusRows, filteredUploadStatusRows]);
 
   const timeIssueRows = useMemo(() => {
     if (!timeData) return [];
@@ -1879,6 +2109,165 @@ export default function UploadData() {
               <div>
                 <p className="text-2xl font-bold">{matchInfo.totalUnique}</p>
                 <p className="text-xs text-muted-foreground">Total Unique</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {hasCourseFilesLoaded && (
+        <Card>
+          <CardHeader className="space-y-3">
+            <div className="space-y-1">
+              <CardTitle className="text-base">Dashboard Status Diagnostics</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Uses the same completion rule as the Dashboard donut: finalized statuses count as complete, including `Completed`, `Published`, `Ready for Loading`, and `Ready to Publish`.
+              </p>
+            </div>
+            <div className="w-full max-w-[220px]">
+              <Select value={statusDiagnosticYear} onValueChange={setStatusDiagnosticYear}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by year" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Years</SelectItem>
+                  {availableStatusDiagnosticYears.map((year) => (
+                    <SelectItem key={year} value={year}>{year}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Upload Courses</p>
+                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.uploadTotal}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Upload Not Complete</p>
+                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.uploadIncomplete}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Persisted Courses</p>
+                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.persistedTotal}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Dashboard Not Complete</p>
+                <p className="text-2xl font-bold">{dashboardStatusDiagnostics.dashboardDonutIncomplete}</p>
+              </div>
+            </div>
+
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Year</TableHead>
+                    <TableHead>Upload Total</TableHead>
+                    <TableHead>Upload Not Complete</TableHead>
+                    <TableHead>Persisted Total</TableHead>
+                    <TableHead>Persisted Not Complete</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dashboardStatusDiagnostics.comparisonRows.length > 0 ? dashboardStatusDiagnostics.comparisonRows.map((row) => (
+                    <TableRow key={`${row.source}-${row.year}`}>
+                      <TableCell className="font-medium capitalize">{row.source}</TableCell>
+                      <TableCell>{row.year}</TableCell>
+                      <TableCell>{row.uploadTotal}</TableCell>
+                      <TableCell>{row.uploadIncomplete}</TableCell>
+                      <TableCell>{row.persistedTotal}</TableCell>
+                      <TableCell>{row.persistedIncomplete}</TableCell>
+                    </TableRow>
+                  )) : (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        Load Legacy and/or Modern files to compare uploaded status counts against persisted projects.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <p className="font-medium">Yearly Course Volume Comparison</p>
+                <p className="text-sm text-muted-foreground">
+                  Mirrors the Dashboard `Yearly Course Volume: Completed vs Active` chart using upload rows versus persisted `projects`.
+                </p>
+              </div>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Year</TableHead>
+                      <TableHead>Upload Completed</TableHead>
+                      <TableHead>Upload Active</TableHead>
+                      <TableHead>Persisted Completed</TableHead>
+                      <TableHead>Persisted Active</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dashboardStatusDiagnostics.yearlyRows.length > 0 ? dashboardStatusDiagnostics.yearlyRows.map((row) => (
+                      <TableRow key={`yearly-${row.year}`}>
+                        <TableCell className="font-medium">{row.year}</TableCell>
+                        <TableCell>{row.uploadCompleted}</TableCell>
+                        <TableCell>{row.uploadActive}</TableCell>
+                        <TableCell>{row.persistedCompleted}</TableCell>
+                        <TableCell>{row.persistedActive}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No yearly comparison is available yet for the selected filter.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <p className="font-medium">Sample Mismatches</p>
+                <p className="text-sm text-muted-foreground">
+                  Missing rows, extra persisted rows, or statuses that land in a different completion bucket than the current upload.
+                </p>
+              </div>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Course</TableHead>
+                      <TableHead>Year</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Issue</TableHead>
+                      <TableHead>Upload Status</TableHead>
+                      <TableHead>Persisted Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dashboardStatusDiagnostics.mismatchRows.length > 0 ? dashboardStatusDiagnostics.mismatchRows.slice(0, 12).map((row) => (
+                      <TableRow key={`${row.key}-${row.issue}`}>
+                        <TableCell className="font-medium">{row.courseName}</TableCell>
+                        <TableCell>{row.year}</TableCell>
+                        <TableCell className="capitalize">{row.source}</TableCell>
+                        <TableCell>{row.issue}</TableCell>
+                        <TableCell>{row.uploadStatus}</TableCell>
+                        <TableCell>{row.persistedStatus}</TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                          No mismatches found for the selected year filter.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
               </div>
             </div>
           </CardContent>

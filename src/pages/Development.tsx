@@ -71,7 +71,6 @@ const TESTING_READY_STATUSES = new Set([
 function bucketStatus(status: unknown): "not_started" | "lp_dev" | "testing_ready" | "other" | "complete" {
   const normalized = normalizeProjectStatus(status, "Unknown").toLowerCase();
   if (isCompletedProjectStatus(normalized)) return "complete";
-  if (normalized === "ready for loading" || normalized === "ready to publish") return "complete";
   if (normalized === "not started") return "not_started";
   if (LP_DEV_STATUSES.has(normalized)) return "lp_dev";
   if (TESTING_READY_STATUSES.has(normalized)) return "testing_ready";
@@ -545,7 +544,7 @@ export default function Development() {
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-red-500" />LP Work</span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-yellow-500" />Testing/Ready</span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-500" />Other</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-emerald-500" />Completed/Published</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-emerald-500" />Complete/Finalized</span>
             </div>
             {currentYearAssignedBreakdown.rows.map((row) => (
               <div key={row.id} className="space-y-1">
@@ -587,7 +586,7 @@ export default function Development() {
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            Includes only courses whose Status is not Completed/Published. Bars are stacked by current-year active and prior-year carryover.
+            Includes only courses whose Status is not in a finalized state. Finalized statuses include Completed, Published, Ready for Loading, and Ready to Publish.
           </p>
           {renderFilterControls(statusFilters, setStatusFilters)}
         </CardHeader>

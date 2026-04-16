@@ -389,7 +389,7 @@ export default function Projects() {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Compared with {m.cohortSize} completed/published course(s) of length “{m.cohortLengthLabel}”.
+                  Compared with {m.cohortSize} completed/finalized course(s) of length “{m.cohortLengthLabel}”.
                 </p>
               </div>
             </CardContent>
