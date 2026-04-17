@@ -1,3 +1,5 @@
+import { parseUploadDate } from "@/lib/analytics/parse-upload-date";
+
 export function normalizeCatalogText(value: unknown): string {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
@@ -18,12 +20,6 @@ export function pickCatalogCell(row: Record<string, unknown>, candidates: string
 
   return "";
 }
-
-function formatDateParts(year: number, month: number, day: number): string {
-  return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
-}
-
-import { parseUploadDate } from "@/lib/analytics/parse-upload-date";
 
 export function parseCatalogDate(value: unknown): string | null {
   return parseUploadDate(value);
