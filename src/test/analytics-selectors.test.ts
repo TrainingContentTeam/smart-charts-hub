@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildAnalyticsSnapshot } from "@/lib/analytics/snapshot";
-import { selectDashboardModel, selectDevelopmentModel } from "@/lib/analytics/selectors";
+import {
+  selectDashboardModel,
+  selectDevelopmentModel,
+  selectGroupedReconciliationModel,
+  selectProjectDetailModel,
+  selectSmeCollaborationModel,
+} from "@/lib/analytics/selectors";
 import type { AnalyticsPersistenceBundle, RawProjectImportRow, RawTimeLogRow } from "@/lib/analytics/types";
+import { createUiSnapshot } from "@/test/fixtures/analytics-ui-fixture";
 
 function bundleWithRows(rows: {
   projects: RawProjectImportRow[];
@@ -129,5 +136,64 @@ describe("analytics selectors", () => {
 
     expect(dashboard.cards.totalLoggedHours).toBe(1.5);
     expect(development.developmentHoursByPhase).toEqual([{ phase: "Planning", hours: 1.5 }]);
+  });
+
+  it("keeps dashboard chart filters local to the chart being requested", () => {
+    const snapshot = createUiSnapshot();
+
+    const unfiltered = selectDashboardModel(snapshot);
+    const filtered = selectDashboardModel(snapshot, {
+      projectsByReportingYear: { statuses: ["Published"] },
+    });
+
+    expect(unfiltered.projectsByReportingYear).toEqual([
+      { year: "2025", count: 1 },
+      { year: "2026", count: 1 },
+    ]);
+    expect(filtered.projectsByReportingYear).toEqual([{ year: "2025", count: 1 }]);
+    expect(filtered.hoursByTimeLogPhase).toEqual(unfiltered.hoursByTimeLogPhase);
+  });
+
+  it("builds grouped reconciliation rows and surfaces shared suggestions", () => {
+    const snapshot = createUiSnapshot();
+
+    const model = selectGroupedReconciliationModel(snapshot);
+
+    expect(model.timeLogGroups).toHaveLength(1);
+    expect(model.timeLogGroups[0].title).toBe("Alpha Project Video");
+    expect(model.timeLogGroups[0].rowCount).toBe(2);
+    expect(model.timeLogGroups[0].topSuggestion?.projectName).toBe("Alpha Project");
+    expect(model.standaloneGroups[0].title).toBe("Standalone Safety Video");
+  });
+
+  it("builds a project detail model with timeline, feedback, and similar projects", () => {
+    const snapshot = createUiSnapshot();
+
+    const model = selectProjectDetailModel(snapshot, "alpha-project|2026");
+
+    expect(model?.projectName).toBe("Alpha Project");
+    expect(model?.timeline.points).toHaveLength(2);
+    expect(model?.smeFeedback.designerComments[0].comment).toContain("Great collaboration");
+    expect(model?.comparison.similarProjects[0].projectName).toBe("Beta Project");
+    expect(model?.comparison.percentileRank).toBeGreaterThan(0);
+  });
+
+  it("uses instrument-specific dates when filtering SME collaboration data", () => {
+    const snapshot = createUiSnapshot();
+
+    const idWindow = selectSmeCollaborationModel(snapshot, {
+      startDate: "2026-03-09",
+      endDate: "2026-03-09",
+    });
+    const smeWindow = selectSmeCollaborationModel(snapshot, {
+      startDate: "2026-03-08",
+      endDate: "2026-03-08",
+      internalValues: ["Internal"],
+    });
+
+    expect(idWindow.cards.responseCount).toBe(1);
+    expect(idWindow.matchedResponses[0].projectName).toBe("Alpha Project");
+    expect(smeWindow.cards.responseCount).toBe(1);
+    expect(smeWindow.bySme[0].sme).toBe("Taylor SME");
   });
 });
