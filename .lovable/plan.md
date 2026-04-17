@@ -1,61 +1,59 @@
 
 
-# Fix: Stale Chart Data and Missing Database Tables
+# Schema reconciliation for the new canonical data model
 
-## What this fixes
+## Findings
 
-1. **Constant 404 errors** — Two tables (`survey_no_match_records` and `time_match_overrides`) are referenced in code but don't exist in the database, causing nonstop failed requests that can interfere with data loading.
-2. **Stale cached data after upload** — React Query has no retry limits or staleness window, so old data can persist. Also, some query keys (`canceled_courses`, `lms_course_info`, `lms_course_versions`) are not invalidated after project batch uploads.
+**Code now uses these tables** (checked every `supabase.from(...)` call in `src/`):
+- `upload_history` (exists ✓)
+- `user_roles` (exists ✓)
+- `raw_project_import_rows` (missing ✗)
+- `raw_time_log_rows` (missing ✗)
+- `raw_sme_feedback_rows` (missing ✗)
+- `course_alias_config` (missing ✗)
+- `person_alias_config` (missing ✗)
+- `person_role_config` (missing ✗)
+- `sme_manual_join_overrides` (missing ✗)
+- `work_entity_decisions` (missing ✗)
 
-## Steps
+**Edge function** `supabase/functions/chat/index.ts` still queries the legacy `projects` and `time_entries` tables — this is the build error noted under "Check supabase/functions/chat/index.ts" and the reason those legacy tables can't simply be dropped without updating the function first.
 
-### Step 1 — Database migration: create the two missing tables
+**Legacy tables no longer referenced anywhere in `src/`:**
+`projects`, `time_entries`, `sme_collaboration_surveys`, `canceled_courses`, `lms_course_info`, `lms_course_versions`, `survey_no_match_records`, `time_match_overrides`.
 
-```sql
-CREATE TABLE public.survey_no_match_records (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  course_name_key text NOT NULL,
-  original_course_name text NOT NULL,
-  reporting_year text,
-  user_id uuid,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE public.survey_no_match_records ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Auth read survey_no_match" ON public.survey_no_match_records FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Insert own survey_no_match" ON public.survey_no_match_records FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Delete own survey_no_match" ON public.survey_no_match_records FOR DELETE TO authenticated USING (auth.uid() = user_id);
+**Build error in `src/lib/analytics/snapshot.ts` line 655:** typo `resolution.work_match_status` → should be `resolution.workMatchStatus` (the type uses camelCase).
 
-CREATE TABLE public.time_match_overrides (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  course_name_key text NOT NULL,
-  original_course_name text NOT NULL,
-  reporting_year text,
-  target_project_key text NOT NULL,
-  user_id uuid,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE public.time_match_overrides ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Auth read time_match_overrides" ON public.time_match_overrides FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Insert own time_match_overrides" ON public.time_match_overrides FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Delete own time_match_overrides" ON public.time_match_overrides FOR DELETE TO authenticated USING (auth.uid() = user_id);
-```
+## Plan
 
-### Step 2 — Configure QueryClient with retry limits
+### 1. Migration — create the 8 missing canonical tables
 
-In `src/App.tsx`, change:
-```typescript
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
-```
+All tables get RLS with the same pattern already used in this project: authenticated users can `SELECT` everything; users can `INSERT/UPDATE/DELETE` only rows where `auth.uid() = user_id`. JSON columns (`raw_row`, `parse_warnings`, `suggestion`, `candidate_project_keys`) use `jsonb`. Add the unique constraints the upserts need (`onConflict` keys in `persistence.ts`):
+- `course_alias_config` UNIQUE `(alias_title_compact, reporting_year, alias_scope)`
+- `work_entity_decisions` UNIQUE `(source_title_compact, reporting_year)`
+- `sme_manual_join_overrides` UNIQUE `(course_key_compact, course_name_compact, reporting_year)`
 
-### Step 3 — Add missing cache invalidation keys after project batch upload
+Columns mirror the TypeScript interfaces in `src/lib/analytics/types.ts` exactly.
 
-In `src/pages/UploadData.tsx` around line 1145, add invalidation for `canceled_courses`, `lms_course_info`, and `lms_course_versions` to the project batch upload success block.
+### 2. Migration — drop legacy tables
+
+Drop (after fixing the chat function in step 3): `projects`, `time_entries`, `sme_collaboration_surveys`, `canceled_courses`, `lms_course_info`, `lms_course_versions`, `survey_no_match_records`, `time_match_overrides`.
+
+### 3. Update `supabase/functions/chat/index.ts`
+
+Replace `projects`/`time_entries` queries with calls to the new raw tables (`raw_project_import_rows`, `raw_time_log_rows`) so the chatbot keeps working after the legacy tables are dropped. Map field names to the new schema in the prompt context.
+
+### 4. Fix the snapshot typo
+
+In `src/lib/analytics/snapshot.ts` line 655, change `resolution.work_match_status` to `resolution.workMatchStatus`. This clears the TS build error.
+
+### 5. Regenerated `src/integrations/supabase/types.ts`
+
+Will regenerate automatically once the migration runs — no manual edit.
+
+## Result
+
+- Schema cache will contain every table the new code queries → the `raw_project_import_rows` runtime error disappears.
+- TypeScript build succeeds (snapshot typo + chat function fixed).
+- Database no longer carries dead legacy tables.
+- All RLS policies follow the existing project pattern.
 
