@@ -26,24 +26,38 @@ function isCsvFile(fileName: string) {
   return /\.csv$/i.test(fileName);
 }
 
+function excelSerialToIso(serial: number): string | null {
+  const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
 function parseDateToIso(value: unknown): string | null {
   if (typeof value === "number" && value > 30000 && value < 60000) {
-    const date = new Date(Math.round((value - 25569) * 86400 * 1000));
-    return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+    return excelSerialToIso(value);
   }
 
   const text = normalizeTextPreserveMeaning(value);
   if (!text) return null;
   if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
 
-  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (match) {
-    const [, month, day, year] = match;
+  const mdy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    const [, month, day, year] = mdy;
     return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
 
+  // Excel serial arriving as a string (common when CSV is exported from Excel)
+  if (/^\d{4,6}$/.test(text)) {
+    const serial = Number(text);
+    if (serial > 30000 && serial < 60000) return excelSerialToIso(serial);
+  }
+
+  // Fallback: only accept if it parses to a sane 4-digit year
   const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const year = parsed.getUTCFullYear();
+  if (year < 1900 || year > 2100) return null;
+  return parsed.toISOString().slice(0, 10);
 }
 
 function parseNumber(value: unknown): number | null {
