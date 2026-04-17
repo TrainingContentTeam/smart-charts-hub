@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
+import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { selectProjectsPageRows } from "@/lib/analytics/selectors";
@@ -192,11 +193,14 @@ export default function Projects() {
                   <TableRow
                     key={row.projectKey}
                     className="cursor-pointer hover:bg-muted/40"
-                    onClick={() =>
+                    onClick={(event) => {
+                      const target = event.target as HTMLElement;
+                      if (target.closest("a,button,input,[role='button']")) return;
+
                       navigate(row.projectHref, {
                         state: { from: `${location.pathname}${location.search}` },
-                      })
-                    }
+                      });
+                    }}
                   >
                     <TableCell className="min-w-[240px]">
                       <ProjectLink projectName={row.projectName} reportingYear={row.reportingYear}>
@@ -208,8 +212,26 @@ export default function Projects() {
                     <TableCell>{row.projectTotalHours}</TableCell>
                     <TableCell>{row.timeLogHours}</TableCell>
                     <TableCell>{row.hoursDiscrepancyFlag ? "Flagged" : "OK"}</TableCell>
-                    <TableCell>{row.ownerNames.join(", ") || row.idAssignedRaw || "Unassigned"}</TableCell>
-                    <TableCell>{row.smeAssignedRaw || "-"}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-x-2 gap-y-1">
+                        {(row.ownerNames.length ? row.ownerNames : [row.idAssignedRaw || "Unassigned"])
+                          .filter(Boolean)
+                          .map((owner) => owner === "Unassigned" ? (
+                            <span key={owner}>{owner}</span>
+                          ) : (
+                            <PersonLink key={owner} personName={owner}>{owner}</PersonLink>
+                          ))}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-x-2 gap-y-1">
+                        {(row.smeAssignedRaw ? row.smeAssignedRaw.split(",").map((name) => name.trim()).filter(Boolean) : [])
+                          .map((sme) => (
+                            <PersonLink key={sme} personName={sme}>{sme}</PersonLink>
+                          ))}
+                        {!row.smeAssignedRaw ? <span>-</span> : null}
+                      </div>
+                    </TableCell>
                     <TableCell>{row.legalReviewerRaw || "-"}</TableCell>
                     <TableCell>{row.fullVerticalList || "-"}</TableCell>
                     <TableCell>{row.courseType}</TableCell>

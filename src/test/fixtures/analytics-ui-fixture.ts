@@ -122,6 +122,9 @@ export function createUiSnapshot(): AnalyticsSnapshot {
     ],
     dimPerson: [
       { person_key: "alex-doe", canonical_name: "Alex Doe", role_groups: ["ID"], observed_raw_names: ["Alex Doe"] },
+      { person_key: "jordan-lee", canonical_name: "Jordan Lee", role_groups: ["ID"], observed_raw_names: ["Jordan Lee"] },
+      { person_key: "taylor-sme", canonical_name: "Taylor SME", role_groups: ["SME"], observed_raw_names: ["Taylor SME"] },
+      { person_key: "casey-sme", canonical_name: "Casey SME", role_groups: ["SME"], observed_raw_names: ["Casey SME"] },
     ],
     dimWorkEntity: [
       {

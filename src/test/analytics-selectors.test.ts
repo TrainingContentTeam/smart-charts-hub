@@ -4,6 +4,7 @@ import {
   selectDashboardModel,
   selectDevelopmentModel,
   selectGroupedReconciliationModel,
+  selectPersonDetailModel,
   selectProjectDetailModel,
   selectSmeCollaborationModel,
 } from "@/lib/analytics/selectors";
@@ -114,9 +115,11 @@ describe("analytics selectors", () => {
       ],
     }));
 
-    const model = selectDevelopmentModel(snapshot);
+    const model = selectDevelopmentModel(snapshot, { currentYear: "2026" });
 
     expect(model.activeProjectCount).toBe(1);
+    expect(model.activeProjectsCurrentYear).toBe(1);
+    expect(model.activeProjectsPreviousYear).toBe(0);
     expect(model.activeProjectsByStatus).toEqual([{ status: "LP Development", count: 1 }]);
     expect(model.developmentHoursByPhase).toEqual([{ phase: "Planning", hours: 1.5 }]);
     expect(model.latestActivityRows[0].courseName).toBe("Project A");
@@ -132,7 +135,7 @@ describe("analytics selectors", () => {
     }));
 
     const dashboard = selectDashboardModel(snapshot);
-    const development = selectDevelopmentModel(snapshot);
+    const development = selectDevelopmentModel(snapshot, { currentYear: "2026" });
 
     expect(dashboard.cards.totalLoggedHours).toBe(1.5);
     expect(development.developmentHoursByPhase).toEqual([{ phase: "Planning", hours: 1.5 }]);
@@ -152,6 +155,25 @@ describe("analytics selectors", () => {
     ]);
     expect(filtered.projectsByReportingYear).toEqual([{ year: "2025", count: 1 }]);
     expect(filtered.hoursByTimeLogPhase).toEqual(unfiltered.hoursByTimeLogPhase);
+  });
+
+  it("sorts latest activity rows by the requested column and falls back to the default order", () => {
+    const snapshot = createUiSnapshot();
+    snapshot.canonicalProjects[1].status = "LP Development";
+    snapshot.canonicalProjects[1].raw_status = "LP Development";
+
+    const defaultModel = selectDevelopmentModel(snapshot, { currentYear: "2026" });
+    const sortedByProject = selectDevelopmentModel(snapshot, {
+      currentYear: "2026",
+      latestActivity: {
+        sortKey: "projectName",
+        sortDirection: "asc",
+      },
+    });
+
+    expect(defaultModel.latestActivityRows[0].projectName).toBe("Alpha Project");
+    expect(sortedByProject.latestActivityRows[0].projectName).toBe("Alpha Project");
+    expect(sortedByProject.latestActivityRows[1].projectName).toBe("Beta Project");
   });
 
   it("builds grouped reconciliation rows and surfaces shared suggestions", () => {
@@ -195,5 +217,68 @@ describe("analytics selectors", () => {
     expect(idWindow.matchedResponses[0].projectName).toBe("Alpha Project");
     expect(smeWindow.cards.responseCount).toBe(1);
     expect(smeWindow.bySme[0].sme).toBe("Taylor SME");
+  });
+
+  it("keeps SME matrix rows on SME-view data only and locks source verification metadata", () => {
+    const snapshot = createUiSnapshot();
+    const model = selectSmeCollaborationModel(snapshot);
+    const overallExperienceRow = model.smeQuestionMatrix.find((row) => row.question === "overall_experience_with_lexipol");
+
+    expect(overallExperienceRow?.counts[4]).toBe(1);
+    expect(overallExperienceRow?.counts[5]).toBe(1);
+    expect(overallExperienceRow?.average).toBe(4.5);
+    expect(model.sourceVerification.smeExperienceBreakdown).toBe("smeFeedbackSmeView");
+    expect(model.sourceVerification.instructionalDesignerBreakdown).toBe("smeFeedbackIdView");
+  });
+
+  it("excludes SMEs without averageable scores from the SME experience breakdown", () => {
+    const snapshot = createUiSnapshot();
+    snapshot.smeFeedbackSmeView.push({
+      raw_sme_feedback_row_id: "sme-empty",
+      matched_project_key: null,
+      join_status: "unresolved",
+      join_method: null,
+      join_confidence: null,
+      reporting_year: "2026",
+      sme_survey_date: "2026-04-01",
+      course_name_raw: "Unmatched Course",
+      course_key_raw: "Unmatched Course",
+      instructional_designer: "Alex Doe",
+      sme: "No Score SME",
+      sme_email: "noscore@example.com",
+      internal: "No",
+      hours_worked: null,
+      amount_billed: null,
+      overall_experience_with_lexipol: null,
+      clarity_of_goals_and_objectives: null,
+      staff_responsiveness: null,
+      adequacy_of_tools_and_resources: null,
+      training_and_support_provided: null,
+      use_of_my_expertise: null,
+      incorporation_of_my_feedback: null,
+      autonomy_in_course_design: null,
+      feeling_valued_as_an_sme: null,
+      likelihood_to_recommend_lexipol: null,
+      additional_feedback_or_suggestions: "",
+    });
+
+    const model = selectSmeCollaborationModel(snapshot);
+    expect(model.bySme.some((row) => row.sme === "No Score SME")).toBe(false);
+  });
+
+  it("builds a person detail model from the correct survey and project relationships", () => {
+    const snapshot = createUiSnapshot();
+
+    const idModel = selectPersonDetailModel(snapshot, "Alex Doe");
+    const smeModel = selectPersonDetailModel(snapshot, "Taylor SME");
+
+    expect(idModel?.roles).toContain("ID");
+    expect(idModel?.idView.assignedProjectCount).toBe(1);
+    expect(idModel?.idView.smeExperienceSurveyCount).toBe(1);
+    expect(idModel?.overview.recentProjects[0].projectName).toBe("Alpha Project");
+    expect(smeModel?.roles).toContain("SME");
+    expect(smeModel?.smeView.surveyCount).toBe(1);
+    expect(smeModel?.smeView.evaluationCount).toBe(1);
+    expect(smeModel?.smeView.contributedProjectCount).toBeGreaterThan(0);
   });
 });

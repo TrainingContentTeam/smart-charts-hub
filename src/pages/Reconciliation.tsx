@@ -2,6 +2,7 @@ import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Clock3, Link2, Save, ShieldAlert, Tag, Undo2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,7 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ActionIconButton } from "@/components/ActionIconButton";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfidenceBadge } from "@/components/ConfidenceBadge";
+import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
+import { SearchableProjectSelect } from "@/components/SearchableProjectSelect";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { useAuth } from "@/hooks/use-auth";
 import { compactCourseName } from "@/lib/analytics/normalization";
@@ -32,12 +35,21 @@ type ReconciliationGroup = GroupedModel["timeLogGroups"][number];
 type ReconciliationGroupRow = ReconciliationGroup["rows"][number];
 type ReconciliationSmeJoinRow = GroupedModel["smeJoinRows"][number];
 
+function visibleGroupRows(
+  group: ReconciliationGroup,
+  deferredById: Record<string, boolean>,
+  hiddenById: Record<string, boolean>,
+) {
+  return group.rows.filter((row) => !deferredById[row.raw_time_log_row_id] && !hiddenById[row.raw_time_log_row_id]);
+}
+
 function uniqueSelectedRows(
   group: ReconciliationGroup,
   selectedById: Record<string, boolean>,
   deferredById: Record<string, boolean>,
+  hiddenById: Record<string, boolean>,
 ) {
-  const visibleRows = group.rows.filter((row) => !deferredById[row.raw_time_log_row_id]);
+  const visibleRows = visibleGroupRows(group, deferredById, hiddenById);
   const selected = visibleRows.filter((row) => selectedById[row.raw_time_log_row_id]);
   return selected.length ? selected : visibleRows;
 }
@@ -54,10 +66,14 @@ export default function Reconciliation() {
   const model = useMemo(() => (snapshot ? selectGroupedReconciliationModel(snapshot) : null), [snapshot]);
 
   const [surveyTargetByRowId, setSurveyTargetByRowId] = useState<Record<string, string>>({});
+  const [projectTargetByGroupKey, setProjectTargetByGroupKey] = useState<Record<string, string>>({});
   const [timeLogSelection, setTimeLogSelection] = useState<Record<string, boolean>>({});
   const [standaloneSelection, setStandaloneSelection] = useState<Record<string, boolean>>({});
   const [nonProjectSelection, setNonProjectSelection] = useState<Record<string, boolean>>({});
   const [deferredById, setDeferredById] = useState<Record<string, boolean>>({});
+  const [hiddenTimeLogRowIds, setHiddenTimeLogRowIds] = useState<Record<string, boolean>>({});
+  const [hiddenSmeJoinRowIds, setHiddenSmeJoinRowIds] = useState<Record<string, boolean>>({});
+  const [pendingActions, setPendingActions] = useState<Record<string, boolean>>({});
   const [standaloneEdits, setStandaloneEdits] = useState<Record<string, { standardizedTitle: string; reportingYear: string; classification: "standalone_course" | "non_project_work" }>>({});
 
   const canonicalProjects = snapshot?.canonicalProjects ?? [];
@@ -78,10 +94,55 @@ export default function Reconciliation() {
     queryClient.invalidateQueries({ queryKey: ["analytics_snapshot"] });
   };
 
+  const setActionPending = (actionKey: string, value: boolean) => {
+    setPendingActions((current) => {
+      const next = { ...current };
+      if (value) {
+        next[actionKey] = true;
+      } else {
+        delete next[actionKey];
+      }
+      return next;
+    });
+  };
+
+  const hideTimeLogRows = (rows: ReconciliationGroupRow[]) => {
+    setHiddenTimeLogRowIds((current) => {
+      const next = { ...current };
+      rows.forEach((row) => {
+        next[row.raw_time_log_row_id] = true;
+      });
+      return next;
+    });
+  };
+
+  const restoreTimeLogRows = (rows: ReconciliationGroupRow[]) => {
+    setHiddenTimeLogRowIds((current) => {
+      const next = { ...current };
+      rows.forEach((row) => {
+        delete next[row.raw_time_log_row_id];
+      });
+      return next;
+    });
+  };
+
+  const clearSelections = (rows: ReconciliationGroupRow[]) => {
+    const rowIds = new Set(rows.map((row) => row.raw_time_log_row_id));
+    const clear = (setter: Dispatch<SetStateAction<Record<string, boolean>>>) =>
+      setter((current) => {
+        const next = { ...current };
+        rowIds.forEach((rowId) => delete next[rowId]);
+        return next;
+      });
+
+    clear(setTimeLogSelection);
+    clear(setStandaloneSelection);
+    clear(setNonProjectSelection);
+  };
+
   const persistProjectMatch = async (rows: ReconciliationGroupRow[], targetProjectKey: string) => {
-    if (!snapshot || !rows.length) return;
     const targetProject = canonicalProjects.find((project) => project.project_key === targetProjectKey);
-    if (!targetProject) return;
+    if (!targetProject || !rows.length) return;
 
     const writes = rows.flatMap((row) => {
       const courseAliasRow = {
@@ -117,9 +178,11 @@ export default function Reconciliation() {
         : [upsertSharedCourseAlias(courseAliasRow), upsertSharedWorkEntityDecision(decisionRow)];
     });
 
-    await Promise.all(writes);
-    invalidate();
-    toast.success(`Saved ${rows.length} project match ${rows.length === 1 ? "decision" : "decisions"}.`);
+    const results = await Promise.allSettled(writes);
+    const rejected = results.find((result) => result.status === "rejected");
+    if (rejected && rejected.status === "rejected") {
+      throw rejected.reason;
+    }
   };
 
   const persistClassification = async (
@@ -127,8 +190,6 @@ export default function Reconciliation() {
     decisionType: "standalone_course" | "non_project_work",
     options?: { standardizedTitle?: string; reportingYear?: string | null },
   ) => {
-    if (!rows.length) return;
-
     const writes = rows.map((row) => {
       const decisionRow = {
         id: makeId(),
@@ -148,9 +209,11 @@ export default function Reconciliation() {
         : upsertSharedWorkEntityDecision(decisionRow);
     });
 
-    await Promise.all(writes);
-    invalidate();
-    toast.success(`Saved ${rows.length} ${decisionType === "standalone_course" ? "standalone" : "non-project"} ${rows.length === 1 ? "classification" : "classifications"}.`);
+    const results = await Promise.allSettled(writes);
+    const rejected = results.find((result) => result.status === "rejected");
+    if (rejected && rejected.status === "rejected") {
+      throw rejected.reason;
+    }
   };
 
   const persistSmeOverride = async (row: ReconciliationSmeJoinRow, targetProjectKey: string) => {
@@ -166,12 +229,66 @@ export default function Reconciliation() {
 
     if (DEV_BYPASS_AUTH) {
       await upsertLocalSmeManualJoin(overrideRow);
-    } else {
-      await upsertSharedSmeManualJoin(overrideRow);
+      return;
     }
 
-    invalidate();
-    toast.success("Saved persistent SME match.");
+    await upsertSharedSmeManualJoin(overrideRow);
+  };
+
+  const runTimeLogAction = (
+    actionKey: string,
+    rows: ReconciliationGroupRow[],
+    successMessage: string,
+    errorMessage: string,
+    callback: () => Promise<void>,
+  ) => {
+    hideTimeLogRows(rows);
+    clearSelections(rows);
+    setActionPending(actionKey, true);
+
+    void callback()
+      .then(() => {
+        toast.success(successMessage);
+        invalidate();
+      })
+      .catch((error) => {
+        restoreTimeLogRows(rows);
+        toast.error(errorMessage, {
+          description: error instanceof Error ? error.message : "Please try again.",
+        });
+      })
+      .finally(() => {
+        setActionPending(actionKey, false);
+      });
+  };
+
+  const runSmeAction = (
+    actionKey: string,
+    row: ReconciliationSmeJoinRow,
+    successMessage: string,
+    callback: () => Promise<void>,
+  ) => {
+    setHiddenSmeJoinRowIds((current) => ({ ...current, [row.raw_sme_feedback_row_id]: true }));
+    setActionPending(actionKey, true);
+
+    void callback()
+      .then(() => {
+        toast.success(successMessage);
+        invalidate();
+      })
+      .catch((error) => {
+        setHiddenSmeJoinRowIds((current) => {
+          const next = { ...current };
+          delete next[row.raw_sme_feedback_row_id];
+          return next;
+        });
+        toast.error("Unable to save the manual SME join.", {
+          description: error instanceof Error ? error.message : "Please try again.",
+        });
+      })
+      .finally(() => {
+        setActionPending(actionKey, false);
+      });
   };
 
   const toggleRowSelection = (
@@ -185,9 +302,10 @@ export default function Reconciliation() {
     setter: Dispatch<SetStateAction<Record<string, boolean>>>,
     group: ReconciliationGroup,
     deferredMap: Record<string, boolean>,
+    hiddenMap: Record<string, boolean>,
   ) => {
     setter((current) => {
-      const visibleRows = group.rows.filter((row) => !deferredMap[row.raw_time_log_row_id]);
+      const visibleRows = visibleGroupRows(group, deferredMap, hiddenMap);
       const allSelected = visibleRows.every((row) => current[row.raw_time_log_row_id]);
       const next = { ...current };
       visibleRows.forEach((row) => {
@@ -197,54 +315,73 @@ export default function Reconciliation() {
     });
   };
 
-  const renderTimeLogGroup = (
+  const renderGroupRows = (
     group: ReconciliationGroup,
     selection: Record<string, boolean>,
     setSelection: Dispatch<SetStateAction<Record<string, boolean>>>,
-    actionOptions?: { showStandalone?: boolean; showNonProject?: boolean; sectionTitle?: string },
+    actionConfig?: {
+      allowProjectMatch?: boolean;
+      allowStandalone?: boolean;
+      allowNonProject?: boolean;
+      allowGroupedEdits?: boolean;
+    },
   ) => {
-    const activeRows = uniqueSelectedRows(group, selection, deferredById);
-    const sharedSuggestionKey = commonSuggestionKey(activeRows);
-    const visibleRows = group.rows.filter((row) => !deferredById[row.raw_time_log_row_id]);
-    const deferredCount = group.rows.length - visibleRows.length;
+    const visibleRows = visibleGroupRows(group, deferredById, hiddenTimeLogRowIds);
+    if (!visibleRows.length) return null;
+
+    const selectedRows = uniqueSelectedRows(group, selection, deferredById, hiddenTimeLogRowIds);
+    const sharedSuggestionKey = commonSuggestionKey(selectedRows);
+    const selectedProjectKey = projectTargetByGroupKey[group.groupKey] || group.topSuggestion?.projectKey || "";
+    const deferredCount = group.rows.filter((row) => deferredById[row.raw_time_log_row_id] && !hiddenTimeLogRowIds[row.raw_time_log_row_id]).length;
     const allSelected = visibleRows.length > 0 && visibleRows.every((row) => selection[row.raw_time_log_row_id]);
     const someSelected = visibleRows.some((row) => selection[row.raw_time_log_row_id]);
+    const actionKeyPrefix = `${group.groupKey}:${actionConfig?.allowGroupedEdits ? "grouped" : "queue"}`;
+    const busy = Object.keys(pendingActions).some((key) => key.startsWith(actionKeyPrefix));
+    const editState = standaloneEdits[group.groupKey] || {
+      standardizedTitle: group.title,
+      reportingYear: group.years[0] || "",
+      classification: "standalone_course" as const,
+    };
 
     return (
-      <Card key={group.groupKey}>
-        <CardHeader className="space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Checkbox
-                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                  aria-label={`Select group ${group.title}`}
-                  onCheckedChange={() => toggleGroupSelection(setSelection, group, deferredById)}
-                />
-                <CardTitle className="text-base">{group.title}</CardTitle>
-                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                  {group.rowCount} rows
-                </span>
-                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                  {group.totalHours}h
-                </span>
-                {group.years.map((year) => (
-                  <span key={year} className="rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                    {year}
-                  </span>
-                ))}
-              </div>
-              {group.topSuggestion ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  <span>Top suggestion:</span>
-                  <ProjectLink projectName={group.topSuggestion.projectName} reportingYear={group.topSuggestion.reportingYear}>
-                    {group.topSuggestion.projectName}
-                  </ProjectLink>
-                  <ConfidenceBadge confidence={group.topSuggestion.confidence} />
-                </div>
-              ) : null}
-            </div>
-
+      <AccordionItem key={group.groupKey} value={group.groupKey}>
+        <AccordionTrigger className="hover:no-underline">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pr-4 text-left">
+            <span className="font-medium">{group.title}</span>
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+              {visibleRows.length} active rows
+            </span>
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+              {group.totalHours}h
+            </span>
+            {group.years.map((year) => (
+              <span key={year} className="rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                {year}
+              </span>
+            ))}
+            {group.topSuggestion ? (
+              <span className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
+                <span>Suggested: {group.topSuggestion.projectName}</span>
+                <ConfidenceBadge confidence={group.topSuggestion.confidence} />
+              </span>
+            ) : null}
+            {deferredCount ? (
+              <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
+                {deferredCount} deferred
+              </span>
+            ) : null}
+          </div>
+        </AccordionTrigger>
+        <AccordionContent className="space-y-4 pt-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <Checkbox
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              aria-label={`Select group ${group.title}`}
+              onCheckedChange={() => toggleGroupSelection(setSelection, group, deferredById, hiddenTimeLogRowIds)}
+            />
+            <span className="text-sm text-muted-foreground">
+              {selectedRows.length} row{selectedRows.length === 1 ? "" : "s"} selected for the next action
+            </span>
             {deferredCount ? (
               <Button
                 variant="ghost"
@@ -263,34 +400,152 @@ export default function Reconciliation() {
             ) : null}
           </div>
 
-          <BulkActionBar selectedCount={activeRows.length}>
-            <ActionIconButton
-              icon={Link2}
-              label="Accept Suggested Match"
-              tooltip="Create a persistent project mapping for the selected rows."
-              variant="default"
-              size="sm"
-              disabled={!sharedSuggestionKey}
-              onClick={() => sharedSuggestionKey && persistProjectMatch(activeRows, sharedSuggestionKey)}
-            />
-            {actionOptions?.showStandalone !== false ? (
+          {actionConfig?.allowGroupedEdits ? (
+            <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
+              <div className="space-y-1">
+                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Standardized Title</span>
+                <Input
+                  value={editState.standardizedTitle}
+                  onChange={(event) =>
+                    setStandaloneEdits((current) => ({
+                      ...current,
+                      [group.groupKey]: { ...editState, standardizedTitle: event.target.value },
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Reporting Year</span>
+                <Input
+                  value={editState.reportingYear}
+                  onChange={(event) =>
+                    setStandaloneEdits((current) => ({
+                      ...current,
+                      [group.groupKey]: { ...editState, reportingYear: event.target.value },
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Classification</span>
+                <select
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={editState.classification}
+                  onChange={(event) =>
+                    setStandaloneEdits((current) => ({
+                      ...current,
+                      [group.groupKey]: {
+                        ...editState,
+                        classification: event.target.value as "standalone_course" | "non_project_work",
+                      },
+                    }))
+                  }
+                >
+                  <option value="standalone_course">Standalone (Single Video / Other)</option>
+                  <option value="non_project_work">Non-Project</option>
+                </select>
+              </div>
+            </div>
+          ) : null}
+
+          <BulkActionBar selectedCount={selectedRows.length}>
+            {actionConfig?.allowProjectMatch !== false ? (
+              <>
+                <SearchableProjectSelect
+                  label="Project Override"
+                  options={canonicalProjectOptions}
+                  selected={selectedProjectKey}
+                  onChange={(value) =>
+                    setProjectTargetByGroupKey((current) => ({
+                      ...current,
+                      [group.groupKey]: value,
+                    }))
+                  }
+                />
+                <ActionIconButton
+                  icon={Link2}
+                  label="Accept Suggested Match"
+                  tooltip="Use the current suggestion as the persistent project match for the selected rows."
+                  variant="default"
+                  size="sm"
+                  disabled={!sharedSuggestionKey || busy}
+                  onClick={() =>
+                    sharedSuggestionKey && runTimeLogAction(
+                      `${actionKeyPrefix}:suggested`,
+                      selectedRows,
+                      "Matched to the suggested project.",
+                      "Unable to match these rows to the suggested project.",
+                      () => persistProjectMatch(selectedRows, sharedSuggestionKey),
+                    )
+                  }
+                />
+                <ActionIconButton
+                  icon={Save}
+                  label="Save Project Match"
+                  tooltip="Override the suggestion and map the selected rows to the project you picked."
+                  variant="outline"
+                  size="sm"
+                  disabled={!selectedProjectKey || busy}
+                  onClick={() =>
+                    selectedProjectKey && runTimeLogAction(
+                      `${actionKeyPrefix}:manual`,
+                      selectedRows,
+                      "Matched to the selected project.",
+                      "Unable to save the manual project match.",
+                      () => persistProjectMatch(selectedRows, selectedProjectKey),
+                    )
+                  }
+                />
+              </>
+            ) : null}
+            {actionConfig?.allowStandalone !== false ? (
               <ActionIconButton
                 icon={Tag}
                 label="Standalone (Single Video / Other)"
                 tooltip="Mark these rows as course-like work that is not present in project exports."
                 variant="outline"
                 size="sm"
-                onClick={() => persistClassification(activeRows, "standalone_course")}
+                disabled={busy}
+                onClick={() =>
+                  runTimeLogAction(
+                    `${actionKeyPrefix}:standalone`,
+                    selectedRows,
+                    "Marked as Standalone (Single Video / Other).",
+                    "Unable to mark these rows as standalone work.",
+                    () =>
+                      persistClassification(selectedRows, "standalone_course", actionConfig?.allowGroupedEdits
+                        ? {
+                            standardizedTitle: editState.standardizedTitle,
+                            reportingYear: editState.reportingYear || null,
+                          }
+                        : undefined),
+                  )
+                }
               />
             ) : null}
-            {actionOptions?.showNonProject !== false ? (
+            {actionConfig?.allowNonProject !== false ? (
               <ActionIconButton
                 icon={ShieldAlert}
                 label="Non-Project"
                 tooltip="Mark these rows as operational or support work that should not map to a course project."
                 variant="outline"
                 size="sm"
-                onClick={() => persistClassification(activeRows, "non_project_work")}
+                disabled={busy}
+                onClick={() =>
+                  runTimeLogAction(
+                    `${actionKeyPrefix}:non-project`,
+                    selectedRows,
+                    "Marked as non-project work.",
+                    "Unable to mark these rows as non-project work.",
+                    () =>
+                      persistClassification(selectedRows, "non_project_work", actionConfig?.allowGroupedEdits
+                        ? {
+                            standardizedTitle: editState.standardizedTitle,
+                            reportingYear: editState.reportingYear || null,
+                          }
+                        : undefined),
+                  )
+                }
               />
             ) : null}
             <ActionIconButton
@@ -299,10 +554,11 @@ export default function Reconciliation() {
               tooltip="Hide the selected rows for this session without saving a persistent decision."
               variant="ghost"
               size="sm"
+              disabled={busy}
               onClick={() =>
                 setDeferredById((current) => {
                   const next = { ...current };
-                  activeRows.forEach((row) => {
+                  selectedRows.forEach((row) => {
                     next[row.raw_time_log_row_id] = true;
                   });
                   return next;
@@ -310,56 +566,54 @@ export default function Reconciliation() {
               }
             />
           </BulkActionBar>
-        </CardHeader>
 
-        <CardContent>
-          {visibleRows.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead />
-                  <TableHead>Course Title</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Hours</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead>Suggested Match</TableHead>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead />
+                <TableHead>Course Title</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Hours</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead>Suggested Match</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleRows.map((row) => (
+                <TableRow key={row.raw_time_log_row_id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selection[row.raw_time_log_row_id] || false}
+                      aria-label={`Select ${row.raw_course_name}`}
+                      onCheckedChange={() => toggleRowSelection(setSelection, row.raw_time_log_row_id)}
+                    />
+                  </TableCell>
+                  <TableCell>{row.raw_course_name}</TableCell>
+                  <TableCell>{row.logDate || "-"}</TableCell>
+                  <TableCell>
+                    {row.roleGroup === "ID" || row.roleGroup === "SME" ? (
+                      <PersonLink personName={row.user}>{row.user}</PersonLink>
+                    ) : row.user}
+                  </TableCell>
+                  <TableCell>{row.hours}</TableCell>
+                  <TableCell>{row.reason}</TableCell>
+                  <TableCell>
+                    {row.suggestion ? (
+                      <div className="flex items-center gap-2">
+                        <span>{row.suggestion.candidate_title}</span>
+                        <ConfidenceBadge confidence={row.suggestion.confidence} />
+                      </div>
+                    ) : (
+                      "-"
+                    )}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleRows.map((row) => (
-                  <TableRow key={row.raw_time_log_row_id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selection[row.raw_time_log_row_id] || false}
-                        aria-label={`Select ${row.raw_course_name}`}
-                        onCheckedChange={() => toggleRowSelection(setSelection, row.raw_time_log_row_id)}
-                      />
-                    </TableCell>
-                    <TableCell>{row.raw_course_name}</TableCell>
-                    <TableCell>{row.logDate || "-"}</TableCell>
-                    <TableCell>{row.user}</TableCell>
-                    <TableCell>{row.hours}</TableCell>
-                    <TableCell>{row.reason}</TableCell>
-                    <TableCell>
-                      {row.suggestion ? (
-                        <div className="flex items-center gap-2">
-                          <span>{row.suggestion.candidate_title}</span>
-                          <ConfidenceBadge confidence={row.suggestion.confidence} />
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">All rows in this group are deferred for this session.</p>
-          )}
-        </CardContent>
-      </Card>
+              ))}
+            </TableBody>
+          </Table>
+        </AccordionContent>
+      </AccordionItem>
     );
   };
 
@@ -376,6 +630,11 @@ export default function Reconciliation() {
       </Card>
     );
   }
+
+  const timeLogGroups = model.timeLogGroups.filter((group) => visibleGroupRows(group, deferredById, hiddenTimeLogRowIds).length > 0);
+  const standaloneGroups = model.standaloneGroups.filter((group) => visibleGroupRows(group, deferredById, hiddenTimeLogRowIds).length > 0);
+  const nonProjectGroups = model.nonProjectGroups.filter((group) => visibleGroupRows(group, deferredById, hiddenTimeLogRowIds).length > 0);
+  const visibleSmeJoinRows = model.smeJoinRows.filter((row) => !hiddenSmeJoinRowIds[row.raw_sme_feedback_row_id]);
 
   return (
     <div className="space-y-6">
@@ -399,161 +658,50 @@ export default function Reconciliation() {
         </TabsList>
 
         <TabsContent value="time-logs" className="space-y-4">
-          {model.timeLogGroups.map((group) => renderTimeLogGroup(group, timeLogSelection, setTimeLogSelection))}
+          {timeLogGroups.length ? (
+            <Accordion type="multiple" className="rounded-lg border px-4">
+              {timeLogGroups.map((group) => renderGroupRows(group, timeLogSelection, setTimeLogSelection))}
+            </Accordion>
+          ) : (
+            <Card>
+              <CardContent className="py-10 text-center text-muted-foreground">
+                No reconcilable time-log groups are left in the active queue.
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="standalone" className="space-y-4">
-          {model.standaloneGroups.map((group) => {
-            const editState = standaloneEdits[group.groupKey] || {
-              standardizedTitle: group.title,
-              reportingYear: group.years[0] || "",
-              classification: "standalone_course" as const,
-            };
-            const selectedRows = uniqueSelectedRows(group, standaloneSelection, deferredById);
-            const visibleRows = group.rows.filter((row) => !deferredById[row.raw_time_log_row_id]);
-            const allSelected = visibleRows.length > 0 && visibleRows.every((row) => standaloneSelection[row.raw_time_log_row_id]);
-            const someSelected = visibleRows.some((row) => standaloneSelection[row.raw_time_log_row_id]);
-
-            return (
-              <Card key={group.groupKey}>
-                <CardHeader className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Checkbox
-                      checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                      aria-label={`Select standalone group ${group.title}`}
-                      onCheckedChange={() => toggleGroupSelection(setStandaloneSelection, group, deferredById)}
-                    />
-                    <CardTitle className="text-base">{group.title}</CardTitle>
-                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                      {group.rowCount} rows
-                    </span>
-                    <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                      {group.totalHours}h
-                    </span>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
-                    <div className="space-y-1">
-                      <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Standardized Title</span>
-                      <Input
-                        value={editState.standardizedTitle}
-                        onChange={(event) =>
-                          setStandaloneEdits((current) => ({
-                            ...current,
-                            [group.groupKey]: { ...editState, standardizedTitle: event.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Reporting Year</span>
-                      <Input
-                        value={editState.reportingYear}
-                        onChange={(event) =>
-                          setStandaloneEdits((current) => ({
-                            ...current,
-                            [group.groupKey]: { ...editState, reportingYear: event.target.value },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Classification</span>
-                      <select
-                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                        value={editState.classification}
-                        onChange={(event) =>
-                          setStandaloneEdits((current) => ({
-                            ...current,
-                            [group.groupKey]: {
-                              ...editState,
-                              classification: event.target.value as "standalone_course" | "non_project_work",
-                            },
-                          }))
-                        }
-                      >
-                        <option value="standalone_course">Standalone (Single Video / Other)</option>
-                        <option value="non_project_work">Non-Project</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <BulkActionBar selectedCount={selectedRows.length}>
-                    <ActionIconButton
-                      icon={Save}
-                      label="Apply to Selected"
-                      tooltip="Save this grouped title, year, and classification for the selected rows."
-                      variant="default"
-                      size="sm"
-                      onClick={() =>
-                        persistClassification(selectedRows, editState.classification, {
-                          standardizedTitle: editState.standardizedTitle,
-                          reportingYear: editState.reportingYear || null,
-                        })
-                      }
-                    />
-                    <ActionIconButton
-                      icon={Clock3}
-                      label="Defer"
-                      tooltip="Hide the selected rows for this session without saving a persistent decision."
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setDeferredById((current) => {
-                          const next = { ...current };
-                          selectedRows.forEach((row) => {
-                            next[row.raw_time_log_row_id] = true;
-                          });
-                          return next;
-                        })
-                      }
-                    />
-                  </BulkActionBar>
-                </CardHeader>
-
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead />
-                        <TableHead>Course Title</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>User</TableHead>
-                        <TableHead>Hours</TableHead>
-                        <TableHead>Reason</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {visibleRows.map((row) => (
-                        <TableRow key={row.raw_time_log_row_id}>
-                          <TableCell>
-                            <Checkbox
-                              checked={standaloneSelection[row.raw_time_log_row_id] || false}
-                              aria-label={`Select ${row.raw_course_name}`}
-                              onCheckedChange={() => toggleRowSelection(setStandaloneSelection, row.raw_time_log_row_id)}
-                            />
-                          </TableCell>
-                          <TableCell>{row.raw_course_name}</TableCell>
-                          <TableCell>{row.logDate || "-"}</TableCell>
-                          <TableCell>{row.user}</TableCell>
-                          <TableCell>{row.hours}</TableCell>
-                          <TableCell>{row.reason}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            );
-          })}
+          {standaloneGroups.length ? (
+            <Accordion type="multiple" className="rounded-lg border px-4">
+              {standaloneGroups.map((group) =>
+                renderGroupRows(group, standaloneSelection, setStandaloneSelection, {
+                  allowGroupedEdits: true,
+                }),
+              )}
+            </Accordion>
+          ) : (
+            <Card>
+              <CardContent className="py-10 text-center text-muted-foreground">
+                No standalone candidates are left in the active queue.
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="non-project" className="space-y-4">
-          {model.nonProjectGroups.map((group) =>
-            renderTimeLogGroup(group, nonProjectSelection, setNonProjectSelection, {
-              showNonProject: true,
-              showStandalone: true,
-            }),
+          {nonProjectGroups.length ? (
+            <Accordion type="multiple" className="rounded-lg border px-4">
+              {nonProjectGroups.map((group) =>
+                renderGroupRows(group, nonProjectSelection, setNonProjectSelection),
+              )}
+            </Accordion>
+          ) : (
+            <Card>
+              <CardContent className="py-10 text-center text-muted-foreground">
+                No non-project candidates are left in the active queue.
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
@@ -563,8 +711,10 @@ export default function Reconciliation() {
               <CardTitle className="text-base">Unresolved and Ambiguous SME Joins</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {model.smeJoinRows.map((row) => {
+              {visibleSmeJoinRows.map((row) => {
                 const selectedProjectKey = surveyTargetByRowId[row.raw_sme_feedback_row_id] || row.suggestedProject?.projectKey || "";
+                const actionKey = `sme:${row.raw_sme_feedback_row_id}`;
+                const busy = Boolean(pendingActions[actionKey]);
 
                 return (
                   <div key={row.raw_sme_feedback_row_id} className="space-y-3 rounded-lg border p-4">
@@ -602,23 +752,17 @@ export default function Reconciliation() {
                         </div>
                       )}
 
-                      <select
-                        className="min-w-[340px] rounded-md border bg-background px-3 py-2 text-sm"
-                        value={selectedProjectKey}
-                        onChange={(event) =>
+                      <SearchableProjectSelect
+                        label="Project Override"
+                        options={canonicalProjectOptions}
+                        selected={selectedProjectKey}
+                        onChange={(value) =>
                           setSurveyTargetByRowId((current) => ({
                             ...current,
-                            [row.raw_sme_feedback_row_id]: event.target.value,
+                            [row.raw_sme_feedback_row_id]: value,
                           }))
                         }
-                      >
-                        <option value="">Select project record...</option>
-                        {canonicalProjectOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
 
                       {row.suggestedProject ? (
                         <ActionIconButton
@@ -627,7 +771,15 @@ export default function Reconciliation() {
                           tooltip="Use the suggested project for this survey row."
                           variant="default"
                           size="sm"
-                          onClick={() => persistSmeOverride(row, row.suggestedProject!.projectKey)}
+                          disabled={busy}
+                          onClick={() =>
+                            runSmeAction(
+                              actionKey,
+                              row,
+                              "Manual SME join saved with the suggested project.",
+                              () => persistSmeOverride(row, row.suggestedProject!.projectKey),
+                            )
+                          }
                         />
                       ) : null}
                       <ActionIconButton
@@ -636,8 +788,15 @@ export default function Reconciliation() {
                         tooltip="Create a persistent mapping between this SME row and the selected project for future matching."
                         variant="outline"
                         size="sm"
-                        disabled={!selectedProjectKey}
-                        onClick={() => selectedProjectKey && persistSmeOverride(row, selectedProjectKey)}
+                        disabled={!selectedProjectKey || busy}
+                        onClick={() =>
+                          selectedProjectKey && runSmeAction(
+                            actionKey,
+                            row,
+                            "Manual SME join saved.",
+                            () => persistSmeOverride(row, selectedProjectKey),
+                          )
+                        }
                       />
                     </div>
                   </div>

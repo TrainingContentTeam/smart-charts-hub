@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ChartPanel } from "@/components/ChartPanel";
+import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { resolveProjectFromRoute } from "@/lib/analytics/project-routing";
@@ -81,11 +82,23 @@ export default function ProjectDetail() {
           <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owners</p>
-              <p className="mt-1 text-sm font-medium">{model.overview.owners.join(", ") || "Unassigned"}</p>
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-sm font-medium">
+                {model.overview.owners.length ? model.overview.owners.map((owner) => (
+                  <PersonLink key={owner} personName={owner}>{owner}</PersonLink>
+                )) : <span>Unassigned</span>}
+              </div>
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">SME</p>
-              <p className="mt-1 text-sm font-medium">{model.overview.smeAssigned || "None listed"}</p>
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-sm font-medium">
+                {model.overview.smeAssigned ? (
+                  model.overview.smeAssigned
+                    .split(",")
+                    .map((name) => name.trim())
+                    .filter(Boolean)
+                    .map((name) => <PersonLink key={name} personName={name}>{name}</PersonLink>)
+                ) : <span>None listed</span>}
+              </div>
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Legal Reviewer</p>
@@ -231,7 +244,7 @@ export default function ProjectDetail() {
                   {model.smeFeedback.designerComments.map((row, index) => (
                     <TableRow key={`${row.author}-${row.date || index}`}>
                       <TableCell>{row.date || "-"}</TableCell>
-                      <TableCell>{row.author}</TableCell>
+                      <TableCell><PersonLink personName={row.author}>{row.author}</PersonLink></TableCell>
                       <TableCell>{row.comment}</TableCell>
                     </TableRow>
                   ))}
@@ -261,7 +274,7 @@ export default function ProjectDetail() {
                   {model.smeFeedback.smeResponses.map((row, index) => (
                     <TableRow key={`${row.author}-${row.date || index}`}>
                       <TableCell>{row.date || "-"}</TableCell>
-                      <TableCell>{row.author}</TableCell>
+                      <TableCell><PersonLink personName={row.author}>{row.author}</PersonLink></TableCell>
                       <TableCell>{row.comment}</TableCell>
                     </TableRow>
                   ))}

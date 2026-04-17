@@ -5,14 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChartPanel } from "@/components/ChartPanel";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
+import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { getSmeInternalLabel, selectSmeCollaborationModel } from "@/lib/analytics/selectors";
 
 function toOptions(values: string[]): CompactFilterOption[] {
-  return [...new Set(values.filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b))
-    .map((value) => ({ label: value, value }));
+  return values.map((value) => ({ label: value, value }));
 }
 
 function SummaryCard({ label, value }: { label: string; value: string | number }) {
@@ -28,11 +27,33 @@ function SummaryCard({ label, value }: { label: string; value: string | number }
   );
 }
 
+function HeatCell({
+  value,
+  maxValue,
+}: {
+  value: number;
+  maxValue: number;
+}) {
+  const opacity = maxValue > 0 ? Math.max(0.12, value / maxValue) : 0.08;
+
+  return (
+    <TableCell
+      className="text-center font-medium"
+      style={{ backgroundColor: `hsl(var(--chart-1) / ${opacity})` }}
+    >
+      {value || "-"}
+    </TableCell>
+  );
+}
+
 export default function SmeCollaboration() {
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const [internalValues, setInternalValues] = useState<string[]>([]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [matchedIds, setMatchedIds] = useState<string[]>([]);
+  const [matchedSmes, setMatchedSmes] = useState<string[]>([]);
+  const [matchedYears, setMatchedYears] = useState<string[]>([]);
 
   const model = useMemo(
     () =>
@@ -41,14 +62,29 @@ export default function SmeCollaboration() {
             internalValues,
             startDate: startDate || null,
             endDate: endDate || null,
+            matchedResponses: {
+              instructionalDesigners: matchedIds,
+              smes: matchedSmes,
+              reportingYears: matchedYears,
+            },
           })
         : null,
-    [endDate, internalValues, snapshot, startDate],
+    [endDate, internalValues, matchedIds, matchedSmes, matchedYears, snapshot, startDate],
   );
 
   const internalOptions = useMemo(
-    () => (snapshot ? toOptions(snapshot.smeFeedbackSmeView.map((row) => getSmeInternalLabel(row.internal))) : []),
+    () =>
+      snapshot
+        ? toOptions(
+            [...new Set(snapshot.smeFeedbackSmeView.map((row) => getSmeInternalLabel(row.internal)))].sort((a, b) => a.localeCompare(b)),
+          )
+        : [],
     [snapshot],
+  );
+
+  const maxMatrixCount = useMemo(
+    () => Math.max(0, ...(model?.smeQuestionMatrix.flatMap((row) => Object.values(row.counts)) || [0])),
+    [model],
   );
 
   if (isLoading) {
@@ -99,17 +135,34 @@ export default function SmeCollaboration() {
       </div>
 
       <ChartPanel title="SME Satisfaction by Question (SME View)">
-        <div className="h-[380px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={model.averageSmeQuestionScores} layout="vertical" margin={{ left: 24 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" domain={[0, 5]} />
-              <YAxis type="category" dataKey="label" width={260} />
-              <Tooltip />
-              <Bar dataKey="average" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Question</TableHead>
+              <TableHead className="text-center">1</TableHead>
+              <TableHead className="text-center">2</TableHead>
+              <TableHead className="text-center">3</TableHead>
+              <TableHead className="text-center">4</TableHead>
+              <TableHead className="text-center">5</TableHead>
+              <TableHead className="text-center">Responses</TableHead>
+              <TableHead className="text-center">Average</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {model.smeQuestionMatrix.map((row) => (
+              <TableRow key={row.question}>
+                <TableCell className="min-w-[280px] font-medium">{row.label}</TableCell>
+                <HeatCell value={row.counts[1]} maxValue={maxMatrixCount} />
+                <HeatCell value={row.counts[2]} maxValue={maxMatrixCount} />
+                <HeatCell value={row.counts[3]} maxValue={maxMatrixCount} />
+                <HeatCell value={row.counts[4]} maxValue={maxMatrixCount} />
+                <HeatCell value={row.counts[5]} maxValue={maxMatrixCount} />
+                <TableCell className="text-center">{row.responseCount || "-"}</TableCell>
+                <TableCell className="text-center font-semibold">{row.average || "-"}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </ChartPanel>
 
       <ChartPanel title="Responses by Reporting Year">
@@ -127,92 +180,119 @@ export default function SmeCollaboration() {
       </ChartPanel>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">ID → SME Evaluation Breakdown</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Instructional Designer</TableHead>
-                  <TableHead>Responses</TableHead>
-                  <TableHead>Avg Rating</TableHead>
-                  <TableHead>Avg Promoter</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {model.byInstructionalDesigner.map((row) => (
-                  <TableRow key={row.instructionalDesigner}>
-                    <TableCell>{row.instructionalDesigner}</TableCell>
-                    <TableCell>{row.responses}</TableCell>
-                    <TableCell>{row.averageRating || "-"}</TableCell>
-                    <TableCell>{row.averagePromoter || "-"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">SME → Lexipol Experience Breakdown</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SME</TableHead>
-                  <TableHead>Responses</TableHead>
-                  <TableHead>Avg Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {model.bySme.map((row) => (
-                  <TableRow key={row.sme}>
-                    <TableCell>{row.sme}</TableCell>
-                    <TableCell>{row.responses}</TableCell>
-                    <TableCell>{row.averageScore || "-"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Matched Responses</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <ChartPanel
+          title="ID → SME Evaluation Breakdown"
+          info="These scores come from the instructional designer survey and reflect the ID’s evaluation of the SME."
+        >
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Project</TableHead>
-                <TableHead>Year</TableHead>
-                <TableHead>SME Response</TableHead>
-                <TableHead>Designer Comments</TableHead>
+                <TableHead>Instructional Designer</TableHead>
+                <TableHead>Responses</TableHead>
+                <TableHead>Avg Rating</TableHead>
+                <TableHead>Avg Promoter</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {model.matchedResponses.map((row) => (
-                <TableRow key={row.rawSmeFeedbackRowId}>
+              {model.byInstructionalDesigner.map((row) => (
+                <TableRow key={row.instructionalDesigner}>
                   <TableCell>
-                    <ProjectLink projectName={row.projectName} reportingYear={row.reportingYear}>
-                      {row.projectName}
-                    </ProjectLink>
+                    <PersonLink personName={row.instructionalDesigner}>{row.instructionalDesigner}</PersonLink>
                   </TableCell>
-                  <TableCell>{row.reportingYear}</TableCell>
-                  <TableCell>{row.smeResponse || "-"}</TableCell>
-                  <TableCell>{row.designerComments || "-"}</TableCell>
+                  <TableCell>{row.responses}</TableCell>
+                  <TableCell>{row.averageRating || "-"}</TableCell>
+                  <TableCell>{row.averagePromoter || "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+        </ChartPanel>
+
+        <ChartPanel
+          title="SME → Lexipol Experience Breakdown"
+          info="These scores come from the SME-facing survey and reflect the SME’s review of the Lexipol experience."
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>SME</TableHead>
+                <TableHead>Responses</TableHead>
+                <TableHead>Avg Score</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {model.bySme.map((row) => (
+                <TableRow key={row.sme}>
+                  <TableCell>
+                    <PersonLink personName={row.sme}>{row.sme}</PersonLink>
+                  </TableCell>
+                  <TableCell>{row.responses}</TableCell>
+                  <TableCell>{row.averageScore || "-"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ChartPanel>
+      </div>
+
+      <ChartPanel
+        title="Matched Responses"
+        filters={
+          <>
+            <CompactMultiSelectFilter
+              label="ID"
+              options={toOptions(model.matchedResponseFilterOptions.instructionalDesigners)}
+              selected={matchedIds}
+              onChange={setMatchedIds}
+            />
+            <CompactMultiSelectFilter
+              label="SME"
+              options={toOptions(model.matchedResponseFilterOptions.smes)}
+              selected={matchedSmes}
+              onChange={setMatchedSmes}
+            />
+            <CompactMultiSelectFilter
+              label="Year"
+              options={toOptions(model.matchedResponseFilterOptions.reportingYears)}
+              selected={matchedYears}
+              onChange={setMatchedYears}
+            />
+          </>
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Project</TableHead>
+              <TableHead>Year</TableHead>
+              <TableHead>Instructional Designer</TableHead>
+              <TableHead>SME</TableHead>
+              <TableHead>SME Response</TableHead>
+              <TableHead>Designer Comments</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {model.matchedResponses.map((row) => (
+              <TableRow key={row.rawSmeFeedbackRowId}>
+                <TableCell>
+                  <ProjectLink projectName={row.projectName} reportingYear={row.reportingYear}>
+                    {row.projectName}
+                  </ProjectLink>
+                </TableCell>
+                <TableCell>{row.reportingYear}</TableCell>
+                <TableCell>
+                  <PersonLink personName={row.instructionalDesigner}>{row.instructionalDesigner}</PersonLink>
+                </TableCell>
+                <TableCell>
+                  <PersonLink personName={row.sme}>{row.sme}</PersonLink>
+                </TableCell>
+                <TableCell>{row.smeResponse || "-"}</TableCell>
+                <TableCell>{row.designerComments || "-"}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </ChartPanel>
     </div>
   );
 }
