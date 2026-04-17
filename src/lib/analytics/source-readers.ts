@@ -201,14 +201,23 @@ function buildTimeLogDraft(
   );
   if (!rawCourseName || rawCourseName.toLowerCase().startsWith("total:")) return null;
 
-  const rawDate = normalizeTextPreserveMeaning(getCell(row, ["Date"]));
-  const logDate = parseDateToIso(rawDate);
+  const rawDateCell = getCell(row, ["Date"]);
+  const rawDate = normalizeTextPreserveMeaning(rawDateCell);
+  // Parse from the original cell so we can also handle native Date / number values
+  // before they get string-flattened by `normalizeTextPreserveMeaning`.
+  const logDate = parseUploadDate(rawDateCell);
   const rawTimeSpent = normalizeTextPreserveMeaning(getCell(row, ["Time spent"]));
   const parseWarnings: string[] = [];
 
-  if (rawDate && !logDate) parseWarnings.push("Could not confidently parse log date.");
+  if (rawDate && !logDate) {
+    parseWarnings.push(
+      `Time Logs, row ${rowNumber}, column "Date": ${describeRawValue(rawDateCell)} could not be confidently parsed; stored raw_date and set log_date=null.`,
+    );
+  }
   if (rawTimeSpent && parseDurationToMinutes(rawTimeSpent) === 0) {
-    parseWarnings.push("Could not confidently parse log duration.");
+    parseWarnings.push(
+      `Time Logs, row ${rowNumber}, column "Time spent": ${describeRawValue(rawTimeSpent)} could not be parsed as a duration.`,
+    );
   }
 
   return {
@@ -238,11 +247,14 @@ function buildSmeDraft(
 
   const courseKeyRaw = normalizeTextPreserveMeaning(getCell(row, ["CourseKey"]));
   const reportingYear = parseReportingYear(getCell(row, ["Year"]));
-  const surveyDate = parseDateToIso(getCell(row, ["Survey Date"]));
+  const surveyDateCell = getCell(row, ["Survey Date"]);
+  const surveyDate = parseUploadDate(surveyDateCell);
   const parseWarnings: string[] = [];
 
-  if (getCell(row, ["Survey Date"]) && !surveyDate) {
-    parseWarnings.push("Could not confidently parse survey date.");
+  if (surveyDateCell && !surveyDate) {
+    parseWarnings.push(
+      `SME, row ${rowNumber}, column "Survey Date": ${describeRawValue(surveyDateCell)} could not be confidently parsed; stored survey_date=null.`,
+    );
   }
 
   return {
@@ -269,44 +281,58 @@ function buildSmeDraft(
 
 export async function parseLegacyProjectImportFile(file: File): Promise<ParsedImportFile<RawProjectImportRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, WINDOWS_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Course Name"], file.name);
   return {
     rows: rows
       .map((row, index) => buildProjectDraft(row, index + 1, "legacy", file.name))
       .filter((row): row is RawProjectImportRowDraft => row !== null),
-    warnings,
+    warnings: [...warnings, ...headerWarnings],
     encoding,
   };
 }
 
 export async function parseModernProjectImportFile(file: File): Promise<ParsedImportFile<RawProjectImportRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, UTF8_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Course Name"], file.name);
   return {
     rows: rows
       .map((row, index) => buildProjectDraft(row, index + 1, "modern", file.name))
       .filter((row): row is RawProjectImportRowDraft => row !== null),
-    warnings,
+    warnings: [...warnings, ...headerWarnings],
     encoding,
   };
 }
 
 export async function parseTimeLogImportFile(file: File): Promise<ParsedImportFile<RawTimeLogRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, WINDOWS_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Date"], file.name);
+  const built = rows
+    .map((row, index) => buildTimeLogDraft(row, index + 1, file.name))
+    .filter((row): row is RawTimeLogRowDraft => row !== null);
+  const rowWarnings: string[] = [];
+  for (const row of built) {
+    for (const w of row.parse_warnings as string[]) rowWarnings.push(w);
+  }
   return {
-    rows: rows
-      .map((row, index) => buildTimeLogDraft(row, index + 1, file.name))
-      .filter((row): row is RawTimeLogRowDraft => row !== null),
-    warnings,
+    rows: built,
+    warnings: [...warnings, ...headerWarnings, ...rowWarnings],
     encoding,
   };
 }
 
 export async function parseSmeImportFile(file: File): Promise<ParsedImportFile<RawSmeFeedbackRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, UTF8_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Course Name"], file.name);
+  const built = rows
+    .map((row, index) => buildSmeDraft(row, index + 1, file.name))
+    .filter((row): row is RawSmeFeedbackRowDraft => row !== null);
+  const rowWarnings: string[] = [];
+  for (const row of built) {
+    for (const w of row.parse_warnings as string[]) rowWarnings.push(w);
+  }
   return {
-    rows: rows
-      .map((row, index) => buildSmeDraft(row, index + 1, file.name))
-      .filter((row): row is RawSmeFeedbackRowDraft => row !== null),
-    warnings,
+    rows: built,
+    warnings: [...warnings, ...headerWarnings, ...rowWarnings],
     encoding,
   };
 }
