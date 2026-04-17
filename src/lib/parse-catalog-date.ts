@@ -27,7 +27,15 @@ export function parseCatalogDate(value: unknown): string | null {
   if (value == null || value === "") return null;
 
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getUTCFullYear();
+    if (y < 1900 || y > 2100) return null;
     return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "number" && Number.isFinite(value) && value > 30000 && value < 70000) {
+    const jsDate = new Date((value - 25569) * 86400 * 1000);
+    if (!Number.isNaN(jsDate.getTime())) return jsDate.toISOString().slice(0, 10);
+    return null;
   }
 
   const text = String(value).trim();
@@ -38,23 +46,32 @@ export function parseCatalogDate(value: unknown): string | null {
   let match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (match) {
     const [, month, day, year] = match;
-    return formatDateParts(Number(year), Number(month), Number(day));
+    const m = Number(month), d = Number(day), y = Number(year);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1900 && y <= 2100) {
+      return formatDateParts(y, m, d);
+    }
+    return null;
   }
 
   match = text.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
   if (match) {
     const [, year, month, day] = match;
-    return formatDateParts(Number(year), Number(month), Number(day));
+    const m = Number(month), d = Number(day), y = Number(year);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1900 && y <= 2100) {
+      return formatDateParts(y, m, d);
+    }
+    return null;
   }
 
-  const serial = Number(text);
-  if (Number.isFinite(serial) && serial > 30000 && serial < 70000) {
-    const jsDate = new Date((serial - 25569) * 86400 * 1000);
-    if (!Number.isNaN(jsDate.getTime())) return jsDate.toISOString().slice(0, 10);
+  // Excel serial as string (integer or decimal)
+  if (/^\d{4,6}(?:\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (Number.isFinite(serial) && serial > 30000 && serial < 70000) {
+      const jsDate = new Date((serial - 25569) * 86400 * 1000);
+      if (!Number.isNaN(jsDate.getTime())) return jsDate.toISOString().slice(0, 10);
+    }
+    return null;
   }
-
-  const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
 
   return null;
 }

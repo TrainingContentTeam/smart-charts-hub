@@ -13,24 +13,40 @@ function normalize(s: string | undefined | null): string {
   return (s || "").trim().replace(/\s+/g, " ");
 }
 
-function parseDate(raw: string): string {
-  if (!raw) return "";
+function parseDate(raw: unknown): string {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 30000 && raw < 60000) {
+    const d = new Date((raw - 25569) * 86400 * 1000);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  }
+  if (raw == null) return "";
   const str = String(raw).trim();
-  // Try M/D/YYYY format
-  const match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!str) return "";
+
+  // ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+
+  // M/D/YYYY
+  const match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/);
   if (match) {
     const [, m, d, y] = match;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    const mm = Number(m), dd = Number(d), yy = Number(y);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31 && yy >= 1900 && yy <= 2100) {
+      return `${y}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    }
+    return "";
   }
-  // Try ISO format
-  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
-  // Excel serial number
-  const num = parseFloat(str);
-  if (!isNaN(num) && num > 30000 && num < 60000) {
-    const d = new Date((num - 25569) * 86400 * 1000);
-    return d.toISOString().slice(0, 10);
+
+  // Excel serial as string (integer or decimal)
+  if (/^\d{4,6}(?:\.\d+)?$/.test(str)) {
+    const num = Number(str);
+    if (Number.isFinite(num) && num > 30000 && num < 60000) {
+      const d = new Date((num - 25569) * 86400 * 1000);
+      return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+    }
+    return "";
   }
-  return str;
+
+  return "";
 }
 
 export async function parseTimeSpentFile(file: File): Promise<TimeSpentEntry[]> {
