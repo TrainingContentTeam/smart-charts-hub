@@ -31,33 +31,43 @@ function excelSerialToIso(serial: number): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
-function parseDateToIso(value: unknown): string | null {
-  if (typeof value === "number" && value > 30000 && value < 60000) {
+export function parseDateToIso(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 30000 && value < 60000) {
     return excelSerialToIso(value);
   }
 
   const text = normalizeTextPreserveMeaning(value);
   if (!text) return null;
+
+  // ISO date (YYYY-MM-DD or with time)
   if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
 
-  const mdy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  // M/D/YYYY or MM/DD/YYYY (optionally followed by time, which we ignore)
+  const mdy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/);
   if (mdy) {
     const [, month, day, year] = mdy;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    const m = Number(month);
+    const d = Number(day);
+    const y = Number(year);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1900 && y <= 2100) {
+      return `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+    return null;
   }
 
-  // Excel serial arriving as a string (common when CSV is exported from Excel)
-  if (/^\d{4,6}$/.test(text)) {
+  // Excel serial arriving as a string — integer or decimal (e.g. "45217" or "45217.0")
+  if (/^\d{4,6}(?:\.\d+)?$/.test(text)) {
     const serial = Number(text);
-    if (serial > 30000 && serial < 60000) return excelSerialToIso(serial);
+    if (Number.isFinite(serial) && serial > 30000 && serial < 60000) {
+      return excelSerialToIso(serial);
+    }
+    // Numeric string outside the valid Excel-serial window — refuse rather than
+    // letting `new Date()` interpret it as a year (this caused the
+    // "time zone displacement out of range" Postgres error).
+    return null;
   }
 
-  // Fallback: only accept if it parses to a sane 4-digit year
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const year = parsed.getUTCFullYear();
-  if (year < 1900 || year > 2100) return null;
-  return parsed.toISOString().slice(0, 10);
+  return null;
 }
 
 function parseNumber(value: unknown): number | null {
