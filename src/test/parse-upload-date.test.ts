@@ -3,17 +3,17 @@ import { parseUploadDate } from "@/lib/analytics/parse-upload-date";
 
 describe("parseUploadDate (strict ingestion parser)", () => {
   it("accepts numeric Excel serials", () => {
-    // 45217 -> 2023-10-01
-    expect(parseUploadDate(45217)).toBe("2023-10-01");
+    // 45217 -> 2023-10-18
+    expect(parseUploadDate(45217)).toBe("2023-10-18");
   });
 
   it("accepts integer Excel serials as strings", () => {
-    expect(parseUploadDate("45217")).toBe("2023-10-01");
+    expect(parseUploadDate("45217")).toBe("2023-10-18");
   });
 
   it("accepts decimal Excel serials as strings", () => {
-    expect(parseUploadDate("45217.0")).toBe("2023-10-01");
-    expect(parseUploadDate("45217.5")).toBe("2023-10-01");
+    expect(parseUploadDate("45217.0")).toBe("2023-10-18");
+    expect(parseUploadDate("45217.5")).toBe("2023-10-18");
   });
 
   it("accepts M/D/YYYY", () => {
