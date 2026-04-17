@@ -1,4 +1,4 @@
-import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut, Shield, ExternalLink } from "lucide-react";
+import { BarChart3, Upload, Wrench, Users, Building2, LibraryBig, FolderOpen, LogOut, Shield, ExternalLink, Unplug } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
 import { useUserRole } from "@/hooks/use-user-role";
@@ -29,6 +29,7 @@ const projectNavItems = [
 
 const adminNavItems = [
   { title: "Upload Data", url: "/upload", icon: Upload },
+  { title: "Reconciliation", url: "/reconciliation", icon: Unplug },
   { title: "User Management", url: "/user-management", icon: Shield },
 ];
 

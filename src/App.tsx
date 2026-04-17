@@ -15,6 +15,7 @@ import Projects from "@/pages/Projects";
 import DataExplorer from "@/pages/DataExplorer";
 import AiInsights from "@/pages/AiInsights";
 import UserManagement from "@/pages/UserManagement";
+import Reconciliation from "@/pages/Reconciliation";
 import Auth from "@/pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -51,6 +52,7 @@ function ProtectedRoutes() {
         <Route path="/sme-collaboration" element={<SmeCollaboration />} />
         <Route path="/external-teams" element={<ExternalTeams />} />
         <Route path="/upload" element={<ProtectedRoute requiredRole="admin"><UploadData /></ProtectedRoute>} />
+        <Route path="/reconciliation" element={<ProtectedRoute requiredRole="admin"><Reconciliation /></ProtectedRoute>} />
         <Route path="/user-management" element={<ProtectedRoute requiredRole="admin"><UserManagement /></ProtectedRoute>} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/explorer" element={<DataExplorer />} />
