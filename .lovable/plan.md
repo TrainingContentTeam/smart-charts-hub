@@ -1,84 +1,122 @@
 
-# Fix plan for `time zone displacement out of range: "+045217-01"`
+## Fix plan for the CSV ingestion failure
 
-## What I found
+### What I found
+- The most likely failing field is the **Time Log `Date` column** being inserted into `raw_time_log_rows.log_date`, because that is the only current upload field being persisted to a real DB `date` column from user source data.
+- `reporting_year` is text, `raw_date` is text, and `survey_date` in the canonical SME raw table is text, so they would not produce this database error directly.
+- The error string `+045217-01` strongly suggests an **Excel serial like `45217`** is still being treated as a date-like year/timestamp somewhere in the import path.
+- The current pipeline already has some safe parsing in `src/lib/analytics/source-readers.ts`, but the **tabular reader still allows spreadsheet inference** instead of forcing a text-first import, and warnings do **not** currently tell you the exact file/row/column/value that failed.
+- Column mapping is header-based, not positional, so a true “column shift” is less likely than **bad header normalization / duplicate headers / inferred cell coercion**, but the upload flow currently does not explicitly audit or surface those conditions.
 
-- The `/upload` page uses `src/lib/analytics/source-readers.ts` for all four file types.
-- The primary risky code is `parseDateToIso()` in that file:
-  - it handles Excel serials when they are actual numbers
-  - it handles plain integer serial strings like `"45217"`
-  - but it still falls back to `new Date(text)` for anything else
-- That fallback is unsafe for spreadsheet-exported values. A value that looks numeric-but-not-exactly-integer (for example decimal serials, partially formatted serials, or odd date fragments) can be interpreted as a huge year-like string and then sent to the database as an invalid date, which matches the error you saw.
-- There are older duplicate parsers with the same pattern in:
-  - `src/lib/parse-sme-survey.ts`
-  - `src/lib/parse-time-spent.ts`
-  - `src/lib/parse-catalog-date.ts`
-
-## Root cause
-
-This is not mainly a database problem. It is a parsing problem before insert:
-- an Excel-style serial/date-like string is slipping past the guarded cases
-- `new Date(...)` is converting it into a malformed far-future date shape
-- that malformed value is then inserted into a `date` column, causing Postgres to throw the timezone displacement error
+## Root issue
+The ingestion flow is still too permissive before transformation:
+- CSV/XLS/XLSX values are not being staged in a fully text-safe way first
+- date parsing is happening without enough source diagnostics
+- invalid date-like values can still reach a typed column instead of being nulled safely
 
 ## Implementation plan
 
-### 1. Harden the canonical upload parser first
-Update `src/lib/analytics/source-readers.ts` so `parseDateToIso()`:
-- accepts Excel serials as:
-  - numbers
-  - integer strings
-  - decimal strings like `"45217.0"` or `"45217.5"`
-- converts serials with a dedicated helper instead of falling through
-- removes or drastically restricts the generic `new Date(text)` fallback
-- only accepts clearly supported formats:
-  - Excel serial
-  - `YYYY-MM-DD`
-  - `M/D/YYYY`
-  - optionally `MM/DD/YYYY HH:MM[:SS]` if needed
-- returns `null` for anything ambiguous, so the row gets a parse warning instead of breaking the upload
+### 1. Make the reader text-first
+Update the shared upload reader in `src/lib/analytics/source-readers.ts` so all incoming sheet values are staged as raw text first:
+- avoid aggressive spreadsheet/date inference during CSV/XLS/XLSX load
+- preserve the original raw cell text for every imported field
+- keep raw row payloads unchanged for debugging
 
-### 2. Apply the same safe parsing rule everywhere else
-Align the other date helpers so the app does not keep reintroducing the same bug in other flows:
-- `src/lib/parse-sme-survey.ts`
+This makes the import pipeline:
+```text
+file -> raw text row -> controlled field mapping -> controlled date parsing -> DB insert
+```
+
+### 2. Centralize controlled date parsing
+Create one strict parser for upload dates and use it everywhere in the canonical ingestion flow.
+Accepted formats only:
+- Excel serial numbers as numbers or numeric strings, including decimals like `45217.0`
+- `YYYY-MM-DD`
+- `M/D/YYYY`
+- optionally ISO datetime only when the target field is actually datetime
+
+Rejected values:
+- arbitrary text
+- malformed numeric/date hybrids
+- anything outside a safe year window
+
+Behavior:
+- return normalized ISO string when valid
+- return `null` when invalid
+- never rely on freeform `new Date(string)` for upload fields
+
+### 3. Apply parsing only to true date fields
+Restrict date parsing to specific mapped fields only:
+- Time log `Date` -> `raw_date` stays raw text, `log_date` becomes validated ISO or `null`
+- SME `Survey Date` -> raw source preserved, parsed value stored only if valid
+- reporting year continues through dedicated year parsing only
+
+Do not date-parse:
+- course names
+- freeform text
+- status fields
+- raw JSON payloads
+- unrelated numeric columns
+
+### 4. Add header/mapping validation
+Strengthen file-to-column mapping before row transformation:
+- validate required headers per file type
+- detect missing or duplicate logical headers
+- surface when the expected `Date`/`Survey Date` header is not confidently resolved
+- include a file-level warning if mapping is ambiguous so the import does not silently misread columns
+
+### 5. Surface exact parse diagnostics
+Extend warnings so they include:
+- file name
+- row number
+- column name
+- raw source value
+- reason it was rejected
+
+Example outcome:
+```text
+Time Logs, row 184, column Date: "45217.0" could not be confidently parsed; stored raw_date and set log_date=null
+```
+
+### 6. Keep import resilient instead of failing hard
+Update the upload flow so malformed date values do not abort the whole import:
+- preserve raw source text
+- store parsed date fields as `null` when invalid
+- continue importing remaining rows
+- show aggregated warnings in the Upload page
+
+### 7. Align older duplicate parsers
+Bring the older helpers into the same safe behavior so the bug does not return in other flows:
 - `src/lib/parse-time-spent.ts`
+- `src/lib/parse-sme-survey.ts`
 - `src/lib/parse-catalog-date.ts`
 
-Best approach: either reuse one shared safe parser or copy the stricter logic consistently.
+Best approach: reuse the same strict helper rather than keeping multiple date parsers.
 
-### 3. Add regression tests
-Add/extend tests to cover:
+### 8. Add regression tests
+Add tests covering:
 - Excel serial as number: `45217`
 - Excel serial as string: `"45217"`
-- Excel serial with decimal: `"45217.0"` and `"45217.5"`
-- normal slash date: `"3/1/2026"`
-- ISO date: `"2026-03-01"`
-- ambiguous/invalid values that should return `null` or `""`, not a malformed date
-
-This is the key guard against the same upload failure returning later.
-
-### 4. Keep upload behavior resilient
-Where rows are built in `source-readers.ts`:
-- preserve the existing warning behavior (`Could not confidently parse log date.` / `survey date`)
-- do not throw on a bad date string
-- let the row upload with `log_date` / `survey_date` as `null` when needed
-
-## Expected result
-
-After this fix:
-- uploads should stop failing with the timezone displacement error
-- malformed date cells will be treated as parse warnings instead of hard failures
-- numeric Excel serial dates from CSV/XLS/XLSX should import safely
-- all date parsing paths will behave consistently across the app
+- Excel serial as decimal string: `"45217.0"` / `"45217.5"`
+- valid slash date: `"3/1/2026"`
+- valid ISO date: `"2026-03-01"`
+- malformed values that must become `null`
+- header mismatch / ambiguous column detection
+- import rows retaining raw text while parsed date becomes `null`
 
 ## Files to update
-
 - `src/lib/analytics/source-readers.ts`
-- `src/lib/parse-sme-survey.ts`
+- new shared date parsing helper under `src/lib/analytics/` or `src/lib/`
+- `src/pages/UploadData.tsx`
 - `src/lib/parse-time-spent.ts`
+- `src/lib/parse-sme-survey.ts`
 - `src/lib/parse-catalog-date.ts`
-- related test files for parsing/import behavior
+- related tests under `src/test/`
 
-## Assumption
-
-I’m assuming the bad value is coming from a spreadsheet-exported date/serial field in one of the upload files, not from the schema itself. The code strongly supports that conclusion because the current upload flow parses dates client-side before insert.
+## Expected result
+After this reconciliation:
+- CSV uploads will no longer crash on malformed date-like values
+- the invalid `45217`-style source value will be isolated to its exact file/row/column
+- raw source values will be preserved for debugging
+- only validated values will reach typed date fields
+- bad dates will become `null`, not broken timezone/timestamp casts
