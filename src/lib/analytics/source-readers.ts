@@ -12,12 +12,19 @@ import {
   parseDurationToMinutes,
   parseReportingYear,
 } from "@/lib/analytics/normalization";
+import { parseUploadDate } from "@/lib/analytics/parse-upload-date";
 
 export interface ParsedImportFile<T> {
   rows: T[];
   warnings: string[];
   encoding: string | null;
 }
+
+/**
+ * Re-export of the centralized strict date parser. Kept under the original
+ * `parseDateToIso` name for backward compatibility with existing callers/tests.
+ */
+export const parseDateToIso = parseUploadDate;
 
 const WINDOWS_SAFE_ENCODINGS = ["windows-1252", "latin1", "utf-8"];
 const UTF8_SAFE_ENCODINGS = ["utf-8", "windows-1252", "latin1"];
@@ -26,48 +33,11 @@ function isCsvFile(fileName: string) {
   return /\.csv$/i.test(fileName);
 }
 
-function excelSerialToIso(serial: number): string | null {
-  const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
-  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
-}
-
-export function parseDateToIso(value: unknown): string | null {
-  if (typeof value === "number" && Number.isFinite(value) && value > 30000 && value < 60000) {
-    return excelSerialToIso(value);
-  }
-
-  const text = normalizeTextPreserveMeaning(value);
-  if (!text) return null;
-
-  // ISO date (YYYY-MM-DD or with time)
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-
-  // M/D/YYYY or MM/DD/YYYY (optionally followed by time, which we ignore)
-  const mdy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/);
-  if (mdy) {
-    const [, month, day, year] = mdy;
-    const m = Number(month);
-    const d = Number(day);
-    const y = Number(year);
-    if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1900 && y <= 2100) {
-      return `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    }
-    return null;
-  }
-
-  // Excel serial arriving as a string — integer or decimal (e.g. "45217" or "45217.0")
-  if (/^\d{4,6}(?:\.\d+)?$/.test(text)) {
-    const serial = Number(text);
-    if (Number.isFinite(serial) && serial > 30000 && serial < 60000) {
-      return excelSerialToIso(serial);
-    }
-    // Numeric string outside the valid Excel-serial window — refuse rather than
-    // letting `new Date()` interpret it as a year (this caused the
-    // "time zone displacement out of range" Postgres error).
-    return null;
-  }
-
-  return null;
+function describeRawValue(value: unknown): string {
+  if (value == null) return "(empty)";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
 }
 
 function parseNumber(value: unknown): number | null {
@@ -79,9 +49,20 @@ function parseNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Pull rows from the first sheet as raw text where possible. We pass
+ * `raw: false` so XLSX returns formatted strings instead of inferring
+ * JS Date / number types — this is critical for date columns where Excel
+ * serials would otherwise be silently coerced into JS Date instances that
+ * could later round-trip into malformed timestamp strings.
+ */
 function getSheetRowsFromWorkbook(workbook: XLSX.WorkBook) {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: "",
+    raw: false,
+    blankrows: false,
+  });
 }
 
 function tryDecodeCsv(buffer: ArrayBuffer, encodings: string[]) {
@@ -90,7 +71,8 @@ function tryDecodeCsv(buffer: ArrayBuffer, encodings: string[]) {
   for (const encoding of encodings) {
     try {
       const text = new TextDecoder(encoding).decode(buffer);
-      const workbook = XLSX.read(text, { type: "string", raw: false });
+      // raw: false ensures values come back as strings, not as inferred Date/number types.
+      const workbook = XLSX.read(text, { type: "string", raw: false, cellDates: false });
       const rows = getSheetRowsFromWorkbook(workbook);
       if (rows.length > 0) {
         if (encoding !== encodings[0]) {
@@ -110,12 +92,45 @@ async function readTabularRows(file: File, preferredEncodings: string[]) {
   const buffer = await file.arrayBuffer();
   if (isCsvFile(file.name)) return tryDecodeCsv(buffer, preferredEncodings);
 
-  const workbook = XLSX.read(buffer, { type: "array" });
+  // Force text-safe reading for XLS/XLSX as well so date columns don't get
+  // pre-coerced into JS Date or huge numeric serials.
+  const workbook = XLSX.read(buffer, { type: "array", raw: false, cellDates: false });
   return {
     rows: getSheetRowsFromWorkbook(workbook),
     encoding: null,
     warnings: [] as string[],
   };
+}
+
+function validateRequiredHeaders(
+  rows: Record<string, unknown>[],
+  required: string[],
+  fileName: string,
+): string[] {
+  if (rows.length === 0) return [];
+  const headerKeys = Object.keys(rows[0]);
+  const normalizedKeys = headerKeys.map((key) => normalizeLookupValue(key));
+  const warnings: string[] = [];
+
+  // Duplicate detection
+  const seen = new Set<string>();
+  for (const key of normalizedKeys) {
+    if (!key) continue;
+    if (seen.has(key)) {
+      warnings.push(`${fileName}: duplicate header detected ("${key}"). Mapping may be ambiguous.`);
+    }
+    seen.add(key);
+  }
+
+  // Missing required headers
+  for (const candidate of required) {
+    const target = normalizeLookupValue(candidate);
+    if (!normalizedKeys.includes(target)) {
+      warnings.push(`${fileName}: expected header "${candidate}" not found.`);
+    }
+  }
+
+  return warnings;
 }
 
 function getCell(row: Record<string, unknown>, candidates: string[]) {
@@ -186,14 +201,23 @@ function buildTimeLogDraft(
   );
   if (!rawCourseName || rawCourseName.toLowerCase().startsWith("total:")) return null;
 
-  const rawDate = normalizeTextPreserveMeaning(getCell(row, ["Date"]));
-  const logDate = parseDateToIso(rawDate);
+  const rawDateCell = getCell(row, ["Date"]);
+  const rawDate = normalizeTextPreserveMeaning(rawDateCell);
+  // Parse from the original cell so we can also handle native Date / number values
+  // before they get string-flattened by `normalizeTextPreserveMeaning`.
+  const logDate = parseUploadDate(rawDateCell);
   const rawTimeSpent = normalizeTextPreserveMeaning(getCell(row, ["Time spent"]));
   const parseWarnings: string[] = [];
 
-  if (rawDate && !logDate) parseWarnings.push("Could not confidently parse log date.");
+  if (rawDate && !logDate) {
+    parseWarnings.push(
+      `Time Logs, row ${rowNumber}, column "Date": ${describeRawValue(rawDateCell)} could not be confidently parsed; stored raw_date and set log_date=null.`,
+    );
+  }
   if (rawTimeSpent && parseDurationToMinutes(rawTimeSpent) === 0) {
-    parseWarnings.push("Could not confidently parse log duration.");
+    parseWarnings.push(
+      `Time Logs, row ${rowNumber}, column "Time spent": ${describeRawValue(rawTimeSpent)} could not be parsed as a duration.`,
+    );
   }
 
   return {
@@ -223,11 +247,14 @@ function buildSmeDraft(
 
   const courseKeyRaw = normalizeTextPreserveMeaning(getCell(row, ["CourseKey"]));
   const reportingYear = parseReportingYear(getCell(row, ["Year"]));
-  const surveyDate = parseDateToIso(getCell(row, ["Survey Date"]));
+  const surveyDateCell = getCell(row, ["Survey Date"]);
+  const surveyDate = parseUploadDate(surveyDateCell);
   const parseWarnings: string[] = [];
 
-  if (getCell(row, ["Survey Date"]) && !surveyDate) {
-    parseWarnings.push("Could not confidently parse survey date.");
+  if (surveyDateCell && !surveyDate) {
+    parseWarnings.push(
+      `SME, row ${rowNumber}, column "Survey Date": ${describeRawValue(surveyDateCell)} could not be confidently parsed; stored survey_date=null.`,
+    );
   }
 
   return {
@@ -254,44 +281,58 @@ function buildSmeDraft(
 
 export async function parseLegacyProjectImportFile(file: File): Promise<ParsedImportFile<RawProjectImportRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, WINDOWS_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Course Name"], file.name);
   return {
     rows: rows
       .map((row, index) => buildProjectDraft(row, index + 1, "legacy", file.name))
       .filter((row): row is RawProjectImportRowDraft => row !== null),
-    warnings,
+    warnings: [...warnings, ...headerWarnings],
     encoding,
   };
 }
 
 export async function parseModernProjectImportFile(file: File): Promise<ParsedImportFile<RawProjectImportRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, UTF8_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Course Name"], file.name);
   return {
     rows: rows
       .map((row, index) => buildProjectDraft(row, index + 1, "modern", file.name))
       .filter((row): row is RawProjectImportRowDraft => row !== null),
-    warnings,
+    warnings: [...warnings, ...headerWarnings],
     encoding,
   };
 }
 
 export async function parseTimeLogImportFile(file: File): Promise<ParsedImportFile<RawTimeLogRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, WINDOWS_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Date"], file.name);
+  const built = rows
+    .map((row, index) => buildTimeLogDraft(row, index + 1, file.name))
+    .filter((row): row is RawTimeLogRowDraft => row !== null);
+  const rowWarnings: string[] = [];
+  for (const row of built) {
+    for (const w of row.parse_warnings as string[]) rowWarnings.push(w);
+  }
   return {
-    rows: rows
-      .map((row, index) => buildTimeLogDraft(row, index + 1, file.name))
-      .filter((row): row is RawTimeLogRowDraft => row !== null),
-    warnings,
+    rows: built,
+    warnings: [...warnings, ...headerWarnings, ...rowWarnings],
     encoding,
   };
 }
 
 export async function parseSmeImportFile(file: File): Promise<ParsedImportFile<RawSmeFeedbackRowDraft>> {
   const { rows, warnings, encoding } = await readTabularRows(file, UTF8_SAFE_ENCODINGS);
+  const headerWarnings = validateRequiredHeaders(rows, ["Course Name"], file.name);
+  const built = rows
+    .map((row, index) => buildSmeDraft(row, index + 1, file.name))
+    .filter((row): row is RawSmeFeedbackRowDraft => row !== null);
+  const rowWarnings: string[] = [];
+  for (const row of built) {
+    for (const w of row.parse_warnings as string[]) rowWarnings.push(w);
+  }
   return {
-    rows: rows
-      .map((row, index) => buildSmeDraft(row, index + 1, file.name))
-      .filter((row): row is RawSmeFeedbackRowDraft => row !== null),
-    warnings,
+    rows: built,
+    warnings: [...warnings, ...headerWarnings, ...rowWarnings],
     encoding,
   };
 }
