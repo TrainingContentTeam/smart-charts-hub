@@ -14,489 +14,398 @@ export type Database = {
   }
   public: {
     Tables: {
-      canceled_courses: {
+      course_alias_config: {
         Row: {
-          course_name_key: string
+          alias_scope: string
+          alias_title_compact: string
+          alias_title_normalized: string
+          alias_title_raw: string
+          canonical_title_compact: string
+          canonical_title_normalized: string
+          canonical_title_raw: string
           created_at: string
           id: string
-          original_course_name: string
+          notes: string | null
           reporting_year: string | null
+          target_project_key: string | null
+          updated_at: string
           user_id: string | null
         }
         Insert: {
-          course_name_key: string
+          alias_scope?: string
+          alias_title_compact: string
+          alias_title_normalized: string
+          alias_title_raw: string
+          canonical_title_compact: string
+          canonical_title_normalized: string
+          canonical_title_raw: string
           created_at?: string
           id?: string
-          original_course_name: string
+          notes?: string | null
           reporting_year?: string | null
+          target_project_key?: string | null
+          updated_at?: string
           user_id?: string | null
         }
         Update: {
-          course_name_key?: string
+          alias_scope?: string
+          alias_title_compact?: string
+          alias_title_normalized?: string
+          alias_title_raw?: string
+          canonical_title_compact?: string
+          canonical_title_normalized?: string
+          canonical_title_raw?: string
           created_at?: string
           id?: string
-          original_course_name?: string
+          notes?: string | null
           reporting_year?: string | null
+          target_project_key?: string | null
+          updated_at?: string
           user_id?: string | null
         }
         Relationships: []
       }
-      lms_course_info: {
+      person_alias_config: {
         Row: {
-          backend_url: string | null
-          course_id: string
-          course_type: string | null
+          alias_name_normalized: string
+          alias_name_raw: string
+          canonical_name: string
           created_at: string
-          frontend_url: string | null
-          original_publish_date: string | null
+          id: string
+          notes: string | null
           updated_at: string
-          upload_id: string | null
           user_id: string | null
         }
         Insert: {
-          backend_url?: string | null
-          course_id: string
-          course_type?: string | null
+          alias_name_normalized: string
+          alias_name_raw: string
+          canonical_name: string
           created_at?: string
-          frontend_url?: string | null
-          original_publish_date?: string | null
+          id?: string
+          notes?: string | null
           updated_at?: string
-          upload_id?: string | null
           user_id?: string | null
         }
         Update: {
-          backend_url?: string | null
-          course_id?: string
-          course_type?: string | null
+          alias_name_normalized?: string
+          alias_name_raw?: string
+          canonical_name?: string
           created_at?: string
-          frontend_url?: string | null
-          original_publish_date?: string | null
+          id?: string
+          notes?: string | null
           updated_at?: string
-          upload_id?: string | null
           user_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "lms_course_info_upload_id_fkey"
-            columns: ["upload_id"]
-            isOneToOne: false
-            referencedRelation: "upload_history"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
-      lms_course_versions: {
+      person_role_config: {
         Row: {
-          authoring_tool: string | null
-          c1a: string | null
-          change_type: string | null
-          course_description: string | null
-          course_id: string
-          course_name: string | null
-          course_version: string | null
+          canonical_name: string
           created_at: string
-          d1a: string | null
-          duration_minutes: number | null
-          ems1a: string | null
-          fr1a: string | null
           id: string
-          lesson_plan: string | null
-          lgu: string | null
-          p1a: string | null
-          published_date: string | null
-          revamp_date: string | null
-          special: string | null
+          notes: string | null
+          role_group: string
           updated_at: string
-          upload_id: string | null
           user_id: string | null
-          version_derived: boolean | null
         }
         Insert: {
-          authoring_tool?: string | null
-          c1a?: string | null
-          change_type?: string | null
-          course_description?: string | null
-          course_id: string
-          course_name?: string | null
-          course_version?: string | null
+          canonical_name: string
           created_at?: string
-          d1a?: string | null
-          duration_minutes?: number | null
-          ems1a?: string | null
-          fr1a?: string | null
           id?: string
-          lesson_plan?: string | null
-          lgu?: string | null
-          p1a?: string | null
-          published_date?: string | null
-          revamp_date?: string | null
-          special?: string | null
+          notes?: string | null
+          role_group: string
           updated_at?: string
-          upload_id?: string | null
           user_id?: string | null
-          version_derived?: boolean | null
         }
         Update: {
-          authoring_tool?: string | null
-          c1a?: string | null
-          change_type?: string | null
-          course_description?: string | null
-          course_id?: string
-          course_name?: string | null
-          course_version?: string | null
+          canonical_name?: string
           created_at?: string
-          d1a?: string | null
-          duration_minutes?: number | null
-          ems1a?: string | null
-          fr1a?: string | null
           id?: string
-          lesson_plan?: string | null
-          lgu?: string | null
-          p1a?: string | null
-          published_date?: string | null
-          revamp_date?: string | null
-          special?: string | null
+          notes?: string | null
+          role_group?: string
           updated_at?: string
-          upload_id?: string | null
           user_id?: string | null
-          version_derived?: boolean | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "lms_course_versions_upload_id_fkey"
-            columns: ["upload_id"]
-            isOneToOne: false
-            referencedRelation: "upload_history"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
-      projects: {
+      raw_project_import_rows: {
         Row: {
-          authoring_tool: string | null
-          course_length: string | null
-          course_style: string | null
-          course_type: string | null
+          authoring_tool: string
+          compact_course_name: string
+          course_length_raw: string
+          course_style: string
+          course_type: string
           created_at: string
-          data_source: string | null
           id: string
-          id_assigned: string | null
+          id_assigned_raw: string
           interaction_count: number | null
-          legal_reviewer: string | null
-          name: string
+          legal_reviewer_raw: string
+          normalized_course_name: string
+          parse_warnings: Json
+          project_total_minutes: number
+          raw_course_name: string
+          raw_row: Json
+          raw_status: string
+          raw_time_spent: string
+          reporting_label: string
           reporting_year: string | null
-          sme: string | null
-          status: string
-          total_hours: number | null
+          row_number: number
+          sme_assigned_raw: string
+          source_dataset: string
+          source_file_name: string | null
+          upload_id: string | null
+          user_id: string | null
+          vertical_raw: string
+        }
+        Insert: {
+          authoring_tool?: string
+          compact_course_name?: string
+          course_length_raw?: string
+          course_style?: string
+          course_type?: string
+          created_at?: string
+          id?: string
+          id_assigned_raw?: string
+          interaction_count?: number | null
+          legal_reviewer_raw?: string
+          normalized_course_name?: string
+          parse_warnings?: Json
+          project_total_minutes?: number
+          raw_course_name?: string
+          raw_row?: Json
+          raw_status?: string
+          raw_time_spent?: string
+          reporting_label?: string
+          reporting_year?: string | null
+          row_number: number
+          sme_assigned_raw?: string
+          source_dataset: string
+          source_file_name?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+          vertical_raw?: string
+        }
+        Update: {
+          authoring_tool?: string
+          compact_course_name?: string
+          course_length_raw?: string
+          course_style?: string
+          course_type?: string
+          created_at?: string
+          id?: string
+          id_assigned_raw?: string
+          interaction_count?: number | null
+          legal_reviewer_raw?: string
+          normalized_course_name?: string
+          parse_warnings?: Json
+          project_total_minutes?: number
+          raw_course_name?: string
+          raw_row?: Json
+          raw_status?: string
+          raw_time_spent?: string
+          reporting_label?: string
+          reporting_year?: string | null
+          row_number?: number
+          sme_assigned_raw?: string
+          source_dataset?: string
+          source_file_name?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+          vertical_raw?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "raw_project_import_rows_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "upload_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      raw_sme_feedback_rows: {
+        Row: {
+          amount_billed: number | null
+          course_key_compact: string
+          course_key_normalized: string
+          course_key_raw: string
+          course_name_compact: string
+          course_name_normalized: string
+          course_name_raw: string
+          created_at: string
+          hours_worked: number | null
+          id: string
+          instructional_designer_raw: string
+          internal_raw: string
+          parse_warnings: Json
+          raw_row: Json
+          reporting_year: string | null
+          row_number: number
+          sme_email_raw: string
+          sme_raw: string
+          source_file_name: string | null
+          survey_date: string | null
+          upload_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          amount_billed?: number | null
+          course_key_compact?: string
+          course_key_normalized?: string
+          course_key_raw?: string
+          course_name_compact?: string
+          course_name_normalized?: string
+          course_name_raw?: string
+          created_at?: string
+          hours_worked?: number | null
+          id?: string
+          instructional_designer_raw?: string
+          internal_raw?: string
+          parse_warnings?: Json
+          raw_row?: Json
+          reporting_year?: string | null
+          row_number: number
+          sme_email_raw?: string
+          sme_raw?: string
+          source_file_name?: string | null
+          survey_date?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          amount_billed?: number | null
+          course_key_compact?: string
+          course_key_normalized?: string
+          course_key_raw?: string
+          course_name_compact?: string
+          course_name_normalized?: string
+          course_name_raw?: string
+          created_at?: string
+          hours_worked?: number | null
+          id?: string
+          instructional_designer_raw?: string
+          internal_raw?: string
+          parse_warnings?: Json
+          raw_row?: Json
+          reporting_year?: string | null
+          row_number?: number
+          sme_email_raw?: string
+          sme_raw?: string
+          source_file_name?: string | null
+          survey_date?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "raw_sme_feedback_rows_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "upload_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      raw_time_log_rows: {
+        Row: {
+          compact_course_name: string
+          created_at: string
+          id: string
+          log_date: string | null
+          minutes: number
+          normalized_course_name: string
+          parse_warnings: Json
+          raw_category: string
+          raw_course_name: string
+          raw_date: string
+          raw_row: Json
+          raw_time_spent: string
+          raw_user: string
+          row_number: number
+          source_file_name: string | null
+          upload_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          compact_course_name?: string
+          created_at?: string
+          id?: string
+          log_date?: string | null
+          minutes?: number
+          normalized_course_name?: string
+          parse_warnings?: Json
+          raw_category?: string
+          raw_course_name?: string
+          raw_date?: string
+          raw_row?: Json
+          raw_time_spent?: string
+          raw_user?: string
+          row_number: number
+          source_file_name?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          compact_course_name?: string
+          created_at?: string
+          id?: string
+          log_date?: string | null
+          minutes?: number
+          normalized_course_name?: string
+          parse_warnings?: Json
+          raw_category?: string
+          raw_course_name?: string
+          raw_date?: string
+          raw_row?: Json
+          raw_time_spent?: string
+          raw_user?: string
+          row_number?: number
+          source_file_name?: string | null
+          upload_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "raw_time_log_rows_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "upload_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sme_manual_join_overrides: {
+        Row: {
+          course_key_compact: string
+          course_name_compact: string
+          created_at: string
+          id: string
+          notes: string | null
+          reporting_year: string | null
+          target_project_key: string
           updated_at: string
           user_id: string | null
-          vertical: string | null
         }
         Insert: {
-          authoring_tool?: string | null
-          course_length?: string | null
-          course_style?: string | null
-          course_type?: string | null
-          created_at?: string
-          data_source?: string | null
-          id?: string
-          id_assigned?: string | null
-          interaction_count?: number | null
-          legal_reviewer?: string | null
-          name: string
-          reporting_year?: string | null
-          sme?: string | null
-          status?: string
-          total_hours?: number | null
-          updated_at?: string
-          user_id?: string | null
-          vertical?: string | null
-        }
-        Update: {
-          authoring_tool?: string | null
-          course_length?: string | null
-          course_style?: string | null
-          course_type?: string | null
-          created_at?: string
-          data_source?: string | null
-          id?: string
-          id_assigned?: string | null
-          interaction_count?: number | null
-          legal_reviewer?: string | null
-          name?: string
-          reporting_year?: string | null
-          sme?: string | null
-          status?: string
-          total_hours?: number | null
-          updated_at?: string
-          user_id?: string | null
-          vertical?: string | null
-        }
-        Relationships: []
-      }
-      sme_collaboration_surveys: {
-        Row: {
-          additional_comments_id: string | null
-          additional_feedback_sme: string | null
-          amount_billed: number
-          autonomy_course_design_score: number | null
-          clarity_goals_score: number | null
-          course_key_raw: string | null
-          course_name: string
-          created_at: string
-          effective_hourly_rate: number | null
-          feeling_valued_score: number | null
-          hours_worked: number
-          id: string
-          id_assistance_interactions_score: number | null
-          id_contribution_development_score: number | null
-          id_deadlines_schedule_score: number | null
-          id_instructional_design_knowledge_score: number | null
-          id_openness_feedback_score: number | null
-          id_overall_collaboration_score: number | null
-          id_overall_quality_score: number | null
-          id_realworld_examples_included: string | null
-          id_responsiveness_score: number | null
-          id_sme_knowledge_score: number | null
-          id_sme_promoter_score: number | null
-          incorporation_feedback_score: number | null
-          instructional_designer: string | null
-          internal: string | null
-          project_id: string | null
-          recommend_lexipol_score: number | null
-          reporting_year: string | null
-          sme: string | null
-          sme_email: string | null
-          sme_overall_experience_score: number | null
-          source_created_at: string | null
-          source_row: number | null
-          staff_responsiveness_score: number | null
-          survey_date: string | null
-          tools_resources_score: number | null
-          training_support_score: number | null
-          upload_id: string | null
-          use_expertise_score: number | null
-          user_id: string | null
-        }
-        Insert: {
-          additional_comments_id?: string | null
-          additional_feedback_sme?: string | null
-          amount_billed?: number
-          autonomy_course_design_score?: number | null
-          clarity_goals_score?: number | null
-          course_key_raw?: string | null
-          course_name: string
-          created_at?: string
-          effective_hourly_rate?: number | null
-          feeling_valued_score?: number | null
-          hours_worked?: number
-          id?: string
-          id_assistance_interactions_score?: number | null
-          id_contribution_development_score?: number | null
-          id_deadlines_schedule_score?: number | null
-          id_instructional_design_knowledge_score?: number | null
-          id_openness_feedback_score?: number | null
-          id_overall_collaboration_score?: number | null
-          id_overall_quality_score?: number | null
-          id_realworld_examples_included?: string | null
-          id_responsiveness_score?: number | null
-          id_sme_knowledge_score?: number | null
-          id_sme_promoter_score?: number | null
-          incorporation_feedback_score?: number | null
-          instructional_designer?: string | null
-          internal?: string | null
-          project_id?: string | null
-          recommend_lexipol_score?: number | null
-          reporting_year?: string | null
-          sme?: string | null
-          sme_email?: string | null
-          sme_overall_experience_score?: number | null
-          source_created_at?: string | null
-          source_row?: number | null
-          staff_responsiveness_score?: number | null
-          survey_date?: string | null
-          tools_resources_score?: number | null
-          training_support_score?: number | null
-          upload_id?: string | null
-          use_expertise_score?: number | null
-          user_id?: string | null
-        }
-        Update: {
-          additional_comments_id?: string | null
-          additional_feedback_sme?: string | null
-          amount_billed?: number
-          autonomy_course_design_score?: number | null
-          clarity_goals_score?: number | null
-          course_key_raw?: string | null
-          course_name?: string
-          created_at?: string
-          effective_hourly_rate?: number | null
-          feeling_valued_score?: number | null
-          hours_worked?: number
-          id?: string
-          id_assistance_interactions_score?: number | null
-          id_contribution_development_score?: number | null
-          id_deadlines_schedule_score?: number | null
-          id_instructional_design_knowledge_score?: number | null
-          id_openness_feedback_score?: number | null
-          id_overall_collaboration_score?: number | null
-          id_overall_quality_score?: number | null
-          id_realworld_examples_included?: string | null
-          id_responsiveness_score?: number | null
-          id_sme_knowledge_score?: number | null
-          id_sme_promoter_score?: number | null
-          incorporation_feedback_score?: number | null
-          instructional_designer?: string | null
-          internal?: string | null
-          project_id?: string | null
-          recommend_lexipol_score?: number | null
-          reporting_year?: string | null
-          sme?: string | null
-          sme_email?: string | null
-          sme_overall_experience_score?: number | null
-          source_created_at?: string | null
-          source_row?: number | null
-          staff_responsiveness_score?: number | null
-          survey_date?: string | null
-          tools_resources_score?: number | null
-          training_support_score?: number | null
-          upload_id?: string | null
-          use_expertise_score?: number | null
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sme_collaboration_surveys_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sme_collaboration_surveys_upload_id_fkey"
-            columns: ["upload_id"]
-            isOneToOne: false
-            referencedRelation: "upload_history"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      survey_no_match_records: {
-        Row: {
-          course_name_key: string
-          created_at: string
-          id: string
-          original_course_name: string
-          reporting_year: string | null
-          user_id: string | null
-        }
-        Insert: {
-          course_name_key: string
+          course_key_compact: string
+          course_name_compact: string
           created_at?: string
           id?: string
-          original_course_name: string
-          reporting_year?: string | null
-          user_id?: string | null
-        }
-        Update: {
-          course_name_key?: string
-          created_at?: string
-          id?: string
-          original_course_name?: string
-          reporting_year?: string | null
-          user_id?: string | null
-        }
-        Relationships: []
-      }
-      time_entries: {
-        Row: {
-          category: string | null
-          created_at: string
-          entry_date: string | null
-          hours: number
-          id: string
-          phase: string
-          project_id: string | null
-          quarter: string | null
-          raw_task_name: string | null
-          raw_time_spent: string | null
-          upload_id: string | null
-          user_id: string | null
-          user_name: string | null
-        }
-        Insert: {
-          category?: string | null
-          created_at?: string
-          entry_date?: string | null
-          hours?: number
-          id?: string
-          phase: string
-          project_id?: string | null
-          quarter?: string | null
-          raw_task_name?: string | null
-          raw_time_spent?: string | null
-          upload_id?: string | null
-          user_id?: string | null
-          user_name?: string | null
-        }
-        Update: {
-          category?: string | null
-          created_at?: string
-          entry_date?: string | null
-          hours?: number
-          id?: string
-          phase?: string
-          project_id?: string | null
-          quarter?: string | null
-          raw_task_name?: string | null
-          raw_time_spent?: string | null
-          upload_id?: string | null
-          user_id?: string | null
-          user_name?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "fk_time_entries_upload"
-            columns: ["upload_id"]
-            isOneToOne: false
-            referencedRelation: "upload_history"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "time_entries_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      time_match_overrides: {
-        Row: {
-          course_name_key: string
-          created_at: string
-          id: string
-          original_course_name: string
-          reporting_year: string | null
-          target_project_key: string
-          user_id: string | null
-        }
-        Insert: {
-          course_name_key: string
-          created_at?: string
-          id?: string
-          original_course_name: string
+          notes?: string | null
           reporting_year?: string | null
           target_project_key: string
+          updated_at?: string
           user_id?: string | null
         }
         Update: {
-          course_name_key?: string
+          course_key_compact?: string
+          course_name_compact?: string
           created_at?: string
           id?: string
-          original_course_name?: string
+          notes?: string | null
           reporting_year?: string | null
           target_project_key?: string
+          updated_at?: string
           user_id?: string | null
         }
         Relationships: []
@@ -552,6 +461,51 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      work_entity_decisions: {
+        Row: {
+          created_at: string
+          decision_type: string
+          id: string
+          notes: string | null
+          reporting_year: string | null
+          source_title_compact: string
+          source_title_normalized: string
+          source_title_raw: string
+          standalone_title: string | null
+          target_project_key: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          decision_type: string
+          id?: string
+          notes?: string | null
+          reporting_year?: string | null
+          source_title_compact: string
+          source_title_normalized: string
+          source_title_raw: string
+          standalone_title?: string | null
+          target_project_key?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          decision_type?: string
+          id?: string
+          notes?: string | null
+          reporting_year?: string | null
+          source_title_compact?: string
+          source_title_normalized?: string
+          source_title_raw?: string
+          standalone_title?: string | null
+          target_project_key?: string | null
+          updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
