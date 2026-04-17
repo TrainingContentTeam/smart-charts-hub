@@ -652,7 +652,7 @@ export function buildAnalyticsSnapshot(bundle: AnalyticsPersistenceBundle): Anal
       work_entity_type: resolution.workEntityType,
       work_item_type: resolution.workEntityType === "operational_work"
         ? "operational"
-        : resolution.work_match_status === "reconcilable_unmatched"
+        : resolution.workMatchStatus === "reconcilable_unmatched"
           ? "unknown"
           : "course_like",
       matched_project_key: resolution.matchedProjectKey,

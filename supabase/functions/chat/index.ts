@@ -55,34 +55,34 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Use the user's client (respects RLS) to fetch only their data
-    const [projectsRes, entriesRes] = await Promise.all([
-      userClient.from("projects").select("*"),
-      userClient.from("time_entries").select("*, projects(name)").limit(500),
+    // Use the user's client (respects RLS) to fetch only their data from the new canonical raw tables
+    const [projectsRes, timeLogsRes] = await Promise.all([
+      userClient.from("raw_project_import_rows").select("raw_course_name, reporting_year, course_type, authoring_tool, vertical_raw, id_assigned_raw, project_total_minutes"),
+      userClient.from("raw_time_log_rows").select("raw_course_name, minutes").limit(2000),
     ]);
 
     const projects = projectsRes.data || [];
-    const entries = entriesRes.data || [];
+    const timeLogs = timeLogsRes.data || [];
 
     // Build context
     const projectSummary = projects
       .map(
         (p: any) =>
-          `- ${p.name}${p.authoring_tool ? ` | Tool: ${p.authoring_tool}` : ""}${p.vertical ? ` | Vertical: ${p.vertical}` : ""}${p.course_type ? ` | Type: ${p.course_type}` : ""}${p.id_assigned ? ` | Assigned: ${p.id_assigned}` : ""}${p.reporting_year ? ` | Year: ${p.reporting_year}` : ""}`
+          `- ${p.raw_course_name}${p.authoring_tool ? ` | Tool: ${p.authoring_tool}` : ""}${p.vertical_raw ? ` | Vertical: ${p.vertical_raw}` : ""}${p.course_type ? ` | Type: ${p.course_type}` : ""}${p.id_assigned_raw ? ` | Assigned: ${p.id_assigned_raw}` : ""}${p.reporting_year ? ` | Year: ${p.reporting_year}` : ""}`
       )
       .join("\n");
 
-    const hoursByProject: Record<string, number> = {};
-    entries.forEach((e: any) => {
-      const name = e.projects?.name || "Unknown";
-      hoursByProject[name] = (hoursByProject[name] || 0) + Number(e.hours);
+    const minutesByCourse: Record<string, number> = {};
+    timeLogs.forEach((e: any) => {
+      const name = e.raw_course_name || "Unknown";
+      minutesByCourse[name] = (minutesByCourse[name] || 0) + Number(e.minutes || 0);
     });
-    const hoursSummary = Object.entries(hoursByProject)
+    const hoursSummary = Object.entries(minutesByCourse)
       .sort((a, b) => b[1] - a[1])
-      .map(([name, hours]) => `- ${name}: ${Math.round(hours * 100) / 100}h`)
+      .map(([name, minutes]) => `- ${name}: ${Math.round((minutes / 60) * 100) / 100}h`)
       .join("\n");
 
-    const totalHours = entries.reduce((s: number, e: any) => s + Number(e.hours), 0);
+    const totalHours = timeLogs.reduce((s: number, e: any) => s + Number(e.minutes || 0), 0) / 60;
 
     const systemPrompt = `You are an analytics assistant for a project time tracking application. You help analyze course development time data.
 
@@ -91,10 +91,10 @@ Here is the current data:
 ## Projects (${projects.length} total):
 ${projectSummary || "No projects yet."}
 
-## Hours by Project (${Math.round(totalHours * 100) / 100} total hours):
+## Hours by Course (${Math.round(totalHours * 100) / 100} total hours):
 ${hoursSummary || "No time entries yet."}
 
-## Time Entries: ${entries.length} entries across ${Object.keys(hoursByProject).length} projects.
+## Time Entries: ${timeLogs.length} entries across ${Object.keys(minutesByCourse).length} courses.
 
 Answer questions about this data concisely. Use specific numbers. If asked about trends or comparisons, reference the actual data. Format responses with markdown.`;
 
