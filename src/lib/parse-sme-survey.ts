@@ -111,7 +111,7 @@ function parseInternal(value: unknown): string | null {
 }
 
 function toIsoDate(value: unknown): string {
-  if (typeof value === "number" && value > 30000 && value < 60000) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 30000 && value < 60000) {
     const date = new Date(Math.round((value - 25569) * 86400 * 1000));
     return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
   }
@@ -120,18 +120,31 @@ function toIsoDate(value: unknown): string {
   if (!raw) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
 
-  const shortDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const shortDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T].*)?$/);
   if (shortDate) {
     const [, month, day, year] = shortDate;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    const m = Number(month), d = Number(day), y = Number(year);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1900 && y <= 2100) {
+      return `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+    return "";
   }
 
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+  // Excel serial as string (integer or decimal)
+  if (/^\d{4,6}(?:\.\d+)?$/.test(raw)) {
+    const serial = Number(raw);
+    if (Number.isFinite(serial) && serial > 30000 && serial < 60000) {
+      const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
+      return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+    }
+    return "";
+  }
+
+  return "";
 }
 
 function toIsoDateTime(value: unknown): string {
-  if (typeof value === "number" && value > 30000 && value < 60000) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 30000 && value < 60000) {
     const date = new Date(Math.round((value - 25569) * 86400 * 1000));
     return Number.isNaN(date.getTime()) ? "" : date.toISOString();
   }
@@ -139,8 +152,20 @@ function toIsoDateTime(value: unknown): string {
   const raw = normalize(value);
   if (!raw) return "";
 
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+  // Only accept ISO-like timestamps for the freeform field
+  if (/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(raw)) {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      const y = parsed.getUTCFullYear();
+      if (y >= 1900 && y <= 2100) return parsed.toISOString();
+    }
+    return "";
+  }
+
+  // M/D/YYYY treated as a date-only value
+  const iso = toIsoDate(raw);
+  if (iso) return `${iso}T00:00:00.000Z`;
+  return "";
 }
 
 function toYear(value: unknown): string {
