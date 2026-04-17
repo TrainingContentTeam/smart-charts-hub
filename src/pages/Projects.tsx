@@ -1,7 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
+import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { selectProjectsPageRows } from "@/lib/analytics/selectors";
 
@@ -9,97 +12,116 @@ function uniqueSorted(values: string[]) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
+function toOptions(values: string[]): CompactFilterOption[] {
+  return uniqueSorted(values).map((value) => ({ label: value, value }));
+}
+
+function matchesBooleanFilter(selected: string[], value: boolean) {
+  if (!selected.length || selected.length === 2) return true;
+  return selected.includes(value ? "yes" : "no");
+}
+
 export default function Projects() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const rows = useMemo(() => (snapshot ? selectProjectsPageRows(snapshot) : []), [snapshot]);
 
-  const [search, setSearch] = useState("");
-  const [reportingYear, setReportingYear] = useState("all");
-  const [status, setStatus] = useState("all");
-  const [owner, setOwner] = useState("all");
-  const [sme, setSme] = useState("all");
-  const [legalReviewer, setLegalReviewer] = useState("all");
-  const [vertical, setVertical] = useState("all");
-  const [courseType, setCourseType] = useState("all");
-  const [authoringTool, setAuthoringTool] = useState("all");
-  const [discrepancyFlag, setDiscrepancyFlag] = useState("all");
-  const [hasTimeLogs, setHasTimeLogs] = useState("all");
-  const [hasSmeFeedback, setHasSmeFeedback] = useState("all");
+  const search = searchParams.get("q") || "";
+  const reportingYears = searchParams.getAll("year");
+  const statuses = searchParams.getAll("status");
+  const owners = searchParams.getAll("owner");
+  const smes = searchParams.getAll("sme");
+  const legalReviewers = searchParams.getAll("legal");
+  const verticals = searchParams.getAll("vertical");
+  const courseTypes = searchParams.getAll("type");
+  const authoringTools = searchParams.getAll("tool");
+  const discrepancyFilters = searchParams.getAll("discrepancy");
+  const hasTimeLogFilters = searchParams.getAll("timeLogs");
+  const hasSmeFilters = searchParams.getAll("smeFeedback");
+
+  const setMultiParam = (key: string, values: string[]) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete(key);
+    values.forEach((value) => next.append(key, value));
+    setSearchParams(next, { replace: true });
+  };
+
+  const setSearchValue = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value.trim()) {
+      next.set("q", value);
+    } else {
+      next.delete("q");
+    }
+    setSearchParams(next, { replace: true });
+  };
 
   const filterOptions = useMemo(() => ({
-    reportingYear: uniqueSorted(rows.map((row) => row.reportingYear)),
-    status: uniqueSorted(rows.map((row) => row.status)),
-    owner: uniqueSorted(rows.map((row) => row.idAssignedRaw)),
-    sme: uniqueSorted(rows.map((row) => row.smeAssignedRaw)),
-    legalReviewer: uniqueSorted(rows.map((row) => row.legalReviewerRaw)),
-    vertical: uniqueSorted(rows.map((row) => row.primaryVertical)),
-    courseType: uniqueSorted(rows.map((row) => row.courseType)),
-    authoringTool: uniqueSorted(rows.map((row) => row.authoringTool)),
+    reportingYear: toOptions(rows.map((row) => row.reportingYear)),
+    status: toOptions(rows.map((row) => row.status)),
+    owner: toOptions(rows.flatMap((row) => row.ownerNames.length ? row.ownerNames : [row.idAssignedRaw || "Unassigned"])),
+    sme: toOptions(rows.map((row) => row.smeAssignedRaw || "Unassigned")),
+    legalReviewer: toOptions(rows.map((row) => row.legalReviewerRaw || "Unassigned")),
+    vertical: toOptions(rows.flatMap((row) => row.verticals.length ? row.verticals : [row.primaryVertical])),
+    courseType: toOptions(rows.map((row) => row.courseType)),
+    authoringTool: toOptions(rows.map((row) => row.authoringTool)),
+    yesNo: [
+      { label: "Yes", value: "yes" },
+      { label: "No", value: "no" },
+    ],
   }), [rows]);
 
   const filteredRows = useMemo(() => {
     const searchText = search.trim().toLowerCase();
 
     return rows.filter((row) => {
-      if (searchText && !`${row.projectKey} ${row.rawCourseName}`.toLowerCase().includes(searchText)) return false;
-      if (reportingYear !== "all" && row.reportingYear !== reportingYear) return false;
-      if (status !== "all" && row.status !== status) return false;
-      if (owner !== "all" && row.idAssignedRaw !== owner) return false;
-      if (sme !== "all" && row.smeAssignedRaw !== sme) return false;
-      if (legalReviewer !== "all" && row.legalReviewerRaw !== legalReviewer) return false;
-      if (vertical !== "all" && row.primaryVertical !== vertical) return false;
-      if (courseType !== "all" && row.courseType !== courseType) return false;
-      if (authoringTool !== "all" && row.authoringTool !== authoringTool) return false;
-      if (discrepancyFlag === "yes" && !row.hoursDiscrepancyFlag) return false;
-      if (discrepancyFlag === "no" && row.hoursDiscrepancyFlag) return false;
-      if (hasTimeLogs === "yes" && !row.hasTimeLogs) return false;
-      if (hasTimeLogs === "no" && row.hasTimeLogs) return false;
-      if (hasSmeFeedback === "yes" && !row.hasSmeFeedback) return false;
-      if (hasSmeFeedback === "no" && row.hasSmeFeedback) return false;
+      const searchableText = [
+        row.projectName,
+        row.status,
+        row.idAssignedRaw,
+        row.smeAssignedRaw,
+        row.legalReviewerRaw,
+        row.fullVerticalList,
+        row.courseType,
+        row.authoringTool,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      if (searchText && !searchableText.includes(searchText)) return false;
+      if (reportingYears.length && !reportingYears.includes(row.reportingYear)) return false;
+      if (statuses.length && !statuses.includes(row.status)) return false;
+      if (owners.length && !row.ownerNames.some((owner) => owners.includes(owner))) return false;
+      if (smes.length && !smes.includes(row.smeAssignedRaw || "Unassigned")) return false;
+      if (legalReviewers.length && !legalReviewers.includes(row.legalReviewerRaw || "Unassigned")) return false;
+      if (verticals.length && !row.verticals.some((vertical) => verticals.includes(vertical))) return false;
+      if (courseTypes.length && !courseTypes.includes(row.courseType)) return false;
+      if (authoringTools.length && !authoringTools.includes(row.authoringTool)) return false;
+      if (!matchesBooleanFilter(discrepancyFilters, row.hoursDiscrepancyFlag)) return false;
+      if (!matchesBooleanFilter(hasTimeLogFilters, row.hasTimeLogs)) return false;
+      if (!matchesBooleanFilter(hasSmeFilters, row.hasSmeFeedback)) return false;
       return true;
     });
   }, [
-    authoringTool,
-    courseType,
-    discrepancyFlag,
-    hasSmeFeedback,
-    hasTimeLogs,
-    legalReviewer,
-    owner,
-    reportingYear,
+    authoringTools,
+    courseTypes,
+    discrepancyFilters,
+    hasSmeFilters,
+    hasTimeLogFilters,
+    legalReviewers,
+    owners,
+    reportingYears,
     rows,
     search,
-    sme,
-    status,
-    vertical,
+    smes,
+    statuses,
+    verticals,
   ]);
 
-  const SelectRow = ({
-    label,
-    value,
-    onChange,
-    options,
-  }: {
-    label: string;
-    value: string;
-    onChange: (value: string) => void;
-    options: string[];
-  }) => (
-    <label className="space-y-1 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="all">All</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-
   if (isLoading) {
-    return <div className="text-muted-foreground">Loading canonical project table...</div>;
+    return <div className="text-muted-foreground">Loading project records...</div>;
   }
 
   return (
@@ -107,7 +129,7 @@ export default function Projects() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
         <p className="text-muted-foreground">
-          One row per canonical project key, with project totals, matched time-log totals, discrepancy flags, and unresolved SME counts.
+          One row per project record, with project totals, logged totals, discrepancy visibility, and SME coverage kept distinct.
         </p>
       </div>
 
@@ -116,70 +138,80 @@ export default function Projects() {
           <CardTitle className="text-base">Filters</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Input placeholder="Search by project key or course name" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            <SelectRow label="Reporting Year" value={reportingYear} onChange={setReportingYear} options={filterOptions.reportingYear} />
-            <SelectRow label="Status" value={status} onChange={setStatus} options={filterOptions.status} />
-            <SelectRow label="Owner" value={owner} onChange={setOwner} options={filterOptions.owner} />
-            <SelectRow label="SME" value={sme} onChange={setSme} options={filterOptions.sme} />
-            <SelectRow label="Legal Reviewer" value={legalReviewer} onChange={setLegalReviewer} options={filterOptions.legalReviewer} />
-            <SelectRow label="Vertical" value={vertical} onChange={setVertical} options={filterOptions.vertical} />
-            <SelectRow label="Course Type" value={courseType} onChange={setCourseType} options={filterOptions.courseType} />
-            <SelectRow label="Authoring Tool" value={authoringTool} onChange={setAuthoringTool} options={filterOptions.authoringTool} />
-            <SelectRow label="Discrepancy Flag" value={discrepancyFlag} onChange={setDiscrepancyFlag} options={["yes", "no"]} />
-            <SelectRow label="Has Time Logs" value={hasTimeLogs} onChange={setHasTimeLogs} options={["yes", "no"]} />
-            <SelectRow label="Has SME Feedback" value={hasSmeFeedback} onChange={setHasSmeFeedback} options={["yes", "no"]} />
+          <Input
+            placeholder="Search by project name, owner, SME, reviewer, vertical, type, or tool"
+            value={search}
+            onChange={(event) => setSearchValue(event.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.reportingYear} selected={reportingYears} onChange={(values) => setMultiParam("year", values)} />
+            <CompactMultiSelectFilter label="Status" options={filterOptions.status} selected={statuses} onChange={(values) => setMultiParam("status", values)} />
+            <CompactMultiSelectFilter label="Owner" options={filterOptions.owner} selected={owners} onChange={(values) => setMultiParam("owner", values)} />
+            <CompactMultiSelectFilter label="SME" options={filterOptions.sme} selected={smes} onChange={(values) => setMultiParam("sme", values)} />
+            <CompactMultiSelectFilter label="Legal Reviewer" options={filterOptions.legalReviewer} selected={legalReviewers} onChange={(values) => setMultiParam("legal", values)} />
+            <CompactMultiSelectFilter label="Vertical" options={filterOptions.vertical} selected={verticals} onChange={(values) => setMultiParam("vertical", values)} />
+            <CompactMultiSelectFilter label="Course Type" options={filterOptions.courseType} selected={courseTypes} onChange={(values) => setMultiParam("type", values)} />
+            <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTool} selected={authoringTools} onChange={(values) => setMultiParam("tool", values)} />
+            <CompactMultiSelectFilter label="Discrepancy" options={filterOptions.yesNo} selected={discrepancyFilters} onChange={(values) => setMultiParam("discrepancy", values)} />
+            <CompactMultiSelectFilter label="Has Time Logs" options={filterOptions.yesNo} selected={hasTimeLogFilters} onChange={(values) => setMultiParam("timeLogs", values)} />
+            <CompactMultiSelectFilter label="Has SME Feedback" options={filterOptions.yesNo} selected={hasSmeFilters} onChange={(values) => setMultiParam("smeFeedback", values)} />
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">{filteredRows.length} Canonical Projects</CardTitle>
+          <CardTitle className="text-base">{filteredRows.length} Projects</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Project Key</TableHead>
-                  <TableHead>Course Name</TableHead>
+                  <TableHead>Project</TableHead>
                   <TableHead>Year</TableHead>
-                  <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Project Hours</TableHead>
-                  <TableHead>Time Log Hours</TableHead>
+                  <TableHead>Logged Hours</TableHead>
                   <TableHead>Discrepancy</TableHead>
-                  <TableHead>ID Assigned</TableHead>
+                  <TableHead>Owners</TableHead>
                   <TableHead>SME</TableHead>
                   <TableHead>Legal</TableHead>
-                  <TableHead>Primary Vertical</TableHead>
-                  <TableHead>All Verticals</TableHead>
+                  <TableHead>Verticals</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Tool</TableHead>
                   <TableHead>Style</TableHead>
                   <TableHead>Length</TableHead>
                   <TableHead>Interactions</TableHead>
                   <TableHead>Latest Log</TableHead>
-                  <TableHead>Unresolved SME Rows</TableHead>
+                  <TableHead>SME Rows Needing Review</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredRows.map((row) => (
-                  <TableRow key={row.projectKey}>
-                    <TableCell>{row.projectKey}</TableCell>
-                    <TableCell>{row.rawCourseName}</TableCell>
+                  <TableRow
+                    key={row.projectKey}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() =>
+                      navigate(row.projectHref, {
+                        state: { from: `${location.pathname}${location.search}` },
+                      })
+                    }
+                  >
+                    <TableCell className="min-w-[240px]">
+                      <ProjectLink projectName={row.projectName} reportingYear={row.reportingYear}>
+                        {row.projectName}
+                      </ProjectLink>
+                    </TableCell>
                     <TableCell>{row.reportingYear}</TableCell>
-                    <TableCell>{row.sourceDataset}</TableCell>
                     <TableCell>{row.status}</TableCell>
                     <TableCell>{row.projectTotalHours}</TableCell>
                     <TableCell>{row.timeLogHours}</TableCell>
                     <TableCell>{row.hoursDiscrepancyFlag ? "Flagged" : "OK"}</TableCell>
-                    <TableCell>{row.idAssignedRaw}</TableCell>
-                    <TableCell>{row.smeAssignedRaw}</TableCell>
-                    <TableCell>{row.legalReviewerRaw}</TableCell>
-                    <TableCell>{row.primaryVertical}</TableCell>
-                    <TableCell>{row.fullVerticalList}</TableCell>
+                    <TableCell>{row.ownerNames.join(", ") || row.idAssignedRaw || "Unassigned"}</TableCell>
+                    <TableCell>{row.smeAssignedRaw || "-"}</TableCell>
+                    <TableCell>{row.legalReviewerRaw || "-"}</TableCell>
+                    <TableCell>{row.fullVerticalList || "-"}</TableCell>
                     <TableCell>{row.courseType}</TableCell>
                     <TableCell>{row.authoringTool}</TableCell>
                     <TableCell>{row.courseStyle}</TableCell>

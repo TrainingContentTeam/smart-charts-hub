@@ -5,6 +5,12 @@ import type {
   RawTimeLogRowDraft,
 } from "@/lib/analytics/types";
 import {
+  extractDateFromLocalDateTime,
+  parseApprovedDurationHoursMinutes,
+  parseApprovedUsLocalDateTime,
+  parseApprovedUsShortDate,
+} from "@/lib/analytics/field-parsers";
+import {
   compactCourseName,
   normalizeCourseName,
   normalizeLookupValue,
@@ -12,7 +18,6 @@ import {
   parseDurationToMinutes,
   parseReportingYear,
 } from "@/lib/analytics/normalization";
-import { parseUploadDate } from "@/lib/analytics/parse-upload-date";
 
 export interface ParsedImportFile<T> {
   rows: T[];
@@ -21,10 +26,10 @@ export interface ParsedImportFile<T> {
 }
 
 /**
- * Re-export of the centralized strict date parser. Kept under the original
+ * Re-export of the approved U.S. short-date parser. Kept under the original
  * `parseDateToIso` name for backward compatibility with existing callers/tests.
  */
-export const parseDateToIso = parseUploadDate;
+export const parseDateToIso = parseApprovedUsShortDate;
 
 const WINDOWS_SAFE_ENCODINGS = ["windows-1252", "latin1", "utf-8"];
 const UTF8_SAFE_ENCODINGS = ["utf-8", "windows-1252", "latin1"];
@@ -37,6 +42,12 @@ function describeRawValue(value: unknown): string {
   if (value == null) return "(empty)";
   if (typeof value === "string") return JSON.stringify(value);
   if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+function readRawCellText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
   return String(value);
 }
 
@@ -202,21 +213,21 @@ function buildTimeLogDraft(
   if (!rawCourseName || rawCourseName.toLowerCase().startsWith("total:")) return null;
 
   const rawDateCell = getCell(row, ["Date"]);
-  const rawDate = normalizeTextPreserveMeaning(rawDateCell);
-  // Parse from the original cell so we can also handle native Date / number values
-  // before they get string-flattened by `normalizeTextPreserveMeaning`.
-  const logDate = parseUploadDate(rawDateCell);
-  const rawTimeSpent = normalizeTextPreserveMeaning(getCell(row, ["Time spent"]));
+  const rawDate = readRawCellText(rawDateCell);
+  const logDate = parseApprovedUsShortDate(rawDateCell);
+  const rawTimeSpentCell = getCell(row, ["Time Spent", "Time spent"]);
+  const rawTimeSpent = readRawCellText(rawTimeSpentCell);
+  const minutes = parseApprovedDurationHoursMinutes(rawTimeSpent);
   const parseWarnings: string[] = [];
 
   if (rawDate && !logDate) {
     parseWarnings.push(
-      `Time Logs, row ${rowNumber}, column "Date": ${describeRawValue(rawDateCell)} could not be confidently parsed; stored raw_date and set log_date=null.`,
+      `${sourceFileName}, row ${rowNumber}, column "Date": ${describeRawValue(rawDateCell)} is not a valid U.S. short date; stored raw_date and set log_date=null.`,
     );
   }
-  if (rawTimeSpent && parseDurationToMinutes(rawTimeSpent) === 0) {
+  if (rawTimeSpent && minutes === null) {
     parseWarnings.push(
-      `Time Logs, row ${rowNumber}, column "Time spent": ${describeRawValue(rawTimeSpent)} could not be parsed as a duration.`,
+      `${sourceFileName}, row ${rowNumber}, column "Time Spent": ${describeRawValue(rawTimeSpentCell)} is not a valid HH:MM duration; stored raw_time_spent and set minutes=null.`,
     );
   }
 
@@ -231,7 +242,7 @@ function buildTimeLogDraft(
     raw_date: rawDate,
     log_date: logDate,
     raw_time_spent: rawTimeSpent,
-    minutes: parseDurationToMinutes(rawTimeSpent),
+    minutes,
     raw_user: normalizeTextPreserveMeaning(getCell(row, ["User"])),
     parse_warnings: parseWarnings,
   };
@@ -247,13 +258,22 @@ function buildSmeDraft(
 
   const courseKeyRaw = normalizeTextPreserveMeaning(getCell(row, ["CourseKey"]));
   const reportingYear = parseReportingYear(getCell(row, ["Year"]));
-  const surveyDateCell = getCell(row, ["Survey Date"]);
-  const surveyDate = parseUploadDate(surveyDateCell);
+  const idSurveyCreatedCell = getCell(row, ["Created"]);
+  const idSurveyRawCreated = readRawCellText(idSurveyCreatedCell);
+  const idSurveyCreatedAt = parseApprovedUsLocalDateTime(idSurveyCreatedCell);
+  const smeSurveyDateCell = getCell(row, ["Survey Date"]);
+  const smeSurveyRawDate = readRawCellText(smeSurveyDateCell);
+  const smeSurveyDate = parseApprovedUsShortDate(smeSurveyDateCell);
   const parseWarnings: string[] = [];
 
-  if (surveyDateCell && !surveyDate) {
+  if (idSurveyRawCreated && !idSurveyCreatedAt) {
     parseWarnings.push(
-      `SME, row ${rowNumber}, column "Survey Date": ${describeRawValue(surveyDateCell)} could not be confidently parsed; stored survey_date=null.`,
+      `${sourceFileName}, row ${rowNumber}, ID survey block, column "Created": ${describeRawValue(idSurveyCreatedCell)} is not a valid U.S. datetime; stored id_survey_raw_created and set id_survey_created_at/id_survey_date=null.`,
+    );
+  }
+  if (smeSurveyRawDate && !smeSurveyDate) {
+    parseWarnings.push(
+      `${sourceFileName}, row ${rowNumber}, SME survey block, column "Survey Date": ${describeRawValue(smeSurveyDateCell)} is not a valid U.S. short date; stored sme_survey_raw_date and set sme_survey_date=null.`,
     );
   }
 
@@ -268,7 +288,13 @@ function buildSmeDraft(
     course_name_normalized: normalizeCourseName(courseNameRaw),
     course_name_compact: compactCourseName(courseNameRaw),
     reporting_year: reportingYear,
-    survey_date: surveyDate,
+    id_survey_raw_created: idSurveyRawCreated,
+    id_survey_created_at: idSurveyCreatedAt,
+    id_survey_date: extractDateFromLocalDateTime(idSurveyCreatedAt),
+    id_survey_date_source: idSurveyCreatedAt ? "Created" : null,
+    sme_survey_raw_date: smeSurveyRawDate,
+    sme_survey_date: smeSurveyDate,
+    sme_survey_date_source: smeSurveyDate ? "Survey Date" : null,
     sme_raw: normalizeTextPreserveMeaning(getCell(row, ["SME"])),
     instructional_designer_raw: normalizeTextPreserveMeaning(getCell(row, ["Instructional Designer - ID"])),
     sme_email_raw: normalizeTextPreserveMeaning(getCell(row, ["SME Email"])),

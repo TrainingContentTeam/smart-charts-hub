@@ -1,18 +1,21 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import {
-  BarChart,
   Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
-  Cell,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ChartPanel } from "@/components/ChartPanel";
+import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
+import { PHASE_EXPLANATION_TOOLTIP, WORK_SCOPE_LABELS } from "@/lib/analytics/labels";
 import { selectDashboardModel } from "@/lib/analytics/selectors";
 
 const PIE_COLORS = [
@@ -22,6 +25,14 @@ const PIE_COLORS = [
   "hsl(var(--chart-4))",
   "hsl(var(--chart-5))",
 ];
+
+function uniqueSorted(values: string[]) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function toOptions(values: string[]): CompactFilterOption[] {
+  return uniqueSorted(values).map((value) => ({ label: value, value }));
+}
 
 function MetricCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
@@ -39,36 +50,103 @@ function MetricCard({ label, value, hint }: { label: string; value: string | num
   );
 }
 
-function ChartCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
-}
-
 export default function Dashboard() {
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const model = useMemo(() => (snapshot ? selectDashboardModel(snapshot) : null), [snapshot]);
 
+  const [projectsByYearFilters, setProjectsByYearFilters] = useState<{ statuses: string[]; courseTypes: string[]; authoringTools: string[] }>({
+    statuses: [],
+    courseTypes: [],
+    authoringTools: [],
+  });
+  const [activeStatusFilters, setActiveStatusFilters] = useState<{ reportingYears: string[]; owners: string[]; authoringTools: string[] }>({
+    reportingYears: [],
+    owners: [],
+    authoringTools: [],
+  });
+  const [courseTypeFilters, setCourseTypeFilters] = useState<{ reportingYears: string[]; statuses: string[] }>({
+    reportingYears: [],
+    statuses: [],
+  });
+  const [authoringToolFilters, setAuthoringToolFilters] = useState<{ reportingYears: string[]; statuses: string[] }>({
+    reportingYears: [],
+    statuses: [],
+  });
+  const [phaseFilters, setPhaseFilters] = useState<{ reportingYears: string[]; roleGroups: string[]; workScopes: Array<"matched_project_work" | "standalone_work" | "non_project_work"> }>({
+    reportingYears: [],
+    roleGroups: [],
+    workScopes: [],
+  });
+  const [roleFilters, setRoleFilters] = useState<{ reportingYears: string[]; phases: string[]; workScopes: Array<"matched_project_work" | "standalone_work" | "non_project_work"> }>({
+    reportingYears: [],
+    phases: [],
+    workScopes: [],
+  });
+
+  const projectsByYearModel = useMemo(
+    () => (snapshot ? selectDashboardModel(snapshot, { projectsByReportingYear: projectsByYearFilters }) : null),
+    [projectsByYearFilters, snapshot],
+  );
+  const activeStatusModel = useMemo(
+    () => (snapshot ? selectDashboardModel(snapshot, { activeProjectsByStatus: activeStatusFilters }) : null),
+    [activeStatusFilters, snapshot],
+  );
+  const courseTypeModel = useMemo(
+    () => (snapshot ? selectDashboardModel(snapshot, { projectMixByCourseType: courseTypeFilters }) : null),
+    [courseTypeFilters, snapshot],
+  );
+  const authoringToolModel = useMemo(
+    () => (snapshot ? selectDashboardModel(snapshot, { projectMixByAuthoringTool: authoringToolFilters }) : null),
+    [authoringToolFilters, snapshot],
+  );
+  const phaseModel = useMemo(
+    () => (snapshot ? selectDashboardModel(snapshot, { hoursByTimeLogPhase: phaseFilters }) : null),
+    [phaseFilters, snapshot],
+  );
+  const roleModel = useMemo(
+    () => (snapshot ? selectDashboardModel(snapshot, { hoursByRoleGroup: roleFilters }) : null),
+    [roleFilters, snapshot],
+  );
+
+  const filterOptions = useMemo(() => {
+    if (!snapshot) {
+      return {
+        years: [] as CompactFilterOption[],
+        statuses: [] as CompactFilterOption[],
+        courseTypes: [] as CompactFilterOption[],
+        authoringTools: [] as CompactFilterOption[],
+        owners: [] as CompactFilterOption[],
+        roleGroups: [] as CompactFilterOption[],
+        phases: [] as CompactFilterOption[],
+        workScopes: [] as CompactFilterOption[],
+      };
+    }
+
+    return {
+      years: toOptions(snapshot.canonicalProjects.map((project) => project.reporting_year || "Unknown")),
+      statuses: toOptions(snapshot.canonicalProjects.map((project) => project.status)),
+      courseTypes: toOptions(snapshot.canonicalProjects.map((project) => project.course_type || "Unknown")),
+      authoringTools: toOptions(snapshot.canonicalProjects.map((project) => project.authoring_tool || "Unknown")),
+      owners: toOptions(snapshot.canonicalProjects.map((project) => project.primary_id_assigned || "Unassigned")),
+      roleGroups: toOptions(snapshot.timeLogs.map((row) => row.role_group)),
+      phases: toOptions(snapshot.timeLogs.map((row) => row.category_phase)),
+      workScopes: [
+        { label: WORK_SCOPE_LABELS.matched_project_work, value: "matched_project_work" },
+        { label: WORK_SCOPE_LABELS.standalone_work, value: "standalone_work" },
+        { label: WORK_SCOPE_LABELS.non_project_work, value: "non_project_work" },
+      ],
+    };
+  }, [snapshot]);
+
   if (isLoading) {
-    return <div className="text-muted-foreground">Loading canonical analytics snapshot...</div>;
+    return <div className="text-muted-foreground">Loading analytics snapshot...</div>;
   }
 
-  if (!model) {
+  if (!model || !projectsByYearModel || !activeStatusModel || !courseTypeModel || !authoringToolModel || !phaseModel || !roleModel) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
-          Upload Legacy, Modern, Time Log, and SME files to build the canonical analytics snapshot.
+          Upload Legacy, Modern, Time Log, and SME files to build the analytics snapshot.
         </CardContent>
       </Card>
     );
@@ -79,30 +157,49 @@ export default function Dashboard() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">
-          Canonical project metrics come from the unioned project registry. Logged effort is shown separately from project totals.
+          Project counts come from project records only. Logged effort is shown separately so lifecycle status and workflow activity stay honest.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Total Projects" value={model.cards.totalProjects} />
         <MetricCard label="Active Projects" value={model.cards.activeProjects} />
         <MetricCard label="Completed / Published" value={model.cards.completedPublishedProjects} />
-        <MetricCard label="Project Hours" value={`${model.cards.totalProjectHours}h`} hint="From Legacy + Modern project totals" />
-        <MetricCard label="Logged Hours" value={`${model.cards.totalLoggedHours}h`} hint="From transactional time logs only" />
-        <MetricCard label="Standalone Course Hours" value={`${model.cards.standaloneHours}h`} />
-        <MetricCard label="Operational Work Hours" value={`${model.cards.operationalHours}h`} />
         <MetricCard
           label="Discrepancy Flags"
           value={model.cards.discrepancyCount}
-          hint={`${model.cards.discrepancyRate}% of canonical projects`}
+          hint={`${model.cards.discrepancyRate}% of project records`}
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ChartCard title="Projects by Reporting Year">
+      <ChartPanel title="Project Hours vs Logged Hours">
+        <div className="h-[320px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={model.hoursComparison}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="label" interval={0} angle={-10} textAnchor="end" height={72} />
+              <YAxis />
+              <Tooltip formatter={(value, _name, item) => [`${value} hours`, item.payload.description]} />
+              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </ChartPanel>
+
+      <div className="space-y-4">
+        <ChartPanel
+          title="Projects by Reporting Year"
+          filters={
+            <>
+              <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={projectsByYearFilters.statuses} onChange={(statuses) => setProjectsByYearFilters((current) => ({ ...current, statuses }))} />
+              <CompactMultiSelectFilter label="Course Type" options={filterOptions.courseTypes} selected={projectsByYearFilters.courseTypes} onChange={(courseTypes) => setProjectsByYearFilters((current) => ({ ...current, courseTypes }))} />
+              <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTools} selected={projectsByYearFilters.authoringTools} onChange={(authoringTools) => setProjectsByYearFilters((current) => ({ ...current, authoringTools }))} />
+            </>
+          }
+        >
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={model.projectsByReportingYear}>
+              <BarChart data={projectsByYearModel.projectsByReportingYear}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
                 <YAxis allowDecimals={false} />
@@ -111,28 +208,45 @@ export default function Dashboard() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartPanel>
 
-        <ChartCard title="Active Projects by Status">
-          <div className="h-[320px]">
+        <ChartPanel
+          title="Active Projects by Status"
+          filters={
+            <>
+              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={activeStatusFilters.reportingYears} onChange={(reportingYears) => setActiveStatusFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter label="Owner" options={filterOptions.owners} selected={activeStatusFilters.owners} onChange={(owners) => setActiveStatusFilters((current) => ({ ...current, owners }))} />
+              <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTools} selected={activeStatusFilters.authoringTools} onChange={(authoringTools) => setActiveStatusFilters((current) => ({ ...current, authoringTools }))} />
+            </>
+          }
+        >
+          <div className="h-[340px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={model.activeProjectsByStatus} layout="vertical" margin={{ left: 24 }}>
+              <BarChart data={activeStatusModel.activeProjectsByStatus} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="status" width={180} />
+                <YAxis type="category" dataKey="status" width={220} />
                 <Tooltip />
                 <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartPanel>
 
-        <ChartCard title="Project Mix by Course Type">
+        <ChartPanel
+          title="Project Mix by Course Type"
+          filters={
+            <>
+              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={courseTypeFilters.reportingYears} onChange={(reportingYears) => setCourseTypeFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={courseTypeFilters.statuses} onChange={(statuses) => setCourseTypeFilters((current) => ({ ...current, statuses }))} />
+            </>
+          }
+        >
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={model.projectMixByCourseType} dataKey="value" nameKey="label" outerRadius={110} label>
-                  {model.projectMixByCourseType.map((entry, index) => (
+                <Pie data={courseTypeModel.projectMixByCourseType} dataKey="value" nameKey="label" outerRadius={120} label>
+                  {courseTypeModel.projectMixByCourseType.map((entry, index) => (
                     <Cell key={entry.label} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                   ))}
                 </Pie>
@@ -140,26 +254,44 @@ export default function Dashboard() {
               </PieChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartPanel>
 
-        <ChartCard title="Project Mix by Authoring Tool">
-          <div className="h-[320px]">
+        <ChartPanel
+          title="Project Mix by Authoring Tool"
+          filters={
+            <>
+              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={authoringToolFilters.reportingYears} onChange={(reportingYears) => setAuthoringToolFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={authoringToolFilters.statuses} onChange={(statuses) => setAuthoringToolFilters((current) => ({ ...current, statuses }))} />
+            </>
+          }
+        >
+          <div className="h-[340px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={model.projectMixByAuthoringTool} layout="vertical" margin={{ left: 24 }}>
+              <BarChart data={authoringToolModel.projectMixByAuthoringTool} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="label" width={140} />
+                <YAxis type="category" dataKey="label" width={180} />
                 <Tooltip />
                 <Bar dataKey="value" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartPanel>
 
-        <ChartCard title="Hours by Time-Log Phase">
+        <ChartPanel
+          title="Hours by Time-Log Phase"
+          info={PHASE_EXPLANATION_TOOLTIP}
+          filters={
+            <>
+              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={phaseFilters.reportingYears} onChange={(reportingYears) => setPhaseFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter label="Role Group" options={filterOptions.roleGroups} selected={phaseFilters.roleGroups} onChange={(roleGroups) => setPhaseFilters((current) => ({ ...current, roleGroups }))} />
+              <CompactMultiSelectFilter label="Work Scope" options={filterOptions.workScopes} selected={phaseFilters.workScopes} onChange={(workScopes) => setPhaseFilters((current) => ({ ...current, workScopes: workScopes as Array<"matched_project_work" | "standalone_work" | "non_project_work"> }))} />
+            </>
+          }
+        >
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={model.hoursByTimeLogPhase}>
+              <BarChart data={phaseModel.hoursByTimeLogPhase}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="phase" />
                 <YAxis />
@@ -168,12 +300,21 @@ export default function Dashboard() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartPanel>
 
-        <ChartCard title="Hours by Role Group">
+        <ChartPanel
+          title="Hours by Role Group"
+          filters={
+            <>
+              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={roleFilters.reportingYears} onChange={(reportingYears) => setRoleFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter label="Phase" options={filterOptions.phases} selected={roleFilters.phases} onChange={(phases) => setRoleFilters((current) => ({ ...current, phases }))} />
+              <CompactMultiSelectFilter label="Work Scope" options={filterOptions.workScopes} selected={roleFilters.workScopes} onChange={(workScopes) => setRoleFilters((current) => ({ ...current, workScopes: workScopes as Array<"matched_project_work" | "standalone_work" | "non_project_work"> }))} />
+            </>
+          }
+        >
           <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={model.hoursByRoleGroup}>
+              <BarChart data={roleModel.hoursByRoleGroup}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="roleGroup" />
                 <YAxis />
@@ -182,7 +323,7 @@ export default function Dashboard() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartPanel>
       </div>
     </div>
   );

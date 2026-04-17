@@ -15,6 +15,7 @@ export type SuggestionConfidence = "high" | "medium";
 export type RoleGroup = "ID" | "SME" | "Legal" | "Other/External";
 export type WorkEntityDecisionType = "project_match" | "standalone_course" | "non_project_work";
 export type AliasScope = "all" | "project" | "time_log" | "sme";
+export type SurveyDateSource = "Created" | "Survey Date" | null;
 
 export interface UploadHistoryRecord {
   id: string;
@@ -71,7 +72,7 @@ export interface RawTimeLogRow {
   raw_date: string;
   log_date: string | null;
   raw_time_spent: string;
-  minutes: number;
+  minutes: number | null;
   raw_user: string;
   parse_warnings: string[];
   created_at: string;
@@ -93,7 +94,13 @@ export interface RawSmeFeedbackRow {
   course_name_normalized: string;
   course_name_compact: string;
   reporting_year: string | null;
-  survey_date: string | null;
+  id_survey_raw_created: string;
+  id_survey_created_at: string | null;
+  id_survey_date: string | null;
+  id_survey_date_source: SurveyDateSource;
+  sme_survey_raw_date: string;
+  sme_survey_date: string | null;
+  sme_survey_date_source: SurveyDateSource;
   sme_raw: string;
   instructional_designer_raw: string;
   sme_email_raw: string;
@@ -299,7 +306,7 @@ export interface TimeLogRow {
   raw_date: string;
   log_date: string | null;
   raw_time_spent: string;
-  minutes: number;
+  minutes: number | null;
   raw_user: string;
   canonical_user_name: string;
   role_group: RoleGroup;
@@ -317,6 +324,8 @@ export interface SmeIdFeedbackRow {
   join_method: SmeJoinMethod;
   join_confidence: JoinConfidence;
   reporting_year: string | null;
+  id_survey_created_at: string | null;
+  id_survey_date: string | null;
   course_name_raw: string;
   course_key_raw: string;
   instructional_designer: string;
@@ -342,6 +351,7 @@ export interface SmeSmeFeedbackRow {
   join_method: SmeJoinMethod;
   join_confidence: JoinConfidence;
   reporting_year: string | null;
+  sme_survey_date: string | null;
   course_name_raw: string;
   course_key_raw: string;
   instructional_designer: string;
@@ -350,7 +360,6 @@ export interface SmeSmeFeedbackRow {
   internal: string;
   hours_worked: number | null;
   amount_billed: number | null;
-  survey_date: string | null;
   overall_experience_with_lexipol: number | null;
   clarity_of_goals_and_objectives: number | null;
   staff_responsiveness: number | null;

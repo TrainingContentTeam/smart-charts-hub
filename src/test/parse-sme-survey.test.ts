@@ -22,7 +22,7 @@ describe("parseSmeSurveyFile", () => {
         Year: "2026",
         "Hours Worked": "12.5",
         "Amount Billed": "$1,250.00",
-        "Survey Date": "3/1/2026",
+        "Survey Date": "3/1/26",
         SME: "Jane Doe",
         "SME Email": "JANE@example.com",
         Internal: "Yes",
@@ -50,7 +50,7 @@ describe("parseSmeSurveyFile", () => {
         "Realworld examples - ID": "Yes",
         "SME Promoter Score - ID": "9",
         "Additional Comments - ID": "Strong examples",
-        Created: "2026-03-02T15:30:00Z",
+        Created: "03/02/2026 15:30",
       },
     ]);
 
@@ -62,6 +62,9 @@ describe("parseSmeSurveyFile", () => {
     expect(row.hoursWorked).toBe(12.5);
     expect(row.amountBilled).toBe(1250);
     expect(row.effectiveHourlyRate).toBe(100);
+    expect(row.idSurveyCreatedAt).toBe("2026-03-02T15:30:00");
+    expect(row.idSurveyDate).toBe("2026-03-02");
+    expect(row.smeSurveyDate).toBe("2026-03-01");
     expect(row.surveyDate).toBe("2026-03-01");
     expect(row.smeEmail).toBe("jane@example.com");
     expect(row.internal).toBe("Yes");
@@ -73,7 +76,7 @@ describe("parseSmeSurveyFile", () => {
     expect(row.idRealworldExamplesIncluded).toBe(true);
     expect(row.idSmePromoterScore).toBe(9);
     expect(row.additionalCommentsId).toBe("Strong examples");
-    expect(row.sourceCreatedAt).toBe("2026-03-02T15:30:00.000Z");
+    expect(row.sourceCreatedAt).toBe("2026-03-02T15:30:00");
   });
 
   it("keeps invalid score shapes null while still parsing the row", async () => {
@@ -84,6 +87,8 @@ describe("parseSmeSurveyFile", () => {
         "Hours Worked": "",
         "Amount Billed": "",
         Internal: "Maybe",
+        "Survey Date": "bad date",
+        Created: "not a datetime",
         "Overall Experience with Lexipol": "Sometimes",
         "Overall Rating of SME Collaboration - ID": "8",
         "SME Promoter Score - ID": "11",
@@ -99,6 +104,8 @@ describe("parseSmeSurveyFile", () => {
     expect(row.idOverallCollaborationScore).toBeNull();
     expect(row.idSmePromoterScore).toBeNull();
     expect(row.idRealworldExamplesIncluded).toBeNull();
+    expect(row.idSurveyCreatedAt).toBeNull();
+    expect(row.smeSurveyDate).toBeNull();
     expect(row.hoursWorked).toBe(0);
     expect(row.amountBilled).toBe(0);
   });

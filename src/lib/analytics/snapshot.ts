@@ -677,7 +677,7 @@ export function buildAnalyticsSnapshot(bundle: AnalyticsPersistenceBundle): Anal
   timeLogRows.forEach((row) => {
     if (!row.matched_project_key) return;
     const existing = projectTimeLogSummary.get(row.matched_project_key) || { minutes: 0, latestDate: null };
-    existing.minutes += row.minutes;
+    existing.minutes += row.minutes ?? 0;
     if (row.log_date && (!existing.latestDate || row.log_date > existing.latestDate)) {
       existing.latestDate = row.log_date;
     }
@@ -718,6 +718,8 @@ export function buildAnalyticsSnapshot(bundle: AnalyticsPersistenceBundle): Anal
       join_method: join.joinMethod,
       join_confidence: join.joinConfidence,
       reporting_year: row.reporting_year,
+      id_survey_created_at: row.id_survey_created_at ?? null,
+      id_survey_date: row.id_survey_date ?? null,
       course_name_raw: row.course_name_raw,
       course_key_raw: row.course_key_raw,
       instructional_designer: instructionalDesigner,
@@ -743,6 +745,7 @@ export function buildAnalyticsSnapshot(bundle: AnalyticsPersistenceBundle): Anal
       join_method: join.joinMethod,
       join_confidence: join.joinConfidence,
       reporting_year: row.reporting_year,
+      sme_survey_date: row.sme_survey_date ?? null,
       course_name_raw: row.course_name_raw,
       course_key_raw: row.course_key_raw,
       instructional_designer: instructionalDesigner,
@@ -751,7 +754,6 @@ export function buildAnalyticsSnapshot(bundle: AnalyticsPersistenceBundle): Anal
       internal: normalizeTextPreserveMeaning(row.internal_raw),
       hours_worked: row.hours_worked,
       amount_billed: row.amount_billed,
-      survey_date: row.survey_date,
       overall_experience_with_lexipol: toLikert(getSurveyField(surveyObject, "Overall Experience with Lexipol")),
       clarity_of_goals_and_objectives: toLikert(getSurveyField(surveyObject, "Clarity of Goals and Objectives")),
       staff_responsiveness: toLikert(getSurveyField(surveyObject, "Staff Responsiveness")),

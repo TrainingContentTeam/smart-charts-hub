@@ -163,7 +163,7 @@ export default function UploadData() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["analytics_snapshot"] });
-      toast.success("Shared canonical import tables refreshed.");
+      toast.success("Shared import tables refreshed.");
     } catch (error: any) {
       toast.error(error.message || "Import failed.");
     } finally {
@@ -176,7 +176,7 @@ export default function UploadData() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Upload Data</h1>
         <p className="text-muted-foreground">
-          Upload raw source files into the canonical import tables. Matching and reconciliation now happen in the dedicated admin workspace.
+          Upload raw source files into the shared import tables. Matching and reconciliation now happen in the dedicated admin workspace.
         </p>
       </div>
 

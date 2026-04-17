@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { selectDevelopmentModel } from "@/lib/analytics/selectors";
 
@@ -34,7 +35,7 @@ export default function Development() {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
-          No canonical project data is available yet.
+          No project data is available yet.
         </CardContent>
       </Card>
     );
@@ -45,7 +46,7 @@ export default function Development() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Development</h1>
         <p className="text-muted-foreground">
-          Active project status comes from canonical project rows. Effort breakdown comes from matched time logs only.
+          Active project status comes from project records. Effort breakdown comes from matched time logs only.
         </p>
       </div>
 
@@ -123,7 +124,7 @@ export default function Development() {
         <ChartCard title="Active Project Count">
           <div className="space-y-2">
             <p className="text-5xl font-bold">{model.activeProjectCount}</p>
-            <p className="text-sm text-muted-foreground">Default view includes canonical projects not in Completed, Published, or Cancelled states.</p>
+            <p className="text-sm text-muted-foreground">Default view includes projects not in Completed, Published, or Cancelled states.</p>
           </div>
         </ChartCard>
       </div>
@@ -145,7 +146,11 @@ export default function Development() {
             <TableBody>
               {model.latestActivityRows.slice(0, 20).map((row) => (
                 <TableRow key={row.projectKey}>
-                  <TableCell>{row.courseName}</TableCell>
+                  <TableCell>
+                    <ProjectLink projectName={row.projectName} reportingYear={row.reportingYear}>
+                      {row.projectName}
+                    </ProjectLink>
+                  </TableCell>
                   <TableCell>{row.status}</TableCell>
                   <TableCell>{row.owner}</TableCell>
                   <TableCell>{row.latestTimeLogDate || "No matched logs"}</TableCell>

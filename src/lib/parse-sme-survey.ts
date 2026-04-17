@@ -1,5 +1,9 @@
 import * as XLSX from "xlsx";
-import { parseUploadDate } from "@/lib/analytics/parse-upload-date";
+import {
+  extractDateFromLocalDateTime,
+  parseApprovedUsLocalDateTime,
+  parseApprovedUsShortDate,
+} from "@/lib/analytics/field-parsers";
 
 export interface SmeCollaborationSurveyImport {
   courseKeyRaw: string;
@@ -8,6 +12,11 @@ export interface SmeCollaborationSurveyImport {
   hoursWorked: number;
   amountBilled: number;
   effectiveHourlyRate: number | null;
+  idSurveyRawCreated: string;
+  idSurveyCreatedAt: string | null;
+  idSurveyDate: string | null;
+  smeSurveyRawDate: string;
+  smeSurveyDate: string | null;
   surveyDate: string;
   sme: string;
   smeEmail: string;
@@ -42,6 +51,11 @@ export interface SmeCollaborationSurveyImport {
 
 function normalize(value: unknown): string {
   return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function rawText(value: unknown): string {
+  if (value == null) return "";
+  return String(value);
 }
 
 function normalizeKey(value: string): string {
@@ -111,35 +125,6 @@ function parseInternal(value: unknown): string | null {
   return null;
 }
 
-function toIsoDate(value: unknown): string {
-  return parseUploadDate(value) ?? "";
-}
-
-function toIsoDateTime(value: unknown): string {
-  // For timestamp-style fields, accept full ISO strings; otherwise fall back
-  // to date-only parsing via the strict shared helper.
-  if (typeof value === "string") {
-    const raw = value.trim();
-    if (/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(raw)) {
-      const parsed = new Date(raw);
-      if (!Number.isNaN(parsed.getTime())) {
-        const y = parsed.getUTCFullYear();
-        if (y >= 1900 && y <= 2100) return parsed.toISOString();
-      }
-      return "";
-    }
-  }
-
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const y = value.getUTCFullYear();
-    if (y >= 1900 && y <= 2100) return value.toISOString();
-    return "";
-  }
-
-  const iso = toIsoDate(value);
-  return iso ? `${iso}T00:00:00.000Z` : "";
-}
-
 function toYear(value: unknown): string {
   const raw = normalize(value);
   const match = raw.match(/(20\d{2}|\d{4})/);
@@ -148,9 +133,9 @@ function toYear(value: unknown): string {
 
 export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSurveyImport[]> {
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
+  const wb = XLSX.read(buf, { type: "array", raw: false, cellDates: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false, blankrows: false });
 
   const results: SmeCollaborationSurveyImport[] = [];
 
@@ -162,6 +147,10 @@ export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSu
     const reportingYear = toYear(getCell(row, lookup, "Year"));
     const hoursWorked = parseNumber(getCell(row, lookup, "Hours Worked")) ?? 0;
     const amountBilled = parseNumber(getCell(row, lookup, "Amount Billed")) ?? 0;
+    const idSurveyRawCreated = rawText(getCell(row, lookup, "Created"));
+    const idSurveyCreatedAt = parseApprovedUsLocalDateTime(idSurveyRawCreated);
+    const smeSurveyRawDate = rawText(getCell(row, lookup, "Survey Date"));
+    const smeSurveyDate = parseApprovedUsShortDate(smeSurveyRawDate);
 
     results.push({
       courseKeyRaw: normalize(getCell(row, lookup, "CourseKey")),
@@ -170,7 +159,12 @@ export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSu
       hoursWorked,
       amountBilled,
       effectiveHourlyRate: hoursWorked > 0 ? Math.round((amountBilled / hoursWorked) * 100) / 100 : null,
-      surveyDate: toIsoDate(getCell(row, lookup, "Survey Date")),
+      idSurveyRawCreated,
+      idSurveyCreatedAt,
+      idSurveyDate: extractDateFromLocalDateTime(idSurveyCreatedAt),
+      smeSurveyRawDate,
+      smeSurveyDate,
+      surveyDate: smeSurveyDate ?? "",
       sme: normalize(getCell(row, lookup, "SME")),
       smeEmail: normalize(getCell(row, lookup, "SME Email")).toLowerCase(),
       internal: parseInternal(getCell(row, lookup, "Internal")),
@@ -198,7 +192,7 @@ export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSu
       idRealworldExamplesIncluded: parseBooleanLike(getCell(row, lookup, "Realworld examples - ID")),
       idSmePromoterScore: parseBoundedInteger(getCell(row, lookup, "SME Promoter Score - ID"), 1, 10),
       additionalCommentsId: String(getCell(row, lookup, "Additional Comments - ID") || "").trim(),
-      sourceCreatedAt: toIsoDateTime(getCell(row, lookup, "Created")),
+      sourceCreatedAt: idSurveyCreatedAt ?? "",
       sourceRow: row,
     });
   }

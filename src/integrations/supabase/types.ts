@@ -235,6 +235,10 @@ export type Database = {
           created_at: string
           hours_worked: number | null
           id: string
+          id_survey_created_at: string | null
+          id_survey_date: string | null
+          id_survey_date_source: string | null
+          id_survey_raw_created: string | null
           instructional_designer_raw: string
           internal_raw: string
           parse_warnings: Json
@@ -243,6 +247,9 @@ export type Database = {
           row_number: number
           sme_email_raw: string
           sme_raw: string
+          sme_survey_date: string | null
+          sme_survey_date_source: string | null
+          sme_survey_raw_date: string | null
           source_file_name: string | null
           survey_date: string | null
           upload_id: string | null
@@ -259,6 +266,10 @@ export type Database = {
           created_at?: string
           hours_worked?: number | null
           id?: string
+          id_survey_created_at?: string | null
+          id_survey_date?: string | null
+          id_survey_date_source?: string | null
+          id_survey_raw_created?: string | null
           instructional_designer_raw?: string
           internal_raw?: string
           parse_warnings?: Json
@@ -267,6 +278,9 @@ export type Database = {
           row_number: number
           sme_email_raw?: string
           sme_raw?: string
+          sme_survey_date?: string | null
+          sme_survey_date_source?: string | null
+          sme_survey_raw_date?: string | null
           source_file_name?: string | null
           survey_date?: string | null
           upload_id?: string | null
@@ -283,6 +297,10 @@ export type Database = {
           created_at?: string
           hours_worked?: number | null
           id?: string
+          id_survey_created_at?: string | null
+          id_survey_date?: string | null
+          id_survey_date_source?: string | null
+          id_survey_raw_created?: string | null
           instructional_designer_raw?: string
           internal_raw?: string
           parse_warnings?: Json
@@ -291,6 +309,9 @@ export type Database = {
           row_number?: number
           sme_email_raw?: string
           sme_raw?: string
+          sme_survey_date?: string | null
+          sme_survey_date_source?: string | null
+          sme_survey_raw_date?: string | null
           source_file_name?: string | null
           survey_date?: string | null
           upload_id?: string | null
@@ -312,7 +333,7 @@ export type Database = {
           created_at: string
           id: string
           log_date: string | null
-          minutes: number
+          minutes: number | null
           normalized_course_name: string
           parse_warnings: Json
           raw_category: string
@@ -331,7 +352,7 @@ export type Database = {
           created_at?: string
           id?: string
           log_date?: string | null
-          minutes?: number
+          minutes?: number | null
           normalized_course_name?: string
           parse_warnings?: Json
           raw_category?: string
@@ -350,7 +371,7 @@ export type Database = {
           created_at?: string
           id?: string
           log_date?: string | null
-          minutes?: number
+          minutes?: number | null
           normalized_course_name?: string
           parse_warnings?: Json
           raw_category?: string

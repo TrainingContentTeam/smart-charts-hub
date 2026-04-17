@@ -51,7 +51,7 @@ function project(id: string, status: string, minutes: number, year = "2026"): Ra
   };
 }
 
-function timeLog(id: string, courseName: string, category: string, minutes: number, date = "2026-04-10"): RawTimeLogRow {
+function timeLog(id: string, courseName: string, category: string, minutes: number | null, date = "2026-04-10"): RawTimeLogRow {
   return {
     id,
     upload_id: null,
@@ -113,5 +113,21 @@ describe("analytics selectors", () => {
     expect(model.activeProjectsByStatus).toEqual([{ status: "LP Development", count: 1 }]);
     expect(model.developmentHoursByPhase).toEqual([{ phase: "Planning", hours: 1.5 }]);
     expect(model.latestActivityRows[0].courseName).toBe("Project A");
+  });
+
+  it("treats null parsed time-log durations as zero in rollups instead of producing NaN", () => {
+    const snapshot = buildAnalyticsSnapshot(bundleWithRows({
+      projects: [project("A", "LP Development", 180)],
+      timeLogs: [
+        timeLog("1", "Project A", "LP Development LC", 90),
+        timeLog("2", "Project A", "LP Development LC", null as number | null),
+      ],
+    }));
+
+    const dashboard = selectDashboardModel(snapshot);
+    const development = selectDevelopmentModel(snapshot);
+
+    expect(dashboard.cards.totalLoggedHours).toBe(1.5);
+    expect(development.developmentHoursByPhase).toEqual([{ phase: "Planning", hours: 1.5 }]);
   });
 });
