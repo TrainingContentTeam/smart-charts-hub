@@ -922,14 +922,14 @@ export function selectProjectDetailModel(snapshot: AnalyticsSnapshot, projectKey
       designerComments: idFeedback
         .filter((row) => row.additional_comments)
         .map((row) => ({
-          date: row.id_survey_date,
+          date: row.survey_date,
           author: row.instructional_designer || "Unknown ID",
           comment: row.additional_comments,
         })),
       smeResponses: smeFeedback
         .filter((row) => row.additional_feedback_or_suggestions)
         .map((row) => ({
-          date: row.sme_survey_date,
+          date: row.survey_date,
           author: row.sme || "Unknown SME",
           comment: row.additional_feedback_or_suggestions,
         })),
@@ -1157,7 +1157,7 @@ export function selectPersonDetailModel(snapshot: AnalyticsSnapshot, canonicalNa
         projectName: row.matched_project_key ? projectMap.get(row.matched_project_key)?.raw_course_name || row.course_name_raw : row.course_name_raw,
         reportingYear: row.reporting_year || "Unknown",
         sme: row.sme,
-        surveyDate: row.sme_survey_date,
+        surveyDate: row.survey_date,
         averageScore: round(
           average(
             [
@@ -1224,7 +1224,7 @@ export function selectPersonDetailModel(snapshot: AnalyticsSnapshot, canonicalNa
         projectName: row.matched_project_key ? projectMap.get(row.matched_project_key)?.raw_course_name || row.course_name_raw : row.course_name_raw,
         reportingYear: row.reporting_year || "Unknown",
         instructionalDesigner: row.instructional_designer,
-        surveyDate: row.sme_survey_date,
+        surveyDate: row.survey_date,
         internal: getSmeInternalLabel(row.internal),
         hoursWorked: row.hours_worked,
         amountBilled: row.amount_billed,
@@ -1236,7 +1236,7 @@ export function selectPersonDetailModel(snapshot: AnalyticsSnapshot, canonicalNa
         projectName: row.matched_project_key ? projectMap.get(row.matched_project_key)?.raw_course_name || row.course_name_raw : row.course_name_raw,
         reportingYear: row.reporting_year || "Unknown",
         instructionalDesigner: row.instructional_designer,
-        surveyDate: row.id_survey_date,
+        surveyDate: row.survey_date,
         overallRating: row.overall_collaboration_rating,
         promoterScore: row.promoter_score,
         comment: row.additional_comments,

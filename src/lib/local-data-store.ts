@@ -29,27 +29,23 @@ function emptyStore(): LocalStore {
   };
 }
 
-function migrateLegacySmeRow(row: Record<string, unknown>) {
-  const legacySurveyDate = typeof row.survey_date === "string" ? row.survey_date : null;
+function migrateLegacySmeRow(row: Record<string, unknown>): Record<string, unknown> {
+  const legacy = (row.id_survey_date ?? row.sme_survey_date ?? row.survey_date) as unknown;
+  const surveyDate = typeof legacy === "string" ? legacy : null;
 
-  return {
-    ...row,
-    id_survey_raw_created: typeof row.id_survey_raw_created === "string" ? row.id_survey_raw_created : "",
-    id_survey_created_at: typeof row.id_survey_created_at === "string" ? row.id_survey_created_at : null,
-    id_survey_date: typeof row.id_survey_date === "string" ? row.id_survey_date : null,
-    id_survey_date_source: typeof row.id_survey_date_source === "string" ? row.id_survey_date_source : null,
-    sme_survey_raw_date: typeof row.sme_survey_raw_date === "string"
-      ? row.sme_survey_raw_date
-      : legacySurveyDate ?? "",
-    sme_survey_date: typeof row.sme_survey_date === "string"
-      ? row.sme_survey_date
-      : legacySurveyDate,
-    sme_survey_date_source: typeof row.sme_survey_date_source === "string"
-      ? row.sme_survey_date_source
-      : legacySurveyDate
-        ? "Survey Date"
-        : null,
-  };
+  // Strip removed legacy keys; collapse to a single survey_date.
+  const {
+    id_survey_raw_created: _r,
+    id_survey_created_at: _c,
+    id_survey_date: _idd,
+    id_survey_date_source: _ids,
+    sme_survey_raw_date: _srd,
+    sme_survey_date: _smd,
+    sme_survey_date_source: _sds,
+    ...rest
+  } = row as Record<string, unknown>;
+
+  return { ...rest, survey_date: surveyDate };
 }
 
 function sanitizeStore(parsed: Partial<LocalStore> | null | undefined): LocalStore {
@@ -58,7 +54,9 @@ function sanitizeStore(parsed: Partial<LocalStore> | null | undefined): LocalSto
     rawProjectImportRows: Array.isArray(parsed?.rawProjectImportRows) ? parsed.rawProjectImportRows : [],
     rawTimeLogRows: Array.isArray(parsed?.rawTimeLogRows) ? parsed.rawTimeLogRows : [],
     rawSmeFeedbackRows: Array.isArray(parsed?.rawSmeFeedbackRows)
-      ? parsed.rawSmeFeedbackRows.map((row) => migrateLegacySmeRow(row as Record<string, unknown>))
+      ? (parsed.rawSmeFeedbackRows.map((row) =>
+          migrateLegacySmeRow(row as unknown as Record<string, unknown>),
+        ) as unknown as LocalStore["rawSmeFeedbackRows"])
       : [],
     courseAliasConfig: Array.isArray(parsed?.courseAliasConfig) ? parsed.courseAliasConfig : [],
     personAliasConfig: Array.isArray(parsed?.personAliasConfig) ? parsed.personAliasConfig : [],

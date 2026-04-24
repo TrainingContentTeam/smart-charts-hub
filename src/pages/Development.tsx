@@ -52,7 +52,7 @@ export default function Development() {
   const [activityStatuses, setActivityStatuses] = useState<string[]>([]);
   const [activityOwners, setActivityOwners] = useState<string[]>([]);
 
-  const { sort, toggleSort } = useTableSort({
+  const { sort, toggleSort } = useTableSort<"projectName" | "status" | "owner" | "latestTimeLogDate">({
     key: "latestTimeLogDate",
     direction: "desc",
   });

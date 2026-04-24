@@ -1,9 +1,5 @@
 import * as XLSX from "xlsx";
-import {
-  extractDateFromLocalDateTime,
-  parseApprovedUsLocalDateTime,
-  parseApprovedUsShortDate,
-} from "@/lib/analytics/field-parsers";
+import { parseApprovedUsShortDate } from "@/lib/analytics/field-parsers";
 
 export interface SmeCollaborationSurveyImport {
   courseKeyRaw: string;
@@ -12,12 +8,8 @@ export interface SmeCollaborationSurveyImport {
   hoursWorked: number;
   amountBilled: number;
   effectiveHourlyRate: number | null;
-  idSurveyRawCreated: string;
-  idSurveyCreatedAt: string | null;
-  idSurveyDate: string | null;
-  smeSurveyRawDate: string;
-  smeSurveyDate: string | null;
-  surveyDate: string;
+  surveyDateRaw: string;
+  surveyDate: string | null;
   sme: string;
   smeEmail: string;
   internal: string | null;
@@ -45,7 +37,6 @@ export interface SmeCollaborationSurveyImport {
   idRealworldExamplesIncluded: boolean | null;
   idSmePromoterScore: number | null;
   additionalCommentsId: string;
-  sourceCreatedAt: string;
   sourceRow: Record<string, unknown>;
 }
 
@@ -147,10 +138,8 @@ export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSu
     const reportingYear = toYear(getCell(row, lookup, "Year"));
     const hoursWorked = parseNumber(getCell(row, lookup, "Hours Worked")) ?? 0;
     const amountBilled = parseNumber(getCell(row, lookup, "Amount Billed")) ?? 0;
-    const idSurveyRawCreated = rawText(getCell(row, lookup, "Created"));
-    const idSurveyCreatedAt = parseApprovedUsLocalDateTime(idSurveyRawCreated);
-    const smeSurveyRawDate = rawText(getCell(row, lookup, "Survey Date"));
-    const smeSurveyDate = parseApprovedUsShortDate(smeSurveyRawDate);
+    const surveyDateRaw = rawText(getCell(row, lookup, "Survey Date"));
+    const surveyDate = parseApprovedUsShortDate(surveyDateRaw);
 
     results.push({
       courseKeyRaw: normalize(getCell(row, lookup, "CourseKey")),
@@ -159,12 +148,8 @@ export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSu
       hoursWorked,
       amountBilled,
       effectiveHourlyRate: hoursWorked > 0 ? Math.round((amountBilled / hoursWorked) * 100) / 100 : null,
-      idSurveyRawCreated,
-      idSurveyCreatedAt,
-      idSurveyDate: extractDateFromLocalDateTime(idSurveyCreatedAt),
-      smeSurveyRawDate,
-      smeSurveyDate,
-      surveyDate: smeSurveyDate ?? "",
+      surveyDateRaw,
+      surveyDate,
       sme: normalize(getCell(row, lookup, "SME")),
       smeEmail: normalize(getCell(row, lookup, "SME Email")).toLowerCase(),
       internal: parseInternal(getCell(row, lookup, "Internal")),
@@ -192,7 +177,6 @@ export async function parseSmeSurveyFile(file: File): Promise<SmeCollaborationSu
       idRealworldExamplesIncluded: parseBooleanLike(getCell(row, lookup, "Realworld examples - ID")),
       idSmePromoterScore: parseBoundedInteger(getCell(row, lookup, "SME Promoter Score - ID"), 1, 10),
       additionalCommentsId: String(getCell(row, lookup, "Additional Comments - ID") || "").trim(),
-      sourceCreatedAt: idSurveyCreatedAt ?? "",
       sourceRow: row,
     });
   }
