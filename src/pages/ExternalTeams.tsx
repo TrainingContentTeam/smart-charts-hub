@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChartPanel } from "@/components/ChartPanel";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
+import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { EXTERNAL_WORK_CLASSIFICATION_LABELS } from "@/lib/analytics/labels";
 import { selectExternalTeamsModel } from "@/lib/analytics/selectors";
@@ -12,6 +13,42 @@ function toOptions(values: string[]): CompactFilterOption[] {
   return [...new Set(values.filter(Boolean))]
     .sort((a, b) => a.localeCompare(b))
     .map((value) => ({ label: value, value }));
+}
+
+type ExternalTeamProjectGroup = ReturnType<typeof selectExternalTeamsModel>["activeExternalTeamProjects"];
+
+function ActiveExternalProjectsCard({
+  title,
+  projects,
+}: {
+  title: string;
+  projects: ExternalTeamProjectGroup[keyof ExternalTeamProjectGroup];
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {projects.length ? (
+          <div className="space-y-3">
+            {projects.map((project) => (
+              <div key={project.projectKey} className="space-y-1 border-b pb-3 last:border-b-0 last:pb-0">
+                <ProjectLink projectName={project.projectName} reportingYear={project.reportingYear}>
+                  {project.projectName}
+                </ProjectLink>
+                <p className="text-xs text-muted-foreground">
+                  {project.status} / {project.reportingYear}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No active projects</p>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function ExternalTeams() {
@@ -77,6 +114,12 @@ export default function ExternalTeams() {
         <p className="text-muted-foreground">
           External work is grouped from time logs and work-entity classification so legal, other external, standalone course work, and non-project work can be compared clearly.
         </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <ActiveExternalProjectsCard title="Legal" projects={model.activeExternalTeamProjects.legal} />
+        <ActiveExternalProjectsCard title="CQO" projects={model.activeExternalTeamProjects.cqo} />
+        <ActiveExternalProjectsCard title="Compliance (Policy)" projects={model.activeExternalTeamProjects.compliance} />
       </div>
 
       <Card>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -34,6 +35,13 @@ function toOptions(values: string[]): CompactFilterOption[] {
   return uniqueSorted(values).map((value) => ({ label: value, value }));
 }
 
+type ProjectFilterParams = Record<string, string | string[] | undefined>;
+
+function getPayloadValue(payload: unknown, key: string) {
+  const value = (payload as Record<string, unknown> | null)?.[key];
+  return value === undefined || value === null ? "" : String(value);
+}
+
 function MetricCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <Card>
@@ -51,6 +59,7 @@ function MetricCard({ label, value, hint }: { label: string; value: string | num
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const model = useMemo(() => (snapshot ? selectDashboardModel(snapshot) : null), [snapshot]);
 
@@ -107,6 +116,16 @@ export default function Dashboard() {
     () => (snapshot ? selectDashboardModel(snapshot, { hoursByRoleGroup: roleFilters }) : null),
     [roleFilters, snapshot],
   );
+
+  const navigateToProjects = (params: ProjectFilterParams) => {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      const values = Array.isArray(value) ? value : [value];
+      values.filter(Boolean).forEach((entry) => searchParams.append(key, entry));
+    });
+    const search = searchParams.toString();
+    navigate(search ? `/projects?${search}` : "/projects");
+  };
 
   const filterOptions = useMemo(() => {
     if (!snapshot) {
@@ -172,20 +191,6 @@ export default function Dashboard() {
         />
       </div>
 
-      <ChartPanel title="Project Hours vs Logged Hours">
-        <div className="h-[320px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={model.hoursComparison}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" interval={0} angle={-10} textAnchor="end" height={72} />
-              <YAxis />
-              <Tooltip formatter={(value, _name, item) => [`${value} hours`, item.payload.description]} />
-              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </ChartPanel>
-
       <div className="space-y-4">
         <ChartPanel
           title="Projects by Reporting Year"
@@ -204,7 +209,18 @@ export default function Dashboard() {
                 <XAxis dataKey="year" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="count"
+                  fill="hsl(var(--chart-1))"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    year: getPayloadValue(payload, "year"),
+                    status: projectsByYearFilters.statuses,
+                    type: projectsByYearFilters.courseTypes,
+                    tool: projectsByYearFilters.authoringTools,
+                  })}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -227,34 +243,87 @@ export default function Dashboard() {
                 <XAxis type="number" allowDecimals={false} />
                 <YAxis type="category" dataKey="status" width={220} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} />
+                <Bar
+                  dataKey="count"
+                  fill="hsl(var(--chart-2))"
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    active: "yes",
+                    status: getPayloadValue(payload, "status"),
+                    year: activeStatusFilters.reportingYears,
+                    owner: activeStatusFilters.owners,
+                    tool: activeStatusFilters.authoringTools,
+                  })}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </ChartPanel>
 
-        <ChartPanel
-          title="Project Mix by Course Type"
-          filters={
-            <>
-              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={courseTypeFilters.reportingYears} onChange={(reportingYears) => setCourseTypeFilters((current) => ({ ...current, reportingYears }))} />
-              <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={courseTypeFilters.statuses} onChange={(statuses) => setCourseTypeFilters((current) => ({ ...current, statuses }))} />
-            </>
-          }
-        >
-          <div className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={courseTypeModel.projectMixByCourseType} dataKey="value" nameKey="label" outerRadius={120} label>
-                  {courseTypeModel.projectMixByCourseType.map((entry, index) => (
-                    <Cell key={entry.label} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartPanel>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <ChartPanel
+            title="Project Mix by Course Type"
+            filters={
+              <>
+                <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={courseTypeFilters.reportingYears} onChange={(reportingYears) => setCourseTypeFilters((current) => ({ ...current, reportingYears }))} />
+                <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={courseTypeFilters.statuses} onChange={(statuses) => setCourseTypeFilters((current) => ({ ...current, statuses }))} />
+              </>
+            }
+          >
+            <div className="h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={courseTypeModel.projectMixByCourseType}
+                    dataKey="value"
+                    nameKey="label"
+                    outerRadius={120}
+                    label
+                    cursor="pointer"
+                    onClick={(payload: unknown) => navigateToProjects({
+                      type: getPayloadValue(payload, "label"),
+                      year: courseTypeFilters.reportingYears,
+                      status: courseTypeFilters.statuses,
+                    })}
+                  >
+                    {courseTypeModel.projectMixByCourseType.map((entry, index) => (
+                      <Cell key={entry.label} fill={PIE_COLORS[index % PIE_COLORS.length]} style={{ cursor: "pointer" }} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </ChartPanel>
+
+          <ChartPanel title="Active Project Status Mix">
+            <div className="h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={model.activeProjectStatusMix}
+                    dataKey="value"
+                    nameKey="label"
+                    innerRadius={68}
+                    outerRadius={120}
+                    label
+                    cursor="pointer"
+                    onClick={(payload: unknown) => navigateToProjects({
+                      active: "yes",
+                      status: getPayloadValue(payload, "label"),
+                    })}
+                  >
+                    {model.activeProjectStatusMix.map((entry, index) => (
+                      <Cell key={entry.label} fill={PIE_COLORS[index % PIE_COLORS.length]} style={{ cursor: "pointer" }} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </ChartPanel>
+        </div>
 
         <ChartPanel
           title="Project Mix by Authoring Tool"
@@ -272,7 +341,17 @@ export default function Dashboard() {
                 <XAxis type="number" allowDecimals={false} />
                 <YAxis type="category" dataKey="label" width={180} />
                 <Tooltip />
-                <Bar dataKey="value" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
+                <Bar
+                  dataKey="value"
+                  fill="hsl(var(--chart-3))"
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    tool: getPayloadValue(payload, "label"),
+                    year: authoringToolFilters.reportingYears,
+                    status: authoringToolFilters.statuses,
+                  })}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -296,7 +375,17 @@ export default function Dashboard() {
                 <XAxis dataKey="phase" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="hours" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="hours"
+                  fill="hsl(var(--chart-4))"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    timePhase: getPayloadValue(payload, "phase"),
+                    year: phaseFilters.reportingYears,
+                    timeRole: phaseFilters.roleGroups,
+                  })}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -319,7 +408,17 @@ export default function Dashboard() {
                 <XAxis dataKey="roleGroup" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="hours" fill="hsl(var(--chart-5))" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="hours"
+                  fill="hsl(var(--chart-5))"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    timeRole: getPayloadValue(payload, "roleGroup"),
+                    year: roleFilters.reportingYears,
+                    timePhase: roleFilters.phases,
+                  })}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>

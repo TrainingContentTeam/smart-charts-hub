@@ -6,7 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import Dashboard from "@/pages/Dashboard";
 import Development from "@/pages/Development";
+import ExternalTeams from "@/pages/ExternalTeams";
 import PersonDetail from "@/pages/PersonDetail";
 import ProjectDetail from "@/pages/ProjectDetail";
 import Projects from "@/pages/Projects";
@@ -15,17 +17,52 @@ import SmeCollaboration from "@/pages/SmeCollaboration";
 import { createUiSnapshot } from "@/test/fixtures/analytics-ui-fixture";
 
 vi.mock("recharts", async () => {
-  const MockContainer = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  const React = await import("react");
+  const MockContainer = ({ children, data }: { children?: ReactNode; data?: Array<Record<string, unknown>> }) => (
+    <div>
+      {React.Children.map(children, (child) =>
+        React.isValidElement(child)
+          ? React.cloneElement(child as React.ReactElement<Record<string, unknown>>, { __chartData: data })
+          : child,
+      )}
+    </div>
+  );
   const MockLeaf = () => null;
+  const labelFor = (entry: Record<string, unknown>) =>
+    String(entry.status || entry.year || entry.label || entry.phase || entry.roleGroup || entry.owner || entry.user || "unknown");
+  const MockBar = ({ __chartData, onClick }: { __chartData?: Array<Record<string, unknown>>; onClick?: (entry: Record<string, unknown>) => void }) => (
+    <div>
+      {(__chartData || []).map((entry, index) => (
+        <button
+          key={`${labelFor(entry)}-${index}`}
+          type="button"
+          aria-label={`chart-bar-${labelFor(entry)}`}
+          onClick={() => onClick?.(entry)}
+        />
+      ))}
+    </div>
+  );
+  const MockPie = ({ data, onClick }: { data?: Array<Record<string, unknown>>; onClick?: (entry: Record<string, unknown>) => void }) => (
+    <div>
+      {(data || []).map((entry, index) => (
+        <button
+          key={`${labelFor(entry)}-${index}`}
+          type="button"
+          aria-label={`chart-slice-${labelFor(entry)}`}
+          onClick={() => onClick?.(entry)}
+        />
+      ))}
+    </div>
+  );
 
   return {
     ResponsiveContainer: MockContainer,
     BarChart: MockContainer,
     PieChart: MockContainer,
     LineChart: MockContainer,
-    Bar: MockLeaf,
+    Bar: MockBar,
     Line: MockLeaf,
-    Pie: MockLeaf,
+    Pie: MockPie,
     Cell: MockLeaf,
     CartesianGrid: MockLeaf,
     Tooltip: MockLeaf,
@@ -127,6 +164,96 @@ afterEach(() => {
 });
 
 describe("analytics UI pages", () => {
+  it("renders the active project status mix donut on the dashboard", () => {
+    renderWithRouter(
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+      </Routes>,
+      ["/"],
+    );
+
+    expect(screen.getByText("Project Mix by Course Type")).toBeInTheDocument();
+    expect(screen.getByText("Active Project Status Mix")).toBeInTheDocument();
+  });
+
+  it("removes the dashboard hours comparison chart and links active status bars to Projects", () => {
+    renderWithRouter(
+      <Routes>
+        <Route path="/" element={<><Dashboard /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/"],
+    );
+
+    expect(screen.queryByText("Project Hours vs Logged Hours")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-LP Development" }));
+
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?active=yes&status=LP+Development");
+  });
+
+  it("links project mix and reporting year chart elements to Projects filters", () => {
+    const { unmount: unmountYear } = renderWithRouter(
+      <Routes>
+        <Route path="/" element={<><Dashboard /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-2026" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?year=2026");
+    unmountYear();
+
+    const { unmount: unmountType } = renderWithRouter(
+      <Routes>
+        <Route path="/" element={<><Dashboard /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-slice-New" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?type=New");
+    unmountType();
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/" element={<><Dashboard /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-Rise" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?tool=Rise");
+  });
+
+  it("links time-log chart bars to matched-project filters", () => {
+    const { unmount: unmountPhase } = renderWithRouter(
+      <Routes>
+        <Route path="/" element={<><Dashboard /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-Planning" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?timePhase=Planning");
+    unmountPhase();
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/" element={<><Dashboard /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-ID" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?timeRole=ID");
+  });
+
   it("syncs Projects search state to the URL", () => {
     renderWithRouter(
       <Routes>
@@ -141,6 +268,102 @@ describe("analytics UI pages", () => {
     );
 
     expect(screen.getByTestId("location-display").textContent).toContain("/projects?q=Alpha");
+  });
+
+  it("filters Projects by active state and matched time-log metadata from URL params", () => {
+    const { unmount: unmountActive } = renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?active=yes"],
+    );
+
+    expect(screen.getByRole("link", { name: "Alpha Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Beta Project" })).not.toBeInTheDocument();
+    unmountActive();
+
+    const { unmount: unmountPhase } = renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?timePhase=Production"],
+    );
+
+    expect(screen.getByRole("link", { name: "Beta Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Alpha Project" })).not.toBeInTheDocument();
+    unmountPhase();
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?timeRole=ID"],
+    );
+
+    expect(screen.getByRole("link", { name: "Alpha Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Beta Project" })).not.toBeInTheDocument();
+  });
+
+  it("renders active external-team project cards on Other External Teams", () => {
+    const snapshot = createUiSnapshot();
+    const base = snapshot.canonicalProjects[0];
+    snapshot.canonicalProjects = [
+      {
+        ...base,
+        project_key: "legal-project|2026",
+        raw_course_name: "Legal Project",
+        normalized_course_name: "Legal Project",
+        compact_course_name: "legalproject",
+        status: "Process Legal Review",
+        raw_status: "Process Legal Review",
+      },
+      {
+        ...base,
+        project_key: "cqo-project|2026",
+        raw_course_name: "CQO Project",
+        normalized_course_name: "CQO Project",
+        compact_course_name: "cqoproject",
+        status: "CQO Review",
+        raw_status: "CQO Review",
+      },
+      {
+        ...base,
+        project_key: "compliance-project|2026",
+        raw_course_name: "Compliance Project",
+        normalized_course_name: "Compliance Project",
+        compact_course_name: "complianceproject",
+        status: "Compliance Review",
+        raw_status: "Compliance Review",
+      },
+      {
+        ...base,
+        project_key: "published-legal-project|2026",
+        raw_course_name: "Published Legal Project",
+        normalized_course_name: "Published Legal Project",
+        compact_course_name: "publishedlegalproject",
+        status: "Published",
+        raw_status: "Published",
+      },
+    ];
+    mockedUseAnalyticsSnapshot.mockReturnValue({
+      data: snapshot,
+      isLoading: false,
+    } as ReturnType<typeof useAnalyticsSnapshot>);
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/external-teams" element={<ExternalTeams />} />
+      </Routes>,
+      ["/external-teams"],
+    );
+
+    expect(screen.getByText("Legal")).toBeInTheDocument();
+    expect(screen.getByText("CQO")).toBeInTheDocument();
+    expect(screen.getByText("Compliance (Policy)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Legal Project" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "CQO Project" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Compliance Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Published Legal Project" })).not.toBeInTheDocument();
   });
 
   it("navigates from the project list to detail and back while preserving list state", () => {

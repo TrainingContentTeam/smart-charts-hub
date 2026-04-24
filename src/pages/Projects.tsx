@@ -38,6 +38,9 @@ export default function Projects() {
   const verticals = searchParams.getAll("vertical");
   const courseTypes = searchParams.getAll("type");
   const authoringTools = searchParams.getAll("tool");
+  const activeFilters = searchParams.getAll("active");
+  const timePhases = searchParams.getAll("timePhase");
+  const timeRoles = searchParams.getAll("timeRole");
   const discrepancyFilters = searchParams.getAll("discrepancy");
   const hasTimeLogFilters = searchParams.getAll("timeLogs");
   const hasSmeFilters = searchParams.getAll("smeFeedback");
@@ -68,6 +71,8 @@ export default function Projects() {
     vertical: toOptions(rows.flatMap((row) => row.verticals.length ? row.verticals : [row.primaryVertical])),
     courseType: toOptions(rows.map((row) => row.courseType)),
     authoringTool: toOptions(rows.map((row) => row.authoringTool)),
+    timePhase: toOptions(rows.flatMap((row) => row.timeLogPhases)),
+    timeRole: toOptions(rows.flatMap((row) => row.timeLogRoleGroups)),
     yesNo: [
       { label: "Yes", value: "yes" },
       { label: "No", value: "no" },
@@ -100,6 +105,9 @@ export default function Projects() {
       if (verticals.length && !row.verticals.some((vertical) => verticals.includes(vertical))) return false;
       if (courseTypes.length && !courseTypes.includes(row.courseType)) return false;
       if (authoringTools.length && !authoringTools.includes(row.authoringTool)) return false;
+      if (!matchesBooleanFilter(activeFilters, row.isActive)) return false;
+      if (timePhases.length && !row.timeLogPhases.some((phase) => timePhases.includes(phase))) return false;
+      if (timeRoles.length && !row.timeLogRoleGroups.some((role) => timeRoles.includes(role))) return false;
       if (!matchesBooleanFilter(discrepancyFilters, row.hoursDiscrepancyFlag)) return false;
       if (!matchesBooleanFilter(hasTimeLogFilters, row.hasTimeLogs)) return false;
       if (!matchesBooleanFilter(hasSmeFilters, row.hasSmeFeedback)) return false;
@@ -108,6 +116,7 @@ export default function Projects() {
   }, [
     authoringTools,
     courseTypes,
+    activeFilters,
     discrepancyFilters,
     hasSmeFilters,
     hasTimeLogFilters,
@@ -118,6 +127,8 @@ export default function Projects() {
     search,
     smes,
     statuses,
+    timePhases,
+    timeRoles,
     verticals,
   ]);
 
@@ -153,6 +164,9 @@ export default function Projects() {
             <CompactMultiSelectFilter label="Vertical" options={filterOptions.vertical} selected={verticals} onChange={(values) => setMultiParam("vertical", values)} />
             <CompactMultiSelectFilter label="Course Type" options={filterOptions.courseType} selected={courseTypes} onChange={(values) => setMultiParam("type", values)} />
             <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTool} selected={authoringTools} onChange={(values) => setMultiParam("tool", values)} />
+            <CompactMultiSelectFilter label="Active" options={filterOptions.yesNo} selected={activeFilters} onChange={(values) => setMultiParam("active", values)} />
+            <CompactMultiSelectFilter label="Time Log Phase" options={filterOptions.timePhase} selected={timePhases} onChange={(values) => setMultiParam("timePhase", values)} />
+            <CompactMultiSelectFilter label="Time Log Role Group" options={filterOptions.timeRole} selected={timeRoles} onChange={(values) => setMultiParam("timeRole", values)} />
             <CompactMultiSelectFilter label="Discrepancy" options={filterOptions.yesNo} selected={discrepancyFilters} onChange={(values) => setMultiParam("discrepancy", values)} />
             <CompactMultiSelectFilter label="Has Time Logs" options={filterOptions.yesNo} selected={hasTimeLogFilters} onChange={(values) => setMultiParam("timeLogs", values)} />
             <CompactMultiSelectFilter label="Has SME Feedback" options={filterOptions.yesNo} selected={hasSmeFilters} onChange={(values) => setMultiParam("smeFeedback", values)} />

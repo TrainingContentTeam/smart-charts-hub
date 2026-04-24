@@ -383,6 +383,8 @@ export function selectDashboardModel(snapshot: AnalyticsSnapshot, filters: Dashb
       .sort((a, b) => compareYearLabel(a.year, b.year)),
     activeProjectsByStatus: buildCountSeries(activeProjectsByStatusSource.map((project) => project.status))
       .map(([status, count]) => ({ status, count })),
+    activeProjectStatusMix: buildCountSeries(activeProjects.map((project) => project.status))
+      .map(([label, value]) => ({ label, value })),
     projectMixByCourseType: buildCountSeries(
       projectMixByCourseTypeSource.map((project) => labelOrUnknown(project.course_type)),
     ).map(([label, value]) => ({ label, value })),
@@ -724,6 +726,20 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
 export function selectExternalTeamsModel(snapshot: AnalyticsSnapshot, filters: ExternalTeamsFilters = {}) {
   const projectMap = buildProjectMap(snapshot);
   const workEntityMap = buildWorkEntityMap(snapshot);
+  const activeExternalTeamProjects = {
+    legal: snapshot.canonicalProjects
+      .filter((project) => isProjectActive(project) && ["Process Legal Review", "Staging - Legal Review"].includes(project.status))
+      .map(toProjectDisplay)
+      .sort((a, b) => compareYearLabel(a.reportingYear, b.reportingYear) || a.projectName.localeCompare(b.projectName)),
+    cqo: snapshot.canonicalProjects
+      .filter((project) => isProjectActive(project) && project.status === "CQO Review")
+      .map(toProjectDisplay)
+      .sort((a, b) => compareYearLabel(a.reportingYear, b.reportingYear) || a.projectName.localeCompare(b.projectName)),
+    compliance: snapshot.canonicalProjects
+      .filter((project) => isProjectActive(project) && project.status === "Compliance Review")
+      .map(toProjectDisplay)
+      .sort((a, b) => compareYearLabel(a.reportingYear, b.reportingYear) || a.projectName.localeCompare(b.projectName)),
+  };
   const externalRows = snapshot.timeLogs.filter((row) =>
     row.role_group === "Legal" ||
     row.role_group === "Other/External" ||
@@ -767,6 +783,7 @@ export function selectExternalTeamsModel(snapshot: AnalyticsSnapshot, filters: E
   ).map(([user, hours]) => ({ user, hours: round(hours, 1) }));
 
   return {
+    activeExternalTeamProjects,
     hoursByExternalRoleGroup,
     hoursByCategoryPhase,
     topWorkItems,
@@ -775,6 +792,14 @@ export function selectExternalTeamsModel(snapshot: AnalyticsSnapshot, filters: E
 }
 
 export function selectProjectsPageRows(snapshot: AnalyticsSnapshot) {
+  const matchedTimeLogsByProject = new Map<string, TimeLogRow[]>();
+  snapshot.timeLogs.forEach((row) => {
+    if (!row.matched_project_key) return;
+    const rows = matchedTimeLogsByProject.get(row.matched_project_key) || [];
+    rows.push(row);
+    matchedTimeLogsByProject.set(row.matched_project_key, rows);
+  });
+
   return snapshot.canonicalProjects.map((project) => ({
     projectKey: project.project_key,
     projectName: project.raw_course_name,
@@ -800,6 +825,9 @@ export function selectProjectsPageRows(snapshot: AnalyticsSnapshot) {
     interactionCount: project.interaction_count,
     latestTimeLogDate: project.latest_time_log_date,
     unresolvedSmeFeedbackCount: project.unresolved_sme_feedback_count,
+    isActive: isProjectActive(project),
+    timeLogPhases: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => row.category_phase) || []),
+    timeLogRoleGroups: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => row.role_group) || []),
     hasTimeLogs: project.time_log_minutes_sum > 0,
     hasSmeFeedback:
       project.unresolved_sme_feedback_count > 0 ||

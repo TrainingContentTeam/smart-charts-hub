@@ -3,6 +3,7 @@ import { buildAnalyticsSnapshot } from "@/lib/analytics/snapshot";
 import {
   selectDashboardModel,
   selectDevelopmentModel,
+  selectExternalTeamsModel,
   selectGroupedReconciliationModel,
   selectPersonDetailModel,
   selectProjectDetailModel,
@@ -100,7 +101,66 @@ describe("analytics selectors", () => {
     expect(model.cards.totalLoggedHours).toBe(2);
     expect(model.cards.activeProjects).toBe(1);
     expect(model.activeProjectsByStatus).toEqual([{ status: "LP Development", count: 1 }]);
+    expect(model.activeProjectStatusMix).toEqual([{ label: "LP Development", value: 1 }]);
     expect(model.hoursByTimeLogPhase.find((row) => row.phase === "Planning")?.hours).toBe(1.5);
+  });
+
+  it("builds active project status mix from project statuses instead of derived time-log phases", () => {
+    const snapshot = buildAnalyticsSnapshot(bundleWithRows({
+      projects: [
+        project("A", "LP Development", 180),
+        project("B", "SME Review", 120),
+        project("C", "Testing", 90),
+        project("D", "Completed", 60),
+        project("E", "Published", 60),
+        project("F", "Cancelled", 60),
+      ],
+      timeLogs: [
+        timeLog("1", "Project A", "LP Development LC", 90),
+        timeLog("2", "Project B", "SME Review LC", 30),
+        timeLog("3", "Project C", "Testing LC", 45),
+      ],
+    }));
+
+    const model = selectDashboardModel(snapshot);
+
+    expect(model.activeProjectStatusMix).toEqual([
+      { label: "LP Development", value: 1 },
+      { label: "SME Review", value: 1 },
+      { label: "Testing", value: 1 },
+    ]);
+    expect(model.activeProjectStatusMix.map((row) => row.label)).not.toEqual(
+      expect.arrayContaining(["Planning", "QA/Release", "Review"]),
+    );
+  });
+
+  it("groups active external-team projects by project status and excludes inactive records", () => {
+    const snapshot = buildAnalyticsSnapshot(bundleWithRows({
+      projects: [
+        project("LegalA", "Process Legal Review", 120),
+        project("LegalB", "Staging - Legal Review", 120),
+        project("Cqo", "CQO Review", 120),
+        project("Compliance", "Compliance Review", 120),
+        project("PublishedLegal", "Published", 120),
+        project("CancelledCqo", "Cancelled", 120),
+        project("CompletedCompliance", "Completed", 120),
+      ],
+      timeLogs: [],
+    }));
+
+    const model = selectExternalTeamsModel(snapshot);
+
+    expect(model.activeExternalTeamProjects.legal.map((row) => row.status)).toEqual([
+      "Process Legal Review",
+      "Staging - Legal Review",
+    ]);
+    expect(model.activeExternalTeamProjects.cqo.map((row) => row.status)).toEqual(["CQO Review"]);
+    expect(model.activeExternalTeamProjects.compliance.map((row) => row.status)).toEqual(["Compliance Review"]);
+    expect([
+      ...model.activeExternalTeamProjects.legal,
+      ...model.activeExternalTeamProjects.cqo,
+      ...model.activeExternalTeamProjects.compliance,
+    ].map((row) => row.status)).not.toEqual(expect.arrayContaining(["Completed", "Published", "Cancelled"]));
   });
 
   it("limits development metrics to active canonical projects and matched development logs", () => {
