@@ -65,14 +65,13 @@ describe("analytics source readers", () => {
     expect(result.warnings[1]).toContain('column "Time Spent"');
   });
 
-  it("keeps the ID survey created timestamp and SME survey date separate", async () => {
+  it("parses the SME survey date as the canonical date and ignores any legacy Created column", async () => {
     const file = makeWorkbookFile("SME Data Report.xlsx", [
       {
         "Course Name": "Course Alpha",
         CourseKey: "ALPHA-1",
         Year: "2026",
         "Survey Date": "3/9/26",
-        Created: "03/09/2026 14:30",
         SME: "Taylor SME",
         "Instructional Designer - ID": "Alex Doe",
       },
@@ -81,23 +80,17 @@ describe("analytics source readers", () => {
     const result = await parseSmeImportFile(file);
 
     expect(result.warnings).toEqual([]);
-    expect(result.rows[0].id_survey_raw_created).toBe("03/09/2026 14:30");
-    expect(result.rows[0].id_survey_created_at).toBe("2026-03-09T14:30:00");
-    expect(result.rows[0].id_survey_date).toBe("2026-03-09");
-    expect(result.rows[0].id_survey_date_source).toBe("Created");
-    expect(result.rows[0].sme_survey_raw_date).toBe("3/9/26");
-    expect(result.rows[0].sme_survey_date).toBe("2026-03-09");
-    expect(result.rows[0].sme_survey_date_source).toBe("Survey Date");
+    expect(result.rows[0].survey_date).toBe("2026-03-09");
+    expect(result.rows[0].instructional_designer_raw).toBe("Alex Doe");
   });
 
-  it("fails invalid SME survey dates softly without reusing the ID created timestamp", async () => {
+  it("sets survey_date to null and emits a single targeted warning for an unparseable Survey Date", async () => {
     const file = makeWorkbookFile("SME Data Report.xlsx", [
       {
         "Course Name": "Course Alpha",
         CourseKey: "ALPHA-1",
         Year: "2026",
         "Survey Date": "not a date",
-        Created: "03/09/2026 14:30",
         SME: "Taylor SME",
         "Instructional Designer - ID": "Alex Doe",
       },
@@ -105,13 +98,8 @@ describe("analytics source readers", () => {
 
     const result = await parseSmeImportFile(file);
 
-    expect(result.rows[0].id_survey_created_at).toBe("2026-03-09T14:30:00");
-    expect(result.rows[0].id_survey_date).toBe("2026-03-09");
-    expect(result.rows[0].sme_survey_raw_date).toBe("not a date");
-    expect(result.rows[0].sme_survey_date).toBeNull();
-    expect(result.rows[0].sme_survey_date_source).toBeNull();
+    expect(result.rows[0].survey_date).toBeNull();
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toContain("SME survey block");
-    expect(result.warnings[0]).not.toContain("ID survey block");
+    expect(result.warnings[0]).toContain('column "Survey Date"');
   });
 });

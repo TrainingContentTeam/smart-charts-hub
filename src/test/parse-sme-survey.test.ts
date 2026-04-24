@@ -62,10 +62,8 @@ describe("parseSmeSurveyFile", () => {
     expect(row.hoursWorked).toBe(12.5);
     expect(row.amountBilled).toBe(1250);
     expect(row.effectiveHourlyRate).toBe(100);
-    expect(row.idSurveyCreatedAt).toBe("2026-03-02T15:30:00");
-    expect(row.idSurveyDate).toBe("2026-03-02");
-    expect(row.smeSurveyDate).toBe("2026-03-01");
     expect(row.surveyDate).toBe("2026-03-01");
+    expect(row.surveyDateRaw).toBe("3/1/26");
     expect(row.smeEmail).toBe("jane@example.com");
     expect(row.internal).toBe("Yes");
     expect(row.smeOverallExperienceScore).toBe(5);
@@ -76,7 +74,6 @@ describe("parseSmeSurveyFile", () => {
     expect(row.idRealworldExamplesIncluded).toBe(true);
     expect(row.idSmePromoterScore).toBe(9);
     expect(row.additionalCommentsId).toBe("Strong examples");
-    expect(row.sourceCreatedAt).toBe("2026-03-02T15:30:00");
   });
 
   it("keeps invalid score shapes null while still parsing the row", async () => {
@@ -104,8 +101,7 @@ describe("parseSmeSurveyFile", () => {
     expect(row.idOverallCollaborationScore).toBeNull();
     expect(row.idSmePromoterScore).toBeNull();
     expect(row.idRealworldExamplesIncluded).toBeNull();
-    expect(row.idSurveyCreatedAt).toBeNull();
-    expect(row.smeSurveyDate).toBeNull();
+    expect(row.surveyDate).toBeNull();
     expect(row.hoursWorked).toBe(0);
     expect(row.amountBilled).toBe(0);
   });

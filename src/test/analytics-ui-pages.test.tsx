@@ -113,7 +113,7 @@ beforeEach(() => {
     session: { user: { id: "user-1" } },
     loading: false,
     signOut: vi.fn(),
-  } as ReturnType<typeof useAuth>);
+  } as unknown as ReturnType<typeof useAuth>);
   mockedUpsertSharedCourseAlias.mockResolvedValue(undefined);
   mockedUpsertSharedWorkEntityDecision.mockResolvedValue(undefined);
   mockedUpsertSharedSmeManualJoin.mockResolvedValue(undefined);
