@@ -5,9 +5,7 @@ import type {
   RawTimeLogRowDraft,
 } from "@/lib/analytics/types";
 import {
-  extractDateFromLocalDateTime,
   parseApprovedDurationHoursMinutes,
-  parseApprovedUsLocalDateTime,
   parseApprovedUsShortDate,
 } from "@/lib/analytics/field-parsers";
 import {
@@ -258,22 +256,14 @@ function buildSmeDraft(
 
   const courseKeyRaw = normalizeTextPreserveMeaning(getCell(row, ["CourseKey"]));
   const reportingYear = parseReportingYear(getCell(row, ["Year"]));
-  const idSurveyCreatedCell = getCell(row, ["Created"]);
-  const idSurveyRawCreated = readRawCellText(idSurveyCreatedCell);
-  const idSurveyCreatedAt = parseApprovedUsLocalDateTime(idSurveyCreatedCell);
-  const smeSurveyDateCell = getCell(row, ["Survey Date"]);
-  const smeSurveyRawDate = readRawCellText(smeSurveyDateCell);
-  const smeSurveyDate = parseApprovedUsShortDate(smeSurveyDateCell);
+  const surveyDateCell = getCell(row, ["Survey Date"]);
+  const surveyDateRaw = readRawCellText(surveyDateCell);
+  const surveyDate = parseApprovedUsShortDate(surveyDateCell);
   const parseWarnings: string[] = [];
 
-  if (idSurveyRawCreated && !idSurveyCreatedAt) {
+  if (surveyDateRaw && !surveyDate) {
     parseWarnings.push(
-      `${sourceFileName}, row ${rowNumber}, ID survey block, column "Created": ${describeRawValue(idSurveyCreatedCell)} is not a valid U.S. datetime; stored id_survey_raw_created and set id_survey_created_at/id_survey_date=null.`,
-    );
-  }
-  if (smeSurveyRawDate && !smeSurveyDate) {
-    parseWarnings.push(
-      `${sourceFileName}, row ${rowNumber}, SME survey block, column "Survey Date": ${describeRawValue(smeSurveyDateCell)} is not a valid U.S. short date; stored sme_survey_raw_date and set sme_survey_date=null.`,
+      `${sourceFileName}, row ${rowNumber}, column "Survey Date": ${describeRawValue(surveyDateCell)} is not a valid U.S. short date; stored survey_date=null.`,
     );
   }
 
@@ -288,13 +278,7 @@ function buildSmeDraft(
     course_name_normalized: normalizeCourseName(courseNameRaw),
     course_name_compact: compactCourseName(courseNameRaw),
     reporting_year: reportingYear,
-    id_survey_raw_created: idSurveyRawCreated,
-    id_survey_created_at: idSurveyCreatedAt,
-    id_survey_date: extractDateFromLocalDateTime(idSurveyCreatedAt),
-    id_survey_date_source: idSurveyCreatedAt ? "Created" : null,
-    sme_survey_raw_date: smeSurveyRawDate,
-    sme_survey_date: smeSurveyDate,
-    sme_survey_date_source: smeSurveyDate ? "Survey Date" : null,
+    survey_date: surveyDate,
     sme_raw: normalizeTextPreserveMeaning(getCell(row, ["SME"])),
     instructional_designer_raw: normalizeTextPreserveMeaning(getCell(row, ["Instructional Designer - ID"])),
     sme_email_raw: normalizeTextPreserveMeaning(getCell(row, ["SME Email"])),

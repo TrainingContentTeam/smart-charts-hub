@@ -533,13 +533,13 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
   const projectMap = buildProjectMap(snapshot);
   // ID-facing metrics must come only from the instructional designer survey instrument.
   const allIdRows = snapshot.smeFeedbackIdView.filter((row) =>
-    (!filters.startDate && !filters.endDate ? true : inDateRange(row.id_survey_date, filters.startDate, filters.endDate)),
+    (!filters.startDate && !filters.endDate ? true : inDateRange(row.survey_date, filters.startDate, filters.endDate)),
   );
 
   // SME-facing metrics must come only from the SME survey instrument.
   const smeRows = snapshot.smeFeedbackSmeView.filter((row) =>
     matchesSelected(filters.internalValues, getSmeInternalLabel(row.internal)) &&
-    (!filters.startDate && !filters.endDate ? true : inDateRange(row.sme_survey_date, filters.startDate, filters.endDate)),
+    (!filters.startDate && !filters.endDate ? true : inDateRange(row.survey_date, filters.startDate, filters.endDate)),
   );
 
   const internalFilteredIds = filters.internalValues?.length
