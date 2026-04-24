@@ -304,6 +304,42 @@ describe("analytics UI pages", () => {
     expect(screen.queryByRole("link", { name: "Beta Project" })).not.toBeInTheDocument();
   });
 
+  it("filters Projects by style and length URL params", () => {
+    const { unmount: unmountStyle } = renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?style=Scenario"],
+    );
+
+    expect(screen.getByRole("button", { name: /style/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /length/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Alpha Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Beta Project" })).not.toBeInTheDocument();
+    unmountStyle();
+
+    const { unmount: unmountLength } = renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?length=2+hr"],
+    );
+
+    expect(screen.getByRole("link", { name: "Beta Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Alpha Project" })).not.toBeInTheDocument();
+    unmountLength();
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?style=Scenario&length=1+hr"],
+    );
+
+    expect(screen.getByRole("link", { name: "Alpha Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Beta Project" })).not.toBeInTheDocument();
+  });
+
   it("renders active external-team project cards on Other External Teams", () => {
     const snapshot = createUiSnapshot();
     const base = snapshot.canonicalProjects[0];

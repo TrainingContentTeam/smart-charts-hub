@@ -38,6 +38,8 @@ export default function Projects() {
   const verticals = searchParams.getAll("vertical");
   const courseTypes = searchParams.getAll("type");
   const authoringTools = searchParams.getAll("tool");
+  const courseStyles = searchParams.getAll("style");
+  const courseLengths = searchParams.getAll("length");
   const activeFilters = searchParams.getAll("active");
   const timePhases = searchParams.getAll("timePhase");
   const timeRoles = searchParams.getAll("timeRole");
@@ -71,6 +73,8 @@ export default function Projects() {
     vertical: toOptions(rows.flatMap((row) => row.verticals.length ? row.verticals : [row.primaryVertical])),
     courseType: toOptions(rows.map((row) => row.courseType)),
     authoringTool: toOptions(rows.map((row) => row.authoringTool)),
+    courseStyle: toOptions(rows.map((row) => row.courseStyle)),
+    courseLength: toOptions(rows.map((row) => row.courseLengthRaw)),
     timePhase: toOptions(rows.flatMap((row) => row.timeLogPhases)),
     timeRole: toOptions(rows.flatMap((row) => row.timeLogRoleGroups)),
     yesNo: [
@@ -92,6 +96,8 @@ export default function Projects() {
         row.fullVerticalList,
         row.courseType,
         row.authoringTool,
+        row.courseStyle,
+        row.courseLengthRaw,
       ]
         .join(" ")
         .toLowerCase();
@@ -105,6 +111,8 @@ export default function Projects() {
       if (verticals.length && !row.verticals.some((vertical) => verticals.includes(vertical))) return false;
       if (courseTypes.length && !courseTypes.includes(row.courseType)) return false;
       if (authoringTools.length && !authoringTools.includes(row.authoringTool)) return false;
+      if (courseStyles.length && !courseStyles.includes(row.courseStyle)) return false;
+      if (courseLengths.length && !courseLengths.includes(row.courseLengthRaw)) return false;
       if (!matchesBooleanFilter(activeFilters, row.isActive)) return false;
       if (timePhases.length && !row.timeLogPhases.some((phase) => timePhases.includes(phase))) return false;
       if (timeRoles.length && !row.timeLogRoleGroups.some((role) => timeRoles.includes(role))) return false;
@@ -115,6 +123,8 @@ export default function Projects() {
     });
   }, [
     authoringTools,
+    courseLengths,
+    courseStyles,
     courseTypes,
     activeFilters,
     discrepancyFilters,
@@ -164,6 +174,8 @@ export default function Projects() {
             <CompactMultiSelectFilter label="Vertical" options={filterOptions.vertical} selected={verticals} onChange={(values) => setMultiParam("vertical", values)} />
             <CompactMultiSelectFilter label="Course Type" options={filterOptions.courseType} selected={courseTypes} onChange={(values) => setMultiParam("type", values)} />
             <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTool} selected={authoringTools} onChange={(values) => setMultiParam("tool", values)} />
+            <CompactMultiSelectFilter label="Style" options={filterOptions.courseStyle} selected={courseStyles} onChange={(values) => setMultiParam("style", values)} />
+            <CompactMultiSelectFilter label="Length" options={filterOptions.courseLength} selected={courseLengths} onChange={(values) => setMultiParam("length", values)} />
             <CompactMultiSelectFilter label="Active" options={filterOptions.yesNo} selected={activeFilters} onChange={(values) => setMultiParam("active", values)} />
             <CompactMultiSelectFilter label="Time Log Phase" options={filterOptions.timePhase} selected={timePhases} onChange={(values) => setMultiParam("timePhase", values)} />
             <CompactMultiSelectFilter label="Time Log Role Group" options={filterOptions.timeRole} selected={timeRoles} onChange={(values) => setMultiParam("timeRole", values)} />
