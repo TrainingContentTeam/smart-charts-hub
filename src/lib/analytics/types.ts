@@ -15,7 +15,7 @@ export type SuggestionConfidence = "high" | "medium";
 export type RoleGroup = "ID" | "SME" | "Legal" | "Other/External";
 export type WorkEntityDecisionType = "project_match" | "standalone_course" | "non_project_work";
 export type AliasScope = "all" | "project" | "time_log" | "sme";
-export type SurveyDateSource = "Created" | "Survey Date" | null;
+
 
 export interface UploadHistoryRecord {
   id: string;
@@ -94,13 +94,7 @@ export interface RawSmeFeedbackRow {
   course_name_normalized: string;
   course_name_compact: string;
   reporting_year: string | null;
-  id_survey_raw_created: string;
-  id_survey_created_at: string | null;
-  id_survey_date: string | null;
-  id_survey_date_source: SurveyDateSource;
-  sme_survey_raw_date: string;
-  sme_survey_date: string | null;
-  sme_survey_date_source: SurveyDateSource;
+  survey_date: string | null;
   sme_raw: string;
   instructional_designer_raw: string;
   sme_email_raw: string;
@@ -324,8 +318,7 @@ export interface SmeIdFeedbackRow {
   join_method: SmeJoinMethod;
   join_confidence: JoinConfidence;
   reporting_year: string | null;
-  id_survey_created_at: string | null;
-  id_survey_date: string | null;
+  survey_date: string | null;
   course_name_raw: string;
   course_key_raw: string;
   instructional_designer: string;
@@ -351,7 +344,7 @@ export interface SmeSmeFeedbackRow {
   join_method: SmeJoinMethod;
   join_confidence: JoinConfidence;
   reporting_year: string | null;
-  sme_survey_date: string | null;
+  survey_date: string | null;
   course_name_raw: string;
   course_key_raw: string;
   instructional_designer: string;

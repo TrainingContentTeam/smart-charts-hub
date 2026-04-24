@@ -92,13 +92,7 @@ function createSmeRow(partial: Partial<RawSmeFeedbackRow>): RawSmeFeedbackRow {
     course_name_normalized: "Course Alpha",
     course_name_compact: "coursealpha",
     reporting_year: "2026",
-    id_survey_raw_created: "04/11/2026 14:30",
-    id_survey_created_at: "2026-04-11T14:30:00",
-    id_survey_date: "2026-04-11",
-    id_survey_date_source: "Created",
-    sme_survey_raw_date: "4/11/26",
-    sme_survey_date: "2026-04-11",
-    sme_survey_date_source: "Survey Date",
+    survey_date: "2026-04-11",
     sme_raw: "Taylor SME",
     instructional_designer_raw: "Alex Doe",
     sme_email_raw: "taylor@example.com",
@@ -194,8 +188,8 @@ describe("buildAnalyticsSnapshot", () => {
 
     expect(snapshot.timeLogs.find((row) => row.raw_time_log_row_id === "alias-match")?.work_match_status).toBe("matched_project_work");
     expect(snapshot.smeJoinAudit.find((row) => row.raw_sme_feedback_row_id === "coursekey-exact")?.join_method).toBe("coursekey_exact");
-    expect(snapshot.smeFeedbackIdView.find((row) => row.raw_sme_feedback_row_id === "coursekey-exact")?.id_survey_created_at).toBe("2026-04-11T14:30:00");
-    expect(snapshot.smeFeedbackSmeView.find((row) => row.raw_sme_feedback_row_id === "coursekey-exact")?.sme_survey_date).toBe("2026-04-11");
+    expect(snapshot.smeFeedbackIdView.find((row) => row.raw_sme_feedback_row_id === "coursekey-exact")?.survey_date).toBe("2026-04-11");
+    expect(snapshot.smeFeedbackSmeView.find((row) => row.raw_sme_feedback_row_id === "coursekey-exact")?.survey_date).toBe("2026-04-11");
     expect(snapshot.smeJoinAudit.find((row) => row.raw_sme_feedback_row_id === "ambiguous")?.join_status).toBe("ambiguous");
   });
 });

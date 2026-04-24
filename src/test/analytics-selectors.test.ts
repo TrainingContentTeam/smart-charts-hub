@@ -240,7 +240,7 @@ describe("analytics selectors", () => {
       join_method: null,
       join_confidence: null,
       reporting_year: "2026",
-      sme_survey_date: "2026-04-01",
+      survey_date: "2026-04-01",
       course_name_raw: "Unmatched Course",
       course_key_raw: "Unmatched Course",
       instructional_designer: "Alex Doe",
