@@ -1,14 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
-import { ChartDateRangeFilter } from "@/components/ChartFilters";
+import { CHART_FILTER_VARIANT, ChartDateRangeFilter } from "@/components/ChartFilters";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { EXTERNAL_WORK_CLASSIFICATION_LABELS, WORK_SCOPE_LABELS } from "@/lib/analytics/labels";
+import { cn } from "@/lib/utils";
 import { selectProjectsPageRows } from "@/lib/analytics/selectors";
 
 function uniqueSorted(values: string[]) {
@@ -121,6 +125,27 @@ export default function Projects() {
     ],
   }), [rows]);
 
+  const advancedFilterCount = [
+    exactProjects,
+    smes,
+    legalReviewers,
+    verticals,
+    courseTypes,
+    courseStyles,
+    courseLengths,
+    timePhases,
+    timeRoles,
+    timeUsers,
+    workScopes,
+    externalClasses,
+    smeIds,
+    smeInternal,
+    discrepancyFilters,
+    hasTimeLogFilters,
+    hasSmeFilters,
+  ].reduce((sum, values) => sum + values.length, 0) + (timeStart ? 1 : 0) + (timeEnd ? 1 : 0) + (smeStart ? 1 : 0) + (smeEnd ? 1 : 0);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(() => advancedFilterCount > 0);
+
   const filteredRows = useMemo(() => {
     const searchText = search.trim().toLowerCase();
 
@@ -223,44 +248,58 @@ export default function Projects() {
             onChange={(event) => setSearchValue(event.target.value)}
           />
           <div className="flex flex-wrap gap-2">
-            <CompactMultiSelectFilter label="Project" options={filterOptions.exactProject} selected={exactProjects} onChange={(values) => setMultiParam("project", values)} />
-            <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.reportingYear} selected={reportingYears} onChange={(values) => setMultiParam("year", values)} />
-            <CompactMultiSelectFilter label="Status" options={filterOptions.status} selected={statuses} onChange={(values) => setMultiParam("status", values)} />
-            <CompactMultiSelectFilter label="Owner" options={filterOptions.owner} selected={owners} onChange={(values) => setMultiParam("owner", values)} />
-            <CompactMultiSelectFilter label="SME" options={filterOptions.sme} selected={smes} onChange={(values) => setMultiParam("sme", values)} />
-            <CompactMultiSelectFilter label="Legal Reviewer" options={filterOptions.legalReviewer} selected={legalReviewers} onChange={(values) => setMultiParam("legal", values)} />
-            <CompactMultiSelectFilter label="Vertical" options={filterOptions.vertical} selected={verticals} onChange={(values) => setMultiParam("vertical", values)} />
-            <CompactMultiSelectFilter label="Course Type" options={filterOptions.courseType} selected={courseTypes} onChange={(values) => setMultiParam("type", values)} />
-            <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTool} selected={authoringTools} onChange={(values) => setMultiParam("tool", values)} />
-            <CompactMultiSelectFilter label="Style" options={filterOptions.courseStyle} selected={courseStyles} onChange={(values) => setMultiParam("style", values)} />
-            <CompactMultiSelectFilter label="Length" options={filterOptions.courseLength} selected={courseLengths} onChange={(values) => setMultiParam("length", values)} />
-            <CompactMultiSelectFilter label="Active" options={filterOptions.yesNo} selected={activeFilters} onChange={(values) => setMultiParam("active", values)} />
-            <CompactMultiSelectFilter label="Time Log Phase" options={filterOptions.timePhase} selected={timePhases} onChange={(values) => setMultiParam("timePhase", values)} />
-            <CompactMultiSelectFilter label="Time Log Role Group" options={filterOptions.timeRole} selected={timeRoles} onChange={(values) => setMultiParam("timeRole", values)} />
-            <CompactMultiSelectFilter label="Time Log User" options={filterOptions.timeUser} selected={timeUsers} onChange={(values) => setMultiParam("timeUser", values)} />
-            <CompactMultiSelectFilter label="Work Scope" options={filterOptions.workScope} selected={workScopes} onChange={(values) => setMultiParam("workScope", values)} />
-            <CompactMultiSelectFilter label="External Class" options={filterOptions.externalClass} selected={externalClasses} onChange={(values) => setMultiParam("externalClass", values)} />
-            <CompactMultiSelectFilter label="SME ID" options={filterOptions.smeId} selected={smeIds} onChange={(values) => setMultiParam("smeId", values)} />
-            <CompactMultiSelectFilter label="SME Internal" options={filterOptions.smeInternal} selected={smeInternal} onChange={(values) => setMultiParam("smeInternal", values)} />
-            <CompactMultiSelectFilter label="Discrepancy" options={filterOptions.yesNo} selected={discrepancyFilters} onChange={(values) => setMultiParam("discrepancy", values)} />
-            <CompactMultiSelectFilter label="Has Time Logs" options={filterOptions.yesNo} selected={hasTimeLogFilters} onChange={(values) => setMultiParam("timeLogs", values)} />
-            <CompactMultiSelectFilter label="Has SME Feedback" options={filterOptions.yesNo} selected={hasSmeFilters} onChange={(values) => setMultiParam("smeFeedback", values)} />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <ChartDateRangeFilter
-              label="Time Log Dates"
-              startDate={timeStart}
-              endDate={timeEnd}
-              onStartDateChange={(value) => setSingleParam("timeStart", value)}
-              onEndDateChange={(value) => setSingleParam("timeEnd", value)}
-            />
-            <ChartDateRangeFilter
-              label="SME Dates"
-              startDate={smeStart}
-              endDate={smeEnd}
-              onStartDateChange={(value) => setSingleParam("smeStart", value)}
-              onEndDateChange={(value) => setSingleParam("smeEnd", value)}
-            />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Year" options={filterOptions.reportingYear} selected={reportingYears} onChange={(values) => setMultiParam("year", values)} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Status" options={filterOptions.status} selected={statuses} onChange={(values) => setMultiParam("status", values)} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Owner" options={filterOptions.owner} selected={owners} onChange={(values) => setMultiParam("owner", values)} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Tool" options={filterOptions.authoringTool} selected={authoringTools} onChange={(values) => setMultiParam("tool", values)} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Active" options={filterOptions.yesNo} selected={activeFilters} onChange={(values) => setMultiParam("active", values)} />
+            <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" className="h-8 gap-2 rounded-full border-muted-foreground/20 px-3 text-xs font-medium">
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  <span>More filters</span>
+                  {advancedFilterCount ? <span className="text-muted-foreground">{advancedFilterCount}</span> : null}
+                  <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedFiltersOpen && "rotate-180")} />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="basis-full pt-2">
+                <div className="flex flex-wrap gap-2">
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Project" options={filterOptions.exactProject} selected={exactProjects} onChange={(values) => setMultiParam("project", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="SME" options={filterOptions.sme} selected={smes} onChange={(values) => setMultiParam("sme", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Legal" options={filterOptions.legalReviewer} selected={legalReviewers} onChange={(values) => setMultiParam("legal", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Vertical" options={filterOptions.vertical} selected={verticals} onChange={(values) => setMultiParam("vertical", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Type" options={filterOptions.courseType} selected={courseTypes} onChange={(values) => setMultiParam("type", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Style" options={filterOptions.courseStyle} selected={courseStyles} onChange={(values) => setMultiParam("style", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Length" options={filterOptions.courseLength} selected={courseLengths} onChange={(values) => setMultiParam("length", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Time Phase" options={filterOptions.timePhase} selected={timePhases} onChange={(values) => setMultiParam("timePhase", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Time Role" options={filterOptions.timeRole} selected={timeRoles} onChange={(values) => setMultiParam("timeRole", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Time User" options={filterOptions.timeUser} selected={timeUsers} onChange={(values) => setMultiParam("timeUser", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Work Scope" options={filterOptions.workScope} selected={workScopes} onChange={(values) => setMultiParam("workScope", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="External" options={filterOptions.externalClass} selected={externalClasses} onChange={(values) => setMultiParam("externalClass", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="SME ID" options={filterOptions.smeId} selected={smeIds} onChange={(values) => setMultiParam("smeId", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="SME Internal" options={filterOptions.smeInternal} selected={smeInternal} onChange={(values) => setMultiParam("smeInternal", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Discrepancy" options={filterOptions.yesNo} selected={discrepancyFilters} onChange={(values) => setMultiParam("discrepancy", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Has Logs" options={filterOptions.yesNo} selected={hasTimeLogFilters} onChange={(values) => setMultiParam("timeLogs", values)} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Has SME" options={filterOptions.yesNo} selected={hasSmeFilters} onChange={(values) => setMultiParam("smeFeedback", values)} />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <ChartDateRangeFilter
+                    label="Time Log Dates"
+                    startDate={timeStart}
+                    endDate={timeEnd}
+                    onStartDateChange={(value) => setSingleParam("timeStart", value)}
+                    onEndDateChange={(value) => setSingleParam("timeEnd", value)}
+                  />
+                  <ChartDateRangeFilter
+                    label="SME Dates"
+                    startDate={smeStart}
+                    endDate={smeEnd}
+                    onStartDateChange={(value) => setSingleParam("smeStart", value)}
+                    onEndDateChange={(value) => setSingleParam("smeEnd", value)}
+                  />
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         </CardContent>
       </Card>
