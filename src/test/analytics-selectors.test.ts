@@ -291,6 +291,70 @@ describe("analytics selectors", () => {
     expect(sortedByProject.latestActivityRows[1].projectName).toBe("Beta Project");
   });
 
+  it("applies expanded development chart filters independently", () => {
+    const snapshot = createUiSnapshot();
+    snapshot.canonicalProjects[1].status = "LP Development";
+    snapshot.canonicalProjects[1].raw_status = "LP Development";
+
+    const model = selectDevelopmentModel(snapshot, {
+      currentYear: "2026",
+      chartFilters: {
+        activeProjectsByStatus: { reportingYears: ["2026"], authoringTools: ["Rise"], courseTypes: ["New"] },
+        activeProjectsByCourseType: { reportingYears: ["2025"], authoringTools: ["Storyline"] },
+      },
+    });
+
+    expect(model.activeProjectsByStatus).toEqual([{ status: "LP Development", count: 1 }]);
+    expect(model.activeProjectsByCourseType).toEqual([{ type: "Revamp", count: 1 }]);
+  });
+
+  it("applies external team chart filters to time-log rollups", () => {
+    const snapshot = createUiSnapshot();
+
+    const model = selectExternalTeamsModel(snapshot, {
+      users: ["Legal Ops"],
+      phases: ["Other"],
+      classifications: ["non_project_work"],
+      reportingYears: ["Unknown"],
+    });
+
+    expect(model.hoursByExternalRoleGroup).toEqual([{ roleGroup: "Non-Project Work", hours: 0.3 }]);
+    expect(model.usersByHours).toEqual([{ user: "Legal Ops", hours: 0.3 }]);
+  });
+
+  it("applies SME collaboration chart-specific filters", () => {
+    const snapshot = createUiSnapshot();
+
+    const model = selectSmeCollaborationModel(snapshot, {
+      matrix: { internalValues: ["Internal"], reportingYears: ["2026"] },
+      bySme: { internalValues: ["Non-Internal"] },
+      matchedResponses: { internalValues: ["Internal"] },
+    });
+
+    expect(model.smeQuestionMatrix[0].responseCount).toBe(1);
+    expect(model.bySme.map((row) => row.sme)).toEqual(["Casey SME"]);
+    expect(model.matchedResponses.map((row) => row.sme)).toEqual(["Taylor SME"]);
+  });
+
+  it("applies project and person detail chart filters", () => {
+    const snapshot = createUiSnapshot();
+    snapshot.canonicalProjects[1].status = "Testing";
+    snapshot.canonicalProjects[1].raw_status = "Testing";
+    snapshot.canonicalProjects[1].primary_id_assigned = "Alex Doe";
+    snapshot.canonicalProjects[1].id_assigned_raw = "Alex Doe";
+    snapshot.canonicalProjects[1].owner_names = ["Alex Doe"];
+
+    const projectModel = selectProjectDetailModel(snapshot, "alpha-project|2026", {
+      timeline: { phases: ["Review"] },
+    });
+    const personModel = selectPersonDetailModel(snapshot, "Alex Doe", {
+      idStatusBreakdown: { authoringTools: ["Storyline"] },
+    });
+
+    expect(projectModel?.timeline.points).toEqual([{ date: "2026-03-10", label: "2026-03-10", hours: 3 }]);
+    expect(personModel?.idView.statusBreakdown).toEqual([{ status: "Testing", count: 1 }]);
+  });
+
   it("builds grouped reconciliation rows and surfaces shared suggestions", () => {
     const snapshot = createUiSnapshot();
 

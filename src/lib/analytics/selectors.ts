@@ -8,6 +8,7 @@ import type {
   CanonicalProject,
   JoinConfidence,
   RoleGroup,
+  SmeIdFeedbackRow,
   SmeSmeFeedbackRow,
   TimeLogMatchAuditRow,
   TimeLogRow,
@@ -15,6 +16,21 @@ import type {
 
 type DashboardWorkScope = keyof typeof WORK_SCOPE_LABELS;
 type ExternalWorkClassification = keyof typeof EXTERNAL_WORK_CLASSIFICATION_LABELS;
+type ProjectChartFilters = {
+  reportingYears?: string[];
+  owners?: string[];
+  authoringTools?: string[];
+  courseTypes?: string[];
+  statuses?: string[];
+};
+type TimeLogChartFilters = {
+  reportingYears?: string[];
+  phases?: string[];
+  roleGroups?: string[];
+  users?: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+};
 
 export type DashboardChartFilters = {
   projectsByReportingYear?: {
@@ -62,10 +78,25 @@ export type SmeCollaborationFilters = {
   internalValues?: string[];
   startDate?: string | null;
   endDate?: string | null;
+  matrix?: SmeSurveyChartFilters;
+  responsesByReportingYear?: SmeSurveyChartFilters;
+  byInstructionalDesigner?: {
+    smes?: string[];
+    reportingYears?: string[];
+    startDate?: string | null;
+    endDate?: string | null;
+  };
+  bySme?: {
+    internalValues?: string[];
+    instructionalDesigners?: string[];
+    reportingYears?: string[];
+    startDate?: string | null;
+    endDate?: string | null;
+  };
   matchedResponses?: SmeMatchedResponseFilters;
 };
 
-export type ExternalTeamsFilters = {
+export type ExternalTeamsChartFilters = {
   roleGroups?: string[];
   phases?: string[];
   classifications?: ExternalWorkClassification[];
@@ -73,28 +104,14 @@ export type ExternalTeamsFilters = {
   users?: string[];
 };
 
+export type ExternalTeamsFilters = ExternalTeamsChartFilters;
+
 export type DevelopmentChartFilters = {
-  activeProjectsByStatus?: {
-    owners?: string[];
-    authoringTools?: string[];
-  };
-  activeProjectsByIdOwner?: {
-    reportingYears?: string[];
-    courseTypes?: string[];
-  };
-  developmentHoursByPhase?: {
-    owners?: string[];
-    courseTypes?: string[];
-    authoringTools?: string[];
-  };
-  activeProjectsByAuthoringTool?: {
-    reportingYears?: string[];
-    owners?: string[];
-  };
-  activeProjectsByCourseType?: {
-    reportingYears?: string[];
-    owners?: string[];
-  };
+  activeProjectsByStatus?: ProjectChartFilters;
+  activeProjectsByIdOwner?: ProjectChartFilters;
+  developmentHoursByPhase?: ProjectChartFilters & { roleGroups?: string[] };
+  activeProjectsByAuthoringTool?: ProjectChartFilters;
+  activeProjectsByCourseType?: ProjectChartFilters;
 };
 
 export type DevelopmentLatestActivitySortKey = "projectName" | "status" | "owner" | "latestTimeLogDate";
@@ -118,6 +135,28 @@ export type SmeMatchedResponseFilters = {
   instructionalDesigners?: string[];
   smes?: string[];
   reportingYears?: string[];
+  internalValues?: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+};
+
+export type SmeSurveyChartFilters = {
+  internalValues?: string[];
+  instructionalDesigners?: string[];
+  smes?: string[];
+  reportingYears?: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+};
+
+export type ProjectDetailOptions = {
+  phaseBreakdown?: TimeLogChartFilters;
+  timeline?: TimeLogChartFilters;
+};
+
+export type PersonDetailOptions = {
+  idStatusBreakdown?: ProjectChartFilters;
+  idPhaseBreakdown?: ProjectChartFilters & { roleGroups?: string[] };
 };
 
 function round(value: number, digits = 1) {
@@ -138,14 +177,31 @@ function matchesSelected(selected: string[] | undefined, value: string) {
   return !selected?.length || selected.includes(value);
 }
 
-function matchesDashboardProjectFilters(
+function matchesProjectChartFilters(
   project: CanonicalProject,
-  filters: { reportingYears?: string[]; owners?: string[]; authoringTools?: string[] } | undefined,
+  filters: ProjectChartFilters | undefined,
 ) {
   return (
     matchesSelected(filters?.reportingYears, project.reporting_year || "Unknown") &&
     matchesSelected(filters?.owners, project.primary_id_assigned || "Unassigned") &&
-    matchesSelected(filters?.authoringTools, labelOrUnknown(project.authoring_tool))
+    matchesSelected(filters?.authoringTools, labelOrUnknown(project.authoring_tool)) &&
+    matchesSelected(filters?.courseTypes, labelOrUnknown(project.course_type)) &&
+    matchesSelected(filters?.statuses, project.status)
+  );
+}
+
+function matchesTimeLogChartFilters(
+  row: TimeLogRow,
+  filters: TimeLogChartFilters | undefined,
+  projectMap: Map<string, CanonicalProject>,
+  workEntityMap: Map<string, AnalyticsSnapshot["dimWorkEntity"][number]>,
+) {
+  return (
+    matchesSelected(filters?.reportingYears, getTimeLogReportingYear(row, projectMap, workEntityMap) || "Unknown") &&
+    matchesSelected(filters?.phases, row.category_phase) &&
+    matchesSelected(filters?.roleGroups, row.role_group) &&
+    matchesSelected(filters?.users, row.canonical_user_name || "Unknown") &&
+    (!filters?.startDate && !filters?.endDate ? true : inDateRange(row.log_date, filters.startDate, filters.endDate))
   );
 }
 
@@ -325,27 +381,27 @@ export function selectDashboardModel(snapshot: AnalyticsSnapshot, filters: Dashb
   const discrepancyCount = snapshot.canonicalProjects.filter((project) => project.hours_discrepancy_flag).length;
 
   const projectsByReportingYearSource = snapshot.canonicalProjects.filter((project) =>
-    matchesDashboardProjectFilters(project, filters.projectsByReportingYear) &&
+    matchesProjectChartFilters(project, filters.projectsByReportingYear) &&
     matchesSelected(filters.projectsByReportingYear?.statuses, project.status) &&
     matchesSelected(filters.projectsByReportingYear?.courseTypes, labelOrUnknown(project.course_type)) &&
     matchesSelected(filters.projectsByReportingYear?.authoringTools, labelOrUnknown(project.authoring_tool)),
   );
 
   const activeProjectsByStatusSource = activeProjects.filter((project) =>
-    matchesDashboardProjectFilters(project, filters.activeProjectsByStatus),
+    matchesProjectChartFilters(project, filters.activeProjectsByStatus),
   );
 
   const activeProjectStatusMixSource = activeProjects.filter((project) =>
-    matchesDashboardProjectFilters(project, filters.activeProjectStatusMix),
+    matchesProjectChartFilters(project, filters.activeProjectStatusMix),
   );
 
   const projectMixByCourseTypeSource = snapshot.canonicalProjects.filter((project) =>
-    matchesDashboardProjectFilters(project, filters.projectMixByCourseType) &&
+    matchesProjectChartFilters(project, filters.projectMixByCourseType) &&
     matchesSelected(filters.projectMixByCourseType?.statuses, project.status),
   );
 
   const projectMixByAuthoringToolSource = snapshot.canonicalProjects.filter((project) =>
-    matchesDashboardProjectFilters(project, filters.projectMixByAuthoringTool) &&
+    matchesProjectChartFilters(project, filters.projectMixByAuthoringTool) &&
     matchesSelected(filters.projectMixByAuthoringTool?.statuses, project.status),
   );
 
@@ -428,8 +484,10 @@ export function selectDashboardModel(snapshot: AnalyticsSnapshot, filters: Dashb
 export function selectDevelopmentModel(snapshot: AnalyticsSnapshot, options: DevelopmentModelOptions = {}) {
   const activeProjects = snapshot.canonicalProjects.filter(isProjectActive);
   const activeKeys = new Set(activeProjects.map((project) => project.project_key));
+  const activeProjectByKey = new Map(activeProjects.map((project) => [project.project_key, project]));
   const currentYear = options.currentYear || String(new Date().getFullYear());
   const previousYear = String(Number(currentYear) - 1);
+  const activeProjectLogs = snapshot.timeLogs.filter((row) => row.matched_project_key && activeKeys.has(row.matched_project_key));
 
   const chartFilterOptions = {
     reportingYears: uniqueSorted(activeProjects.map((project) => project.reporting_year || "Unknown")),
@@ -437,26 +495,23 @@ export function selectDevelopmentModel(snapshot: AnalyticsSnapshot, options: Dev
     authoringTools: uniqueSorted(activeProjects.map((project) => labelOrUnknown(project.authoring_tool))),
     courseTypes: uniqueSorted(activeProjects.map((project) => labelOrUnknown(project.course_type))),
     statuses: uniqueSorted(activeProjects.map((project) => project.status)),
+    roleGroups: uniqueSorted(activeProjectLogs.map((row) => row.role_group)),
   };
 
   const activeProjectsByStatusSource = activeProjects.filter((project) =>
-    matchesSelected(options.chartFilters?.activeProjectsByStatus?.owners, project.primary_id_assigned || "Unassigned") &&
-    matchesSelected(options.chartFilters?.activeProjectsByStatus?.authoringTools, labelOrUnknown(project.authoring_tool)),
+    matchesProjectChartFilters(project, options.chartFilters?.activeProjectsByStatus),
   );
 
   const activeProjectsByIdOwnerSource = activeProjects.filter((project) =>
-    matchesSelected(options.chartFilters?.activeProjectsByIdOwner?.reportingYears, project.reporting_year || "Unknown") &&
-    matchesSelected(options.chartFilters?.activeProjectsByIdOwner?.courseTypes, labelOrUnknown(project.course_type)),
+    matchesProjectChartFilters(project, options.chartFilters?.activeProjectsByIdOwner),
   );
 
   const activeProjectsByAuthoringToolSource = activeProjects.filter((project) =>
-    matchesSelected(options.chartFilters?.activeProjectsByAuthoringTool?.reportingYears, project.reporting_year || "Unknown") &&
-    matchesSelected(options.chartFilters?.activeProjectsByAuthoringTool?.owners, project.primary_id_assigned || "Unassigned"),
+    matchesProjectChartFilters(project, options.chartFilters?.activeProjectsByAuthoringTool),
   );
 
   const activeProjectsByCourseTypeSource = activeProjects.filter((project) =>
-    matchesSelected(options.chartFilters?.activeProjectsByCourseType?.reportingYears, project.reporting_year || "Unknown") &&
-    matchesSelected(options.chartFilters?.activeProjectsByCourseType?.owners, project.primary_id_assigned || "Unassigned"),
+    matchesProjectChartFilters(project, options.chartFilters?.activeProjectsByCourseType),
   );
 
   const activeProjectsByStatus = buildCountSeries(activeProjectsByStatusSource.map((project) => project.status))
@@ -475,18 +530,14 @@ export function selectDevelopmentModel(snapshot: AnalyticsSnapshot, options: Dev
   ).map(([type, count]) => ({ type, count }));
 
   const developmentHoursByPhase = buildHoursSeries(
-    snapshot.timeLogs
-      .filter((row) => row.matched_project_key && activeKeys.has(row.matched_project_key))
+    activeProjectLogs
       .filter((row) => {
-        const project = row.matched_project_key
-          ? activeProjects.find((entry) => entry.project_key === row.matched_project_key)
-          : null;
+        const project = row.matched_project_key ? activeProjectByKey.get(row.matched_project_key) : null;
         if (!project) return false;
 
         return (
-          matchesSelected(options.chartFilters?.developmentHoursByPhase?.owners, project.primary_id_assigned || "Unassigned") &&
-          matchesSelected(options.chartFilters?.developmentHoursByPhase?.courseTypes, labelOrUnknown(project.course_type)) &&
-          matchesSelected(options.chartFilters?.developmentHoursByPhase?.authoringTools, labelOrUnknown(project.authoring_tool))
+          matchesProjectChartFilters(project, options.chartFilters?.developmentHoursByPhase) &&
+          matchesSelected(options.chartFilters?.developmentHoursByPhase?.roleGroups, row.role_group)
         );
       })
       .map((row) => ({ key: row.category_phase, minutes: row.minutes })),
@@ -558,25 +609,44 @@ export function selectDevelopmentModel(snapshot: AnalyticsSnapshot, options: Dev
 
 export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters: SmeCollaborationFilters = {}) {
   const projectMap = buildProjectMap(snapshot);
-  // ID-facing metrics must come only from the instructional designer survey instrument.
-  const allIdRows = snapshot.smeFeedbackIdView.filter((row) =>
-    (!filters.startDate && !filters.endDate ? true : inDateRange(row.survey_date, filters.startDate, filters.endDate)),
-  );
+  const allSmeRows = snapshot.smeFeedbackSmeView;
+  const smeByRawIdAll = new Map(allSmeRows.map((row) => [row.raw_sme_feedback_row_id, row]));
+  const baseFilters: SmeSurveyChartFilters = {
+    internalValues: filters.internalValues,
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+  };
 
-  // SME-facing metrics must come only from the SME survey instrument.
-  const smeRows = snapshot.smeFeedbackSmeView.filter((row) =>
-    matchesSelected(filters.internalValues, getSmeInternalLabel(row.internal)) &&
-    (!filters.startDate && !filters.endDate ? true : inDateRange(row.survey_date, filters.startDate, filters.endDate)),
-  );
+  const matchesSmeRow = (row: SmeSmeFeedbackRow, chartFilters: SmeSurveyChartFilters | undefined) =>
+    matchesSelected(chartFilters?.internalValues, getSmeInternalLabel(row.internal)) &&
+    matchesSelected(chartFilters?.instructionalDesigners, row.instructional_designer || "Unknown ID") &&
+    matchesSelected(chartFilters?.smes, row.sme || "Unknown SME") &&
+    matchesSelected(chartFilters?.reportingYears, row.reporting_year || "Unknown") &&
+    (!chartFilters?.startDate && !chartFilters?.endDate ? true : inDateRange(row.survey_date, chartFilters.startDate, chartFilters.endDate));
 
-  const internalFilteredIds = filters.internalValues?.length
-    ? new Set(smeRows.map((row) => row.raw_sme_feedback_row_id))
-    : null;
-  const idRows = allIdRows.filter((row) => !internalFilteredIds || internalFilteredIds.has(row.raw_sme_feedback_row_id));
+  const matchesIdRow = (row: SmeIdFeedbackRow, chartFilters: SmeSurveyChartFilters | undefined) => {
+    const pairedSmeRow = smeByRawIdAll.get(row.raw_sme_feedback_row_id);
+    return (
+      matchesSelected(chartFilters?.instructionalDesigners, row.instructional_designer || "Unknown ID") &&
+      matchesSelected(chartFilters?.smes, row.sme || "Unknown SME") &&
+      matchesSelected(chartFilters?.reportingYears, row.reporting_year || "Unknown") &&
+      (!chartFilters?.internalValues?.length || (pairedSmeRow && matchesSelected(chartFilters.internalValues, getSmeInternalLabel(pairedSmeRow.internal)))) &&
+      (!chartFilters?.startDate && !chartFilters?.endDate ? true : inDateRange(row.survey_date, chartFilters.startDate, chartFilters.endDate))
+    );
+  };
 
-  const relevantIds = new Set([...idRows, ...smeRows].map((row) => row.raw_sme_feedback_row_id));
-  const relevantJoinRows = snapshot.smeJoinAudit.filter((row) => relevantIds.has(row.raw_sme_feedback_row_id));
+  const filterIdRows = (chartFilters: SmeSurveyChartFilters | undefined) =>
+    snapshot.smeFeedbackIdView.filter((row) => matchesIdRow(row, chartFilters));
+  const filterSmeRows = (chartFilters: SmeSurveyChartFilters | undefined) =>
+    allSmeRows.filter((row) => matchesSmeRow(row, chartFilters));
+  const relevantJoinRowsFor = (idRows: SmeIdFeedbackRow[], smeRows: SmeSmeFeedbackRow[]) => {
+    const relevantIds = new Set([...idRows, ...smeRows].map((row) => row.raw_sme_feedback_row_id));
+    return snapshot.smeJoinAudit.filter((row) => relevantIds.has(row.raw_sme_feedback_row_id));
+  };
 
+  const idRows = filterIdRows(baseFilters);
+  const smeRows = filterSmeRows(baseFilters);
+  const relevantJoinRows = relevantJoinRowsFor(idRows, smeRows);
   const unresolvedCount = relevantJoinRows.filter((row) => row.join_status !== "matched").length;
   const idOverallRatings = idRows
     .map((row) => row.overall_collaboration_rating)
@@ -598,8 +668,9 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
     "likelihood_to_recommend_lexipol",
   ];
 
+  const matrixSmeRows = filterSmeRows(filters.matrix ?? baseFilters);
   const smeQuestionMatrix = smeQuestionKeys.map((key) => {
-    const scores = smeRows
+    const scores = matrixSmeRows
       .map((row) => row[key] as number | null)
       .filter((value): value is number => value !== null);
 
@@ -626,7 +697,8 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
     average: row.average,
   }));
 
-  const bySme = smeRows.reduce<Record<string, { responses: number; scores: number[] }>>((acc, row) => {
+  const bySmeRows = filterSmeRows(filters.bySme ?? baseFilters);
+  const bySme = bySmeRows.reduce<Record<string, { responses: number; scores: number[] }>>((acc, row) => {
     const key = row.sme || "Unknown SME";
     const scores = [
       row.overall_experience_with_lexipol,
@@ -646,7 +718,8 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
     return acc;
   }, {});
 
-  const byInstructionalDesigner = idRows.reduce<Record<string, { responses: number; ratings: number[]; promoters: number[] }>>((acc, row) => {
+  const byIdRows = filterIdRows(filters.byInstructionalDesigner ?? baseFilters);
+  const byInstructionalDesigner = byIdRows.reduce<Record<string, { responses: number; ratings: number[]; promoters: number[] }>>((acc, row) => {
     const key = row.instructional_designer || "Unknown ID";
     if (!acc[key]) acc[key] = { responses: 0, ratings: [], promoters: [] };
     acc[key].responses += 1;
@@ -655,7 +728,8 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
     return acc;
   }, {});
 
-  const byReportingYear = relevantJoinRows.reduce<Record<string, number>>((acc, row) => {
+  const yearFilters = filters.responsesByReportingYear ?? baseFilters;
+  const byReportingYear = relevantJoinRowsFor(filterIdRows(yearFilters), filterSmeRows(yearFilters)).reduce<Record<string, number>>((acc, row) => {
     const year = row.reporting_year || "Unknown";
     acc[year] = (acc[year] || 0) + 1;
     return acc;
@@ -669,40 +743,58 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
       return acc;
     }, {});
 
-  const idByRawId = new Map(idRows.map((row) => [row.raw_sme_feedback_row_id, row]));
-  const smeByRawId = new Map(smeRows.map((row) => [row.raw_sme_feedback_row_id, row]));
-  const matchedResponses = relevantJoinRows
-    .filter((row) => row.matched_project_key)
-    .map((row) => {
-      const project = projectMap.get(row.matched_project_key!);
-      const idRow = idByRawId.get(row.raw_sme_feedback_row_id);
-      const smeRow = smeByRawId.get(row.raw_sme_feedback_row_id);
+  const buildMatchedResponses = (idRowsForResponses: SmeIdFeedbackRow[], smeRowsForResponses: SmeSmeFeedbackRow[]) => {
+    const idByRawId = new Map(idRowsForResponses.map((row) => [row.raw_sme_feedback_row_id, row]));
+    const smeByRawId = new Map(smeRowsForResponses.map((row) => [row.raw_sme_feedback_row_id, row]));
+    return relevantJoinRowsFor(idRowsForResponses, smeRowsForResponses)
+      .filter((row) => row.matched_project_key)
+      .map((row) => {
+        const project = projectMap.get(row.matched_project_key!);
+        const idRow = idByRawId.get(row.raw_sme_feedback_row_id);
+        const smeRow = smeByRawId.get(row.raw_sme_feedback_row_id);
 
-      return {
-        rawSmeFeedbackRowId: row.raw_sme_feedback_row_id,
-        projectKey: row.matched_project_key!,
-        projectName: project?.raw_course_name || row.course_name_raw,
-        reportingYear: project?.reporting_year || row.reporting_year || "Unknown",
-        instructionalDesigner: idRow?.instructional_designer || smeRow?.instructional_designer || "Unknown ID",
-        sme: smeRow?.sme || idRow?.sme || "Unknown SME",
-        smeResponse: smeRow?.additional_feedback_or_suggestions || "",
-        designerComments: idRow?.additional_comments || "",
-      };
-    })
-    .filter((row) => row.smeResponse || row.designerComments)
-    .sort((a, b) => a.projectName.localeCompare(b.projectName) || a.rawSmeFeedbackRowId.localeCompare(b.rawSmeFeedbackRowId));
-
-  const matchedResponseFilterOptions = {
-    instructionalDesigners: uniqueSorted(matchedResponses.map((row) => row.instructionalDesigner)),
-    smes: uniqueSorted(matchedResponses.map((row) => row.sme)),
-    reportingYears: uniqueSorted(matchedResponses.map((row) => row.reportingYear)),
+        return {
+          rawSmeFeedbackRowId: row.raw_sme_feedback_row_id,
+          projectKey: row.matched_project_key!,
+          projectName: project?.raw_course_name || row.course_name_raw,
+          reportingYear: project?.reporting_year || row.reporting_year || "Unknown",
+          instructionalDesigner: idRow?.instructional_designer || smeRow?.instructional_designer || "Unknown ID",
+          sme: smeRow?.sme || idRow?.sme || "Unknown SME",
+          smeResponse: smeRow?.additional_feedback_or_suggestions || "",
+          designerComments: idRow?.additional_comments || "",
+        };
+      })
+      .filter((row) => row.smeResponse || row.designerComments)
+      .sort((a, b) => a.projectName.localeCompare(b.projectName) || a.rawSmeFeedbackRowId.localeCompare(b.rawSmeFeedbackRowId));
   };
 
-  const filteredMatchedResponses = matchedResponses.filter((row) =>
-    matchesSelected(filters.matchedResponses?.instructionalDesigners, row.instructionalDesigner) &&
-    matchesSelected(filters.matchedResponses?.smes, row.sme) &&
-    matchesSelected(filters.matchedResponses?.reportingYears, row.reportingYear),
-  );
+  const allMatchedResponses = buildMatchedResponses(snapshot.smeFeedbackIdView, allSmeRows);
+  const matchedResponseFilters = filters.matchedResponses ? { ...baseFilters, ...filters.matchedResponses } : baseFilters;
+  const filteredMatchedResponses = buildMatchedResponses(filterIdRows(matchedResponseFilters), filterSmeRows(matchedResponseFilters));
+
+  const matchedResponseFilterOptions = {
+    instructionalDesigners: uniqueSorted(allMatchedResponses.map((row) => row.instructionalDesigner)),
+    smes: uniqueSorted(allMatchedResponses.map((row) => row.sme)),
+    reportingYears: uniqueSorted(allMatchedResponses.map((row) => row.reportingYear)),
+    internalValues: uniqueSorted(allSmeRows.map((row) => getSmeInternalLabel(row.internal))),
+  };
+
+  const chartFilterOptions = {
+    internalValues: matchedResponseFilterOptions.internalValues,
+    instructionalDesigners: uniqueSorted([
+      ...snapshot.smeFeedbackIdView.map((row) => row.instructional_designer || "Unknown ID"),
+      ...allSmeRows.map((row) => row.instructional_designer || "Unknown ID"),
+    ]),
+    smes: uniqueSorted([
+      ...snapshot.smeFeedbackIdView.map((row) => row.sme || "Unknown SME"),
+      ...allSmeRows.map((row) => row.sme || "Unknown SME"),
+    ]),
+    reportingYears: uniqueSorted([
+      ...snapshot.smeFeedbackIdView.map((row) => row.reporting_year || "Unknown"),
+      ...allSmeRows.map((row) => row.reporting_year || "Unknown"),
+    ]),
+  };
+  const relevantIds = new Set([...idRows, ...smeRows].map((row) => row.raw_sme_feedback_row_id));
 
   return {
     cards: {
@@ -741,6 +833,7 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
       .sort((a, b) => b.responses - a.responses || a.projectName.localeCompare(b.projectName)),
     matchedResponses: filteredMatchedResponses,
     matchedResponseFilterOptions,
+    chartFilterOptions,
     sourceVerification: {
       instructionalDesignerBreakdown: "smeFeedbackIdView",
       smeExperienceBreakdown: "smeFeedbackSmeView",
@@ -860,17 +953,25 @@ export function selectProjectsPageRows(snapshot: AnalyticsSnapshot) {
   }));
 }
 
-export function selectProjectDetailModel(snapshot: AnalyticsSnapshot, projectKey: string) {
+export function selectProjectDetailModel(snapshot: AnalyticsSnapshot, projectKey: string, options: ProjectDetailOptions = {}) {
+  const projectMap = buildProjectMap(snapshot);
+  const workEntityMap = buildWorkEntityMap(snapshot);
   const project = snapshot.canonicalProjects.find((entry) => entry.project_key === projectKey);
   if (!project) return null;
 
   const matchedTimeLogs = snapshot.timeLogs.filter((row) => row.matched_project_key === projectKey);
+  const phaseBreakdownTimeLogs = matchedTimeLogs.filter((row) =>
+    matchesTimeLogChartFilters(row, options.phaseBreakdown, projectMap, workEntityMap),
+  );
+  const timelineTimeLogs = matchedTimeLogs.filter((row) =>
+    matchesTimeLogChartFilters(row, options.timeline, projectMap, workEntityMap),
+  );
   const phaseBreakdown = buildHoursSeries(
-    matchedTimeLogs.map((row) => ({ key: row.category_phase, minutes: row.minutes })),
+    phaseBreakdownTimeLogs.map((row) => ({ key: row.category_phase, minutes: row.minutes })),
   ).map(([phase, hours]) => ({ phase, hours: round(hours, 1) }));
 
   const dailyTimeline = Object.entries(
-    matchedTimeLogs.reduce<Record<string, number>>((acc, row) => {
+    timelineTimeLogs.reduce<Record<string, number>>((acc, row) => {
       if (!row.log_date) return acc;
       acc[row.log_date] = (acc[row.log_date] || 0) + (row.minutes ?? 0) / 60;
       return acc;
@@ -966,6 +1067,11 @@ export function selectProjectDetailModel(snapshot: AnalyticsSnapshot, projectKey
       granularity: dailyTimeline.length > 45 ? "weekly" : "daily",
       points: timelinePoints,
     },
+    chartFilterOptions: {
+      phases: uniqueSorted(matchedTimeLogs.map((row) => row.category_phase)),
+      roleGroups: uniqueSorted(matchedTimeLogs.map((row) => row.role_group)),
+      users: uniqueSorted(matchedTimeLogs.map((row) => row.canonical_user_name || "Unknown")),
+    },
     smeFeedback: {
       idResponseCount: idFeedback.length,
       smeResponseCount: smeFeedback.length,
@@ -994,7 +1100,7 @@ export function selectProjectDetailModel(snapshot: AnalyticsSnapshot, projectKey
   };
 }
 
-export function selectPersonDetailModel(snapshot: AnalyticsSnapshot, canonicalName: string) {
+export function selectPersonDetailModel(snapshot: AnalyticsSnapshot, canonicalName: string, options: PersonDetailOptions = {}) {
   const personName = normalizePersonName(canonicalName);
   if (!personName) return null;
 
@@ -1064,10 +1170,22 @@ export function selectPersonDetailModel(snapshot: AnalyticsSnapshot, canonicalNa
       )
     : null;
 
-  const idStatusBreakdown = buildCountSeries(idAssignedProjects.map((project) => project.status))
+  const idStatusProjects = idAssignedProjects.filter((project) =>
+    matchesProjectChartFilters(project, options.idStatusBreakdown),
+  );
+  const idPhaseTimeLogs = ownedProjectTimeLogs.filter((row) => {
+    const project = row.matched_project_key ? projectMap.get(row.matched_project_key) : null;
+    return (
+      Boolean(project) &&
+      matchesProjectChartFilters(project!, options.idPhaseBreakdown) &&
+      matchesSelected(options.idPhaseBreakdown?.roleGroups, row.role_group)
+    );
+  });
+
+  const idStatusBreakdown = buildCountSeries(idStatusProjects.map((project) => project.status))
     .map(([status, count]) => ({ status, count }));
   const idPhaseBreakdown = buildHoursSeries(
-    ownedProjectTimeLogs.map((row) => ({ key: row.category_phase, minutes: row.minutes })),
+    idPhaseTimeLogs.map((row) => ({ key: row.category_phase, minutes: row.minutes })),
   ).map(([phase, hours]) => ({ phase, hours: round(hours, 1) }));
 
   const internalValues = uniqueSorted(smeSurveyRows.map((row) => getSmeInternalLabel(row.internal)));
@@ -1197,6 +1315,12 @@ export function selectPersonDetailModel(snapshot: AnalyticsSnapshot, canonicalNa
       ),
       statusBreakdown: idStatusBreakdown,
       phaseBreakdown: idPhaseBreakdown,
+      chartFilterOptions: {
+        reportingYears: uniqueSorted(idAssignedProjects.map((project) => project.reporting_year || "Unknown")),
+        authoringTools: uniqueSorted(idAssignedProjects.map((project) => labelOrUnknown(project.authoring_tool))),
+        courseTypes: uniqueSorted(idAssignedProjects.map((project) => labelOrUnknown(project.course_type))),
+        roleGroups: uniqueSorted(ownedProjectTimeLogs.map((row) => row.role_group)),
+      },
       ownedProjects: idAssignedProjects
         .map((project) => ({
           ...toProjectDisplay(project),

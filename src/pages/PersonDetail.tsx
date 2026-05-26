@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -8,6 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartPanel } from "@/components/ChartPanel";
+import { CHART_FILTER_VARIANT, ChartFilterBar } from "@/components/ChartFilters";
+import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
 import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
@@ -29,19 +31,49 @@ function SummaryCard({ label, value, hint }: { label: string; value: string | nu
   );
 }
 
+function toOptions(values: string[]): CompactFilterOption[] {
+  return values.map((value) => ({ label: value, value }));
+}
+
+function chartHeight(count: number, minimum = 320, maximum = 560) {
+  return Math.max(minimum, Math.min(maximum, count * 38 + 120));
+}
+
 export default function PersonDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
+  const [statusYears, setStatusYears] = useState<string[]>([]);
+  const [statusTools, setStatusTools] = useState<string[]>([]);
+  const [statusTypes, setStatusTypes] = useState<string[]>([]);
+  const [phaseYears, setPhaseYears] = useState<string[]>([]);
+  const [phaseTools, setPhaseTools] = useState<string[]>([]);
+  const [phaseTypes, setPhaseTypes] = useState<string[]>([]);
+  const [phaseRoles, setPhaseRoles] = useState<string[]>([]);
 
   const canonicalName = useMemo(
     () => (snapshot ? resolvePersonNameFromRoute(snapshot, params.personSlug) : null),
     [params.personSlug, snapshot],
   );
   const model = useMemo(
-    () => (snapshot && canonicalName ? selectPersonDetailModel(snapshot, canonicalName) : null),
-    [canonicalName, snapshot],
+    () =>
+      snapshot && canonicalName
+        ? selectPersonDetailModel(snapshot, canonicalName, {
+            idStatusBreakdown: {
+              reportingYears: statusYears,
+              authoringTools: statusTools,
+              courseTypes: statusTypes,
+            },
+            idPhaseBreakdown: {
+              reportingYears: phaseYears,
+              authoringTools: phaseTools,
+              courseTypes: phaseTypes,
+              roleGroups: phaseRoles,
+            },
+          })
+        : null,
+    [canonicalName, phaseRoles, phaseTools, phaseTypes, phaseYears, snapshot, statusTools, statusTypes, statusYears],
   );
 
   if (isLoading) {
@@ -174,13 +206,22 @@ export default function PersonDetail() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <ChartPanel title="Assigned Projects by Status">
-              <div className="h-[320px]">
+            <ChartPanel
+              title="Assigned Projects by Status"
+              filters={
+                <ChartFilterBar>
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Year" options={toOptions(model.idView.chartFilterOptions.reportingYears)} selected={statusYears} onChange={setStatusYears} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Tool" options={toOptions(model.idView.chartFilterOptions.authoringTools)} selected={statusTools} onChange={setStatusTools} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Type" options={toOptions(model.idView.chartFilterOptions.courseTypes)} selected={statusTypes} onChange={setStatusTypes} />
+                </ChartFilterBar>
+              }
+            >
+              <div style={{ height: chartHeight(model.idView.statusBreakdown.length) }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={model.idView.statusBreakdown} layout="vertical" margin={{ left: 24 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" allowDecimals={false} />
-                    <YAxis type="category" dataKey="status" width={170} />
+                    <YAxis type="category" dataKey="status" width={170} interval={0} />
                     <Tooltip />
                     <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
                   </BarChart>
@@ -188,7 +229,17 @@ export default function PersonDetail() {
               </div>
             </ChartPanel>
 
-            <ChartPanel title="Owned Project Hours by Phase">
+            <ChartPanel
+              title="Owned Project Hours by Phase"
+              filters={
+                <ChartFilterBar>
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Year" options={toOptions(model.idView.chartFilterOptions.reportingYears)} selected={phaseYears} onChange={setPhaseYears} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Tool" options={toOptions(model.idView.chartFilterOptions.authoringTools)} selected={phaseTools} onChange={setPhaseTools} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Type" options={toOptions(model.idView.chartFilterOptions.courseTypes)} selected={phaseTypes} onChange={setPhaseTypes} />
+                  <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Role" options={toOptions(model.idView.chartFilterOptions.roleGroups)} selected={phaseRoles} onChange={setPhaseRoles} />
+                </ChartFilterBar>
+              }
+            >
               <div className="h-[320px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={model.idView.phaseBreakdown}>

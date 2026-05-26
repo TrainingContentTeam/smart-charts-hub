@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ChartPanel } from "@/components/ChartPanel";
+import { CHART_FILTER_VARIANT, ChartDateRangeFilter, ChartFilterBar } from "@/components/ChartFilters";
+import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
 import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
@@ -28,19 +30,61 @@ function SummaryCard({ label, value, hint }: { label: string; value: string; hin
   );
 }
 
+function toOptions(values: string[]): CompactFilterOption[] {
+  return values.map((value) => ({ label: value, value }));
+}
+
 export default function ProjectDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
+  const [phaseRoles, setPhaseRoles] = useState<string[]>([]);
+  const [phaseUsers, setPhaseUsers] = useState<string[]>([]);
+  const [phaseStartDate, setPhaseStartDate] = useState("");
+  const [phaseEndDate, setPhaseEndDate] = useState("");
+  const [timelinePhases, setTimelinePhases] = useState<string[]>([]);
+  const [timelineRoles, setTimelineRoles] = useState<string[]>([]);
+  const [timelineUsers, setTimelineUsers] = useState<string[]>([]);
+  const [timelineStartDate, setTimelineStartDate] = useState("");
+  const [timelineEndDate, setTimelineEndDate] = useState("");
 
   const project = useMemo(
     () => (snapshot ? resolveProjectFromRoute(snapshot, params.reportingYear, params.projectSlug) : null),
     [params.projectSlug, params.reportingYear, snapshot],
   );
   const model = useMemo(
-    () => (snapshot && project ? selectProjectDetailModel(snapshot, project.project_key) : null),
-    [project, snapshot],
+    () =>
+      snapshot && project
+        ? selectProjectDetailModel(snapshot, project.project_key, {
+            phaseBreakdown: {
+              roleGroups: phaseRoles,
+              users: phaseUsers,
+              startDate: phaseStartDate || null,
+              endDate: phaseEndDate || null,
+            },
+            timeline: {
+              phases: timelinePhases,
+              roleGroups: timelineRoles,
+              users: timelineUsers,
+              startDate: timelineStartDate || null,
+              endDate: timelineEndDate || null,
+            },
+          })
+        : null,
+    [
+      phaseEndDate,
+      phaseRoles,
+      phaseStartDate,
+      phaseUsers,
+      project,
+      snapshot,
+      timelineEndDate,
+      timelinePhases,
+      timelineRoles,
+      timelineStartDate,
+      timelineUsers,
+    ],
   );
 
   if (isLoading) {
@@ -154,7 +198,16 @@ export default function ProjectDetail() {
         </Card>
       ) : null}
 
-      <ChartPanel title="Phase Breakdown">
+      <ChartPanel
+        title="Phase Breakdown"
+        filters={
+          <ChartFilterBar>
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Role" options={toOptions(model.chartFilterOptions.roleGroups)} selected={phaseRoles} onChange={setPhaseRoles} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="User" options={toOptions(model.chartFilterOptions.users)} selected={phaseUsers} onChange={setPhaseUsers} />
+            <ChartDateRangeFilter startDate={phaseStartDate} endDate={phaseEndDate} onStartDateChange={setPhaseStartDate} onEndDateChange={setPhaseEndDate} />
+          </ChartFilterBar>
+        }
+      >
         <div className="h-[320px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={model.phaseBreakdown}>
@@ -168,7 +221,17 @@ export default function ProjectDetail() {
         </div>
       </ChartPanel>
 
-      <ChartPanel title={`Development Timeline (${model.timeline.granularity})`}>
+      <ChartPanel
+        title={`Development Timeline (${model.timeline.granularity})`}
+        filters={
+          <ChartFilterBar>
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Phase" options={toOptions(model.chartFilterOptions.phases)} selected={timelinePhases} onChange={setTimelinePhases} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Role" options={toOptions(model.chartFilterOptions.roleGroups)} selected={timelineRoles} onChange={setTimelineRoles} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="User" options={toOptions(model.chartFilterOptions.users)} selected={timelineUsers} onChange={setTimelineUsers} />
+            <ChartDateRangeFilter startDate={timelineStartDate} endDate={timelineEndDate} onStartDateChange={setTimelineStartDate} onEndDateChange={setTimelineEndDate} />
+          </ChartFilterBar>
+        }
+      >
         <div className="h-[340px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={model.timeline.points}>

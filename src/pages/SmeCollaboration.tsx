@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChartPanel } from "@/components/ChartPanel";
+import { CHART_FILTER_VARIANT, ChartDateRangeFilter, ChartFilterBar } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
 import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
@@ -48,28 +48,104 @@ function HeatCell({
 
 export default function SmeCollaboration() {
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
-  const [internalValues, setInternalValues] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [matrixInternal, setMatrixInternal] = useState<string[]>([]);
+  const [matrixIds, setMatrixIds] = useState<string[]>([]);
+  const [matrixSmes, setMatrixSmes] = useState<string[]>([]);
+  const [matrixYears, setMatrixYears] = useState<string[]>([]);
+  const [matrixStartDate, setMatrixStartDate] = useState("");
+  const [matrixEndDate, setMatrixEndDate] = useState("");
+  const [yearInternal, setYearInternal] = useState<string[]>([]);
+  const [yearIds, setYearIds] = useState<string[]>([]);
+  const [yearSmes, setYearSmes] = useState<string[]>([]);
+  const [yearStartDate, setYearStartDate] = useState("");
+  const [yearEndDate, setYearEndDate] = useState("");
+  const [idBreakdownSmes, setIdBreakdownSmes] = useState<string[]>([]);
+  const [idBreakdownYears, setIdBreakdownYears] = useState<string[]>([]);
+  const [idBreakdownStartDate, setIdBreakdownStartDate] = useState("");
+  const [idBreakdownEndDate, setIdBreakdownEndDate] = useState("");
+  const [smeBreakdownInternal, setSmeBreakdownInternal] = useState<string[]>([]);
+  const [smeBreakdownIds, setSmeBreakdownIds] = useState<string[]>([]);
+  const [smeBreakdownYears, setSmeBreakdownYears] = useState<string[]>([]);
+  const [smeBreakdownStartDate, setSmeBreakdownStartDate] = useState("");
+  const [smeBreakdownEndDate, setSmeBreakdownEndDate] = useState("");
   const [matchedIds, setMatchedIds] = useState<string[]>([]);
   const [matchedSmes, setMatchedSmes] = useState<string[]>([]);
   const [matchedYears, setMatchedYears] = useState<string[]>([]);
+  const [matchedInternal, setMatchedInternal] = useState<string[]>([]);
+  const [matchedStartDate, setMatchedStartDate] = useState("");
+  const [matchedEndDate, setMatchedEndDate] = useState("");
 
   const model = useMemo(
     () =>
       snapshot
         ? selectSmeCollaborationModel(snapshot, {
-            internalValues,
-            startDate: startDate || null,
-            endDate: endDate || null,
+            matrix: {
+              internalValues: matrixInternal,
+              instructionalDesigners: matrixIds,
+              smes: matrixSmes,
+              reportingYears: matrixYears,
+              startDate: matrixStartDate || null,
+              endDate: matrixEndDate || null,
+            },
+            responsesByReportingYear: {
+              internalValues: yearInternal,
+              instructionalDesigners: yearIds,
+              smes: yearSmes,
+              startDate: yearStartDate || null,
+              endDate: yearEndDate || null,
+            },
+            byInstructionalDesigner: {
+              smes: idBreakdownSmes,
+              reportingYears: idBreakdownYears,
+              startDate: idBreakdownStartDate || null,
+              endDate: idBreakdownEndDate || null,
+            },
+            bySme: {
+              internalValues: smeBreakdownInternal,
+              instructionalDesigners: smeBreakdownIds,
+              reportingYears: smeBreakdownYears,
+              startDate: smeBreakdownStartDate || null,
+              endDate: smeBreakdownEndDate || null,
+            },
             matchedResponses: {
               instructionalDesigners: matchedIds,
               smes: matchedSmes,
               reportingYears: matchedYears,
+              internalValues: matchedInternal,
+              startDate: matchedStartDate || null,
+              endDate: matchedEndDate || null,
             },
           })
         : null,
-    [endDate, internalValues, matchedIds, matchedSmes, matchedYears, snapshot, startDate],
+    [
+      idBreakdownEndDate,
+      idBreakdownSmes,
+      idBreakdownStartDate,
+      idBreakdownYears,
+      matchedEndDate,
+      matchedIds,
+      matchedInternal,
+      matchedSmes,
+      matchedStartDate,
+      matchedYears,
+      matrixEndDate,
+      matrixIds,
+      matrixInternal,
+      matrixSmes,
+      matrixStartDate,
+      matrixYears,
+      smeBreakdownEndDate,
+      smeBreakdownIds,
+      smeBreakdownInternal,
+      smeBreakdownStartDate,
+      smeBreakdownYears,
+      snapshot,
+      yearEndDate,
+      yearIds,
+      yearInternal,
+      yearSmes,
+      yearStartDate,
+    ],
   );
 
   const internalOptions = useMemo(
@@ -110,23 +186,6 @@ export default function SmeCollaboration() {
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Filters</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          <CompactMultiSelectFilter label="Internal" options={internalOptions} selected={internalValues} onChange={setInternalValues} />
-          <div className="grid gap-1">
-            <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Start Date</span>
-            <Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="w-[180px]" />
-          </div>
-          <div className="grid gap-1">
-            <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">End Date</span>
-            <Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="w-[180px]" />
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Response Count" value={model.cards.responseCount} />
         <SummaryCard label="Avg Collaboration Rating" value={model.cards.averageOverallCollaborationRating || "-"} />
@@ -134,7 +193,18 @@ export default function SmeCollaboration() {
         <SummaryCard label="Unresolved / Ambiguous Rows" value={model.cards.unresolvedRowsCount} />
       </div>
 
-      <ChartPanel title="SME Satisfaction by Question (SME View)">
+      <ChartPanel
+        title="SME Satisfaction by Question (SME View)"
+        filters={
+          <ChartFilterBar>
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Internal" options={internalOptions} selected={matrixInternal} onChange={setMatrixInternal} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Year" options={toOptions(model.chartFilterOptions.reportingYears)} selected={matrixYears} onChange={setMatrixYears} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="ID" options={toOptions(model.chartFilterOptions.instructionalDesigners)} selected={matrixIds} onChange={setMatrixIds} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="SME" options={toOptions(model.chartFilterOptions.smes)} selected={matrixSmes} onChange={setMatrixSmes} />
+            <ChartDateRangeFilter startDate={matrixStartDate} endDate={matrixEndDate} onStartDateChange={setMatrixStartDate} onEndDateChange={setMatrixEndDate} />
+          </ChartFilterBar>
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -165,7 +235,17 @@ export default function SmeCollaboration() {
         </Table>
       </ChartPanel>
 
-      <ChartPanel title="Responses by Reporting Year">
+      <ChartPanel
+        title="Responses by Reporting Year"
+        filters={
+          <ChartFilterBar>
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Internal" options={internalOptions} selected={yearInternal} onChange={setYearInternal} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="ID" options={toOptions(model.chartFilterOptions.instructionalDesigners)} selected={yearIds} onChange={setYearIds} />
+            <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="SME" options={toOptions(model.chartFilterOptions.smes)} selected={yearSmes} onChange={setYearSmes} />
+            <ChartDateRangeFilter startDate={yearStartDate} endDate={yearEndDate} onStartDateChange={setYearStartDate} onEndDateChange={setYearEndDate} />
+          </ChartFilterBar>
+        }
+      >
         <div className="h-[320px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={model.byReportingYear}>
@@ -183,6 +263,13 @@ export default function SmeCollaboration() {
         <ChartPanel
           title="ID → SME Evaluation Breakdown"
           info="These scores come from the instructional designer survey and reflect the ID’s evaluation of the SME."
+          filters={
+            <ChartFilterBar>
+              <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="SME" options={toOptions(model.chartFilterOptions.smes)} selected={idBreakdownSmes} onChange={setIdBreakdownSmes} />
+              <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Year" options={toOptions(model.chartFilterOptions.reportingYears)} selected={idBreakdownYears} onChange={setIdBreakdownYears} />
+              <ChartDateRangeFilter startDate={idBreakdownStartDate} endDate={idBreakdownEndDate} onStartDateChange={setIdBreakdownStartDate} onEndDateChange={setIdBreakdownEndDate} />
+            </ChartFilterBar>
+          }
         >
           <Table>
             <TableHeader>
@@ -211,6 +298,14 @@ export default function SmeCollaboration() {
         <ChartPanel
           title="SME → Lexipol Experience Breakdown"
           info="These scores come from the SME-facing survey and reflect the SME’s review of the Lexipol experience."
+          filters={
+            <ChartFilterBar>
+              <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Internal" options={internalOptions} selected={smeBreakdownInternal} onChange={setSmeBreakdownInternal} />
+              <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="ID" options={toOptions(model.chartFilterOptions.instructionalDesigners)} selected={smeBreakdownIds} onChange={setSmeBreakdownIds} />
+              <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Year" options={toOptions(model.chartFilterOptions.reportingYears)} selected={smeBreakdownYears} onChange={setSmeBreakdownYears} />
+              <ChartDateRangeFilter startDate={smeBreakdownStartDate} endDate={smeBreakdownEndDate} onStartDateChange={setSmeBreakdownStartDate} onEndDateChange={setSmeBreakdownEndDate} />
+            </ChartFilterBar>
+          }
         >
           <Table>
             <TableHeader>
@@ -238,26 +333,37 @@ export default function SmeCollaboration() {
       <ChartPanel
         title="Matched Responses"
         filters={
-          <>
+          <ChartFilterBar>
             <CompactMultiSelectFilter
+              variant={CHART_FILTER_VARIANT}
               label="ID"
               options={toOptions(model.matchedResponseFilterOptions.instructionalDesigners)}
               selected={matchedIds}
               onChange={setMatchedIds}
             />
             <CompactMultiSelectFilter
+              variant={CHART_FILTER_VARIANT}
               label="SME"
               options={toOptions(model.matchedResponseFilterOptions.smes)}
               selected={matchedSmes}
               onChange={setMatchedSmes}
             />
             <CompactMultiSelectFilter
+              variant={CHART_FILTER_VARIANT}
               label="Year"
               options={toOptions(model.matchedResponseFilterOptions.reportingYears)}
               selected={matchedYears}
               onChange={setMatchedYears}
             />
-          </>
+            <CompactMultiSelectFilter
+              variant={CHART_FILTER_VARIANT}
+              label="Internal"
+              options={internalOptions}
+              selected={matchedInternal}
+              onChange={setMatchedInternal}
+            />
+            <ChartDateRangeFilter startDate={matchedStartDate} endDate={matchedEndDate} onStartDateChange={setMatchedStartDate} onEndDateChange={setMatchedEndDate} />
+          </ChartFilterBar>
         }
       >
         <Table>

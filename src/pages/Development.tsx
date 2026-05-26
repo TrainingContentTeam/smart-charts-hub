@@ -3,6 +3,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChartPanel } from "@/components/ChartPanel";
+import { CHART_FILTER_VARIANT, ChartFilterBar } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
 import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
@@ -37,17 +38,27 @@ export default function Development() {
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
 
   const currentYear = String(new Date().getFullYear());
+  const [statusYears, setStatusYears] = useState<string[]>([]);
   const [statusOwners, setStatusOwners] = useState<string[]>([]);
   const [statusTools, setStatusTools] = useState<string[]>([]);
+  const [statusTypes, setStatusTypes] = useState<string[]>([]);
   const [ownerYears, setOwnerYears] = useState<string[]>([]);
+  const [ownerStatuses, setOwnerStatuses] = useState<string[]>([]);
+  const [ownerTools, setOwnerTools] = useState<string[]>([]);
   const [ownerTypes, setOwnerTypes] = useState<string[]>([]);
+  const [phaseYears, setPhaseYears] = useState<string[]>([]);
   const [phaseOwners, setPhaseOwners] = useState<string[]>([]);
   const [phaseTypes, setPhaseTypes] = useState<string[]>([]);
   const [phaseTools, setPhaseTools] = useState<string[]>([]);
+  const [phaseRoles, setPhaseRoles] = useState<string[]>([]);
   const [toolYears, setToolYears] = useState<string[]>([]);
   const [toolOwners, setToolOwners] = useState<string[]>([]);
+  const [toolStatuses, setToolStatuses] = useState<string[]>([]);
+  const [toolTypes, setToolTypes] = useState<string[]>([]);
   const [typeYears, setTypeYears] = useState<string[]>([]);
   const [typeOwners, setTypeOwners] = useState<string[]>([]);
+  const [typeStatuses, setTypeStatuses] = useState<string[]>([]);
+  const [typeTools, setTypeTools] = useState<string[]>([]);
   const [activitySearch, setActivitySearch] = useState("");
   const [activityStatuses, setActivityStatuses] = useState<string[]>([]);
   const [activityOwners, setActivityOwners] = useState<string[]>([]);
@@ -63,11 +74,11 @@ export default function Development() {
         ? selectDevelopmentModel(snapshot, {
             currentYear,
             chartFilters: {
-              activeProjectsByStatus: { owners: statusOwners, authoringTools: statusTools },
-              activeProjectsByIdOwner: { reportingYears: ownerYears, courseTypes: ownerTypes },
-              developmentHoursByPhase: { owners: phaseOwners, courseTypes: phaseTypes, authoringTools: phaseTools },
-              activeProjectsByAuthoringTool: { reportingYears: toolYears, owners: toolOwners },
-              activeProjectsByCourseType: { reportingYears: typeYears, owners: typeOwners },
+              activeProjectsByStatus: { reportingYears: statusYears, owners: statusOwners, authoringTools: statusTools, courseTypes: statusTypes },
+              activeProjectsByIdOwner: { reportingYears: ownerYears, statuses: ownerStatuses, authoringTools: ownerTools, courseTypes: ownerTypes },
+              developmentHoursByPhase: { reportingYears: phaseYears, owners: phaseOwners, courseTypes: phaseTypes, authoringTools: phaseTools, roleGroups: phaseRoles },
+              activeProjectsByAuthoringTool: { reportingYears: toolYears, owners: toolOwners, statuses: toolStatuses, courseTypes: toolTypes },
+              activeProjectsByCourseType: { reportingYears: typeYears, owners: typeOwners, statuses: typeStatuses, authoringTools: typeTools },
             },
             latestActivity: {
               search: activitySearch,
@@ -83,19 +94,29 @@ export default function Development() {
       activitySearch,
       activityStatuses,
       currentYear,
+      ownerStatuses,
       ownerTypes,
+      ownerTools,
       ownerYears,
       phaseOwners,
+      phaseRoles,
       phaseTools,
       phaseTypes,
+      phaseYears,
       snapshot,
       sort.direction,
       sort.key,
       statusOwners,
       statusTools,
+      statusTypes,
+      statusYears,
       toolOwners,
+      toolStatuses,
+      toolTypes,
       toolYears,
       typeOwners,
+      typeStatuses,
+      typeTools,
       typeYears,
     ],
   );
@@ -137,20 +158,36 @@ export default function Development() {
         <ChartPanel
           title="Active Projects by Status"
           filters={
-            <>
+            <ChartFilterBar>
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Year"
+                options={toOptions(model.chartFilterOptions.reportingYears)}
+                selected={statusYears}
+                onChange={setStatusYears}
+              />
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Owner"
                 options={toOptions(model.chartFilterOptions.owners)}
                 selected={statusOwners}
                 onChange={setStatusOwners}
               />
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Tool"
                 options={toOptions(model.chartFilterOptions.authoringTools)}
                 selected={statusTools}
                 onChange={setStatusTools}
               />
-            </>
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Type"
+                options={toOptions(model.chartFilterOptions.courseTypes)}
+                selected={statusTypes}
+                onChange={setStatusTypes}
+              />
+            </ChartFilterBar>
           }
         >
           <div style={{ height: chartHeight(model.activeProjectsByStatus.length, 340) }}>
@@ -158,7 +195,7 @@ export default function Development() {
               <BarChart data={model.activeProjectsByStatus} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="status" width={180} />
+                <YAxis type="category" dataKey="status" width={180} interval={0} />
                 <Tooltip />
                 <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
               </BarChart>
@@ -169,20 +206,36 @@ export default function Development() {
         <ChartPanel
           title="Active Projects by ID Owner"
           filters={
-            <>
+            <ChartFilterBar>
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Year"
                 options={toOptions(model.chartFilterOptions.reportingYears)}
                 selected={ownerYears}
                 onChange={setOwnerYears}
               />
               <CompactMultiSelectFilter
-                label="Course Type"
+                variant={CHART_FILTER_VARIANT}
+                label="Status"
+                options={toOptions(model.chartFilterOptions.statuses)}
+                selected={ownerStatuses}
+                onChange={setOwnerStatuses}
+              />
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Tool"
+                options={toOptions(model.chartFilterOptions.authoringTools)}
+                selected={ownerTools}
+                onChange={setOwnerTools}
+              />
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Type"
                 options={toOptions(model.chartFilterOptions.courseTypes)}
                 selected={ownerTypes}
                 onChange={setOwnerTypes}
               />
-            </>
+            </ChartFilterBar>
           }
         >
           <div style={{ height: chartHeight(model.activeProjectsByIdOwner.length, 340) }}>
@@ -190,7 +243,7 @@ export default function Development() {
               <BarChart data={model.activeProjectsByIdOwner} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="owner" width={180} />
+                <YAxis type="category" dataKey="owner" width={180} interval={0} />
                 <Tooltip />
                 <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} />
               </BarChart>
@@ -203,26 +256,43 @@ export default function Development() {
         <ChartPanel
           title="Development Hours by Phase"
           filters={
-            <>
+            <ChartFilterBar>
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Year"
+                options={toOptions(model.chartFilterOptions.reportingYears)}
+                selected={phaseYears}
+                onChange={setPhaseYears}
+              />
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Owner"
                 options={toOptions(model.chartFilterOptions.owners)}
                 selected={phaseOwners}
                 onChange={setPhaseOwners}
               />
               <CompactMultiSelectFilter
-                label="Course Type"
-                options={toOptions(model.chartFilterOptions.courseTypes)}
-                selected={phaseTypes}
-                onChange={setPhaseTypes}
-              />
-              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Tool"
                 options={toOptions(model.chartFilterOptions.authoringTools)}
                 selected={phaseTools}
                 onChange={setPhaseTools}
               />
-            </>
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Type"
+                options={toOptions(model.chartFilterOptions.courseTypes)}
+                selected={phaseTypes}
+                onChange={setPhaseTypes}
+              />
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Role"
+                options={toOptions(model.chartFilterOptions.roleGroups)}
+                selected={phaseRoles}
+                onChange={setPhaseRoles}
+              />
+            </ChartFilterBar>
           }
         >
           <div className="h-[320px]">
@@ -241,20 +311,36 @@ export default function Development() {
         <ChartPanel
           title="Active Projects by Authoring Tool"
           filters={
-            <>
+            <ChartFilterBar>
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Year"
                 options={toOptions(model.chartFilterOptions.reportingYears)}
                 selected={toolYears}
                 onChange={setToolYears}
               />
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Owner"
                 options={toOptions(model.chartFilterOptions.owners)}
                 selected={toolOwners}
                 onChange={setToolOwners}
               />
-            </>
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Status"
+                options={toOptions(model.chartFilterOptions.statuses)}
+                selected={toolStatuses}
+                onChange={setToolStatuses}
+              />
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Type"
+                options={toOptions(model.chartFilterOptions.courseTypes)}
+                selected={toolTypes}
+                onChange={setToolTypes}
+              />
+            </ChartFilterBar>
           }
         >
           <div className="h-[320px]">
@@ -273,20 +359,36 @@ export default function Development() {
         <ChartPanel
           title="Active Projects by Course Type"
           filters={
-            <>
+            <ChartFilterBar>
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Year"
                 options={toOptions(model.chartFilterOptions.reportingYears)}
                 selected={typeYears}
                 onChange={setTypeYears}
               />
               <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
                 label="Owner"
                 options={toOptions(model.chartFilterOptions.owners)}
                 selected={typeOwners}
                 onChange={setTypeOwners}
               />
-            </>
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Status"
+                options={toOptions(model.chartFilterOptions.statuses)}
+                selected={typeStatuses}
+                onChange={setTypeStatuses}
+              />
+              <CompactMultiSelectFilter
+                variant={CHART_FILTER_VARIANT}
+                label="Tool"
+                options={toOptions(model.chartFilterOptions.authoringTools)}
+                selected={typeTools}
+                onChange={setTypeTools}
+              />
+            </ChartFilterBar>
           }
         >
           <div className="h-[320px]">
