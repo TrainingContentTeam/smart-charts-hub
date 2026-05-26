@@ -29,7 +29,13 @@ function bundleWithRows(rows: {
   };
 }
 
-function project(id: string, status: string, minutes: number, year = "2026"): RawProjectImportRow {
+function project(
+  id: string,
+  status: string,
+  minutes: number,
+  year = "2026",
+  overrides: Partial<RawProjectImportRow> = {},
+): RawProjectImportRow {
   return {
     id,
     upload_id: null,
@@ -57,6 +63,7 @@ function project(id: string, status: string, minutes: number, year = "2026"): Ra
     interaction_count: 4,
     parse_warnings: [],
     created_at: "2026-04-17T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -215,6 +222,54 @@ describe("analytics selectors", () => {
     ]);
     expect(filtered.projectsByReportingYear).toEqual([{ year: "2025", count: 1 }]);
     expect(filtered.hoursByTimeLogPhase).toEqual(unfiltered.hoursByTimeLogPhase);
+  });
+
+  it("applies dashboard project filters by year, owner, and tool", () => {
+    const snapshot = buildAnalyticsSnapshot(bundleWithRows({
+      projects: [
+        project("A", "LP Development", 180, "2026", {
+          id_assigned_raw: "Alex Doe",
+          authoring_tool: "Rise",
+          course_type: "New",
+        }),
+        project("B", "SME Review", 120, "2026", {
+          id_assigned_raw: "Jordan Lee",
+          authoring_tool: "Storyline",
+          course_type: "Revamp",
+        }),
+        project("C", "Testing", 90, "2025", {
+          id_assigned_raw: "Alex Doe",
+          authoring_tool: "Storyline",
+          course_type: "New",
+        }),
+        project("D", "Published", 60, "2026", {
+          id_assigned_raw: "Alex Doe",
+          authoring_tool: "Rise",
+          course_type: "Revamp",
+        }),
+      ],
+      timeLogs: [],
+    }));
+
+    expect(selectDashboardModel(snapshot, {
+      projectsByReportingYear: { authoringTools: ["Rise"] },
+    }).projectsByReportingYear).toEqual([{ year: "2026", count: 2 }]);
+
+    expect(selectDashboardModel(snapshot, {
+      projectMixByCourseType: { reportingYears: ["2025"] },
+    }).projectMixByCourseType).toEqual([{ label: "New", value: 1 }]);
+
+    expect(selectDashboardModel(snapshot, {
+      projectMixByAuthoringTool: { owners: ["Jordan Lee"] },
+    }).projectMixByAuthoringTool).toEqual([{ label: "Storyline", value: 1 }]);
+
+    expect(selectDashboardModel(snapshot, {
+      activeProjectStatusMix: {
+        reportingYears: ["2026"],
+        owners: ["Alex Doe"],
+        authoringTools: ["Rise"],
+      },
+    }).activeProjectStatusMix).toEqual([{ label: "LP Development", value: 1 }]);
   });
 
   it("sorts latest activity rows by the requested column and falls back to the default order", () => {

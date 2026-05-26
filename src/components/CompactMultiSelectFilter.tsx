@@ -19,6 +19,7 @@ type CompactMultiSelectFilterProps = {
   onChange: (values: string[]) => void;
   className?: string;
   placeholder?: string;
+  variant?: "default" | "chip";
 };
 
 export function CompactMultiSelectFilter({
@@ -28,12 +29,18 @@ export function CompactMultiSelectFilter({
   onChange,
   className,
   placeholder = "All",
+  variant = "default",
 }: CompactMultiSelectFilterProps) {
   const [open, setOpen] = useState(false);
   const selectedLabels = useMemo(
     () => options.filter((option) => selected.includes(option.value)).map((option) => option.label),
     [options, selected],
   );
+  const chipValue = selectedLabels.length === 0
+    ? placeholder
+    : selectedLabels.length === 1
+      ? selectedLabels[0]
+      : `${selectedLabels.length} selected`;
 
   const toggleValue = (value: string) => {
     if (selected.includes(value)) {
@@ -47,27 +54,45 @@ export function CompactMultiSelectFilter({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" className={cn("h-auto min-h-10 justify-between gap-3 px-3 py-2 text-left", className)}>
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
-            <div className="mt-1 flex min-h-5 flex-wrap items-center gap-1">
-              {selectedLabels.length ? (
-                <>
-                  {selectedLabels.slice(0, 2).map((selectedLabel) => (
-                    <Badge key={selectedLabel} variant="secondary" className="max-w-[130px] truncate">
-                      {selectedLabel}
-                    </Badge>
-                  ))}
-                  {selectedLabels.length > 2 ? (
-                    <Badge variant="outline">+{selectedLabels.length - 2}</Badge>
-                  ) : null}
-                </>
-              ) : (
-                <span className="text-sm text-muted-foreground">{placeholder}</span>
-              )}
-            </div>
-          </div>
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <Button
+          variant="outline"
+          className={cn(
+            variant === "chip"
+              ? "h-8 max-w-[190px] justify-start gap-1.5 rounded-full border-muted-foreground/20 bg-background px-3 text-xs font-medium text-muted-foreground hover:border-foreground/30 hover:bg-background hover:text-foreground"
+              : "h-auto min-h-10 justify-between gap-3 px-3 py-2 text-left",
+            className,
+          )}
+        >
+          {variant === "chip" ? (
+            <>
+              <span className="shrink-0">{label}</span>
+              <span className="min-w-0 truncate text-foreground">{chipValue}</span>
+              <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            </>
+          ) : (
+            <>
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+                <div className="mt-1 flex min-h-5 flex-wrap items-center gap-1">
+                  {selectedLabels.length ? (
+                    <>
+                      {selectedLabels.slice(0, 2).map((selectedLabel) => (
+                        <Badge key={selectedLabel} variant="secondary" className="max-w-[130px] truncate">
+                          {selectedLabel}
+                        </Badge>
+                      ))}
+                      {selectedLabels.length > 2 ? (
+                        <Badge variant="outline">+{selectedLabels.length - 2}</Badge>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">{placeholder}</span>
+                  )}
+                </div>
+              </div>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-0">
@@ -104,4 +129,3 @@ export function CompactMultiSelectFilter({
     </Popover>
   );
 }
-

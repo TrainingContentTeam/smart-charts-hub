@@ -18,6 +18,8 @@ type ExternalWorkClassification = keyof typeof EXTERNAL_WORK_CLASSIFICATION_LABE
 
 export type DashboardChartFilters = {
   projectsByReportingYear?: {
+    reportingYears?: string[];
+    owners?: string[];
     statuses?: string[];
     courseTypes?: string[];
     authoringTools?: string[];
@@ -27,12 +29,21 @@ export type DashboardChartFilters = {
     owners?: string[];
     authoringTools?: string[];
   };
+  activeProjectStatusMix?: {
+    reportingYears?: string[];
+    owners?: string[];
+    authoringTools?: string[];
+  };
   projectMixByCourseType?: {
     reportingYears?: string[];
+    owners?: string[];
+    authoringTools?: string[];
     statuses?: string[];
   };
   projectMixByAuthoringTool?: {
     reportingYears?: string[];
+    owners?: string[];
+    authoringTools?: string[];
     statuses?: string[];
   };
   hoursByTimeLogPhase?: {
@@ -125,6 +136,17 @@ function labelOrUnknown(value: string | null | undefined) {
 
 function matchesSelected(selected: string[] | undefined, value: string) {
   return !selected?.length || selected.includes(value);
+}
+
+function matchesDashboardProjectFilters(
+  project: CanonicalProject,
+  filters: { reportingYears?: string[]; owners?: string[]; authoringTools?: string[] } | undefined,
+) {
+  return (
+    matchesSelected(filters?.reportingYears, project.reporting_year || "Unknown") &&
+    matchesSelected(filters?.owners, project.primary_id_assigned || "Unassigned") &&
+    matchesSelected(filters?.authoringTools, labelOrUnknown(project.authoring_tool))
+  );
 }
 
 function matchesSearch(search: string | undefined, values: Array<string | null | undefined>) {
@@ -303,24 +325,27 @@ export function selectDashboardModel(snapshot: AnalyticsSnapshot, filters: Dashb
   const discrepancyCount = snapshot.canonicalProjects.filter((project) => project.hours_discrepancy_flag).length;
 
   const projectsByReportingYearSource = snapshot.canonicalProjects.filter((project) =>
+    matchesDashboardProjectFilters(project, filters.projectsByReportingYear) &&
     matchesSelected(filters.projectsByReportingYear?.statuses, project.status) &&
     matchesSelected(filters.projectsByReportingYear?.courseTypes, labelOrUnknown(project.course_type)) &&
     matchesSelected(filters.projectsByReportingYear?.authoringTools, labelOrUnknown(project.authoring_tool)),
   );
 
   const activeProjectsByStatusSource = activeProjects.filter((project) =>
-    matchesSelected(filters.activeProjectsByStatus?.reportingYears, project.reporting_year || "Unknown") &&
-    matchesSelected(filters.activeProjectsByStatus?.owners, project.primary_id_assigned || "Unassigned") &&
-    matchesSelected(filters.activeProjectsByStatus?.authoringTools, labelOrUnknown(project.authoring_tool)),
+    matchesDashboardProjectFilters(project, filters.activeProjectsByStatus),
+  );
+
+  const activeProjectStatusMixSource = activeProjects.filter((project) =>
+    matchesDashboardProjectFilters(project, filters.activeProjectStatusMix),
   );
 
   const projectMixByCourseTypeSource = snapshot.canonicalProjects.filter((project) =>
-    matchesSelected(filters.projectMixByCourseType?.reportingYears, project.reporting_year || "Unknown") &&
+    matchesDashboardProjectFilters(project, filters.projectMixByCourseType) &&
     matchesSelected(filters.projectMixByCourseType?.statuses, project.status),
   );
 
   const projectMixByAuthoringToolSource = snapshot.canonicalProjects.filter((project) =>
-    matchesSelected(filters.projectMixByAuthoringTool?.reportingYears, project.reporting_year || "Unknown") &&
+    matchesDashboardProjectFilters(project, filters.projectMixByAuthoringTool) &&
     matchesSelected(filters.projectMixByAuthoringTool?.statuses, project.status),
   );
 
@@ -383,7 +408,7 @@ export function selectDashboardModel(snapshot: AnalyticsSnapshot, filters: Dashb
       .sort((a, b) => compareYearLabel(a.year, b.year)),
     activeProjectsByStatus: buildCountSeries(activeProjectsByStatusSource.map((project) => project.status))
       .map(([status, count]) => ({ status, count })),
-    activeProjectStatusMix: buildCountSeries(activeProjects.map((project) => project.status))
+    activeProjectStatusMix: buildCountSeries(activeProjectStatusMixSource.map((project) => project.status))
       .map(([label, value]) => ({ label, value })),
     projectMixByCourseType: buildCountSeries(
       projectMixByCourseTypeSource.map((project) => labelOrUnknown(project.course_type)),

@@ -26,6 +26,7 @@ const PIE_COLORS = [
   "hsl(var(--chart-4))",
   "hsl(var(--chart-5))",
 ];
+const DASHBOARD_FILTER_VARIANT = "chip" as const;
 
 function uniqueSorted(values: string[]) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -36,6 +37,10 @@ function toOptions(values: string[]): CompactFilterOption[] {
 }
 
 type ProjectFilterParams = Record<string, string | string[] | undefined>;
+
+function chartHeight(count: number, minimum = 340, maximum = 620) {
+  return Math.max(minimum, Math.min(maximum, count * 38 + 120));
+}
 
 function getPayloadValue(payload: unknown, key: string) {
   const value = (payload as Record<string, unknown> | null)?.[key];
@@ -63,7 +68,9 @@ export default function Dashboard() {
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const model = useMemo(() => (snapshot ? selectDashboardModel(snapshot) : null), [snapshot]);
 
-  const [projectsByYearFilters, setProjectsByYearFilters] = useState<{ statuses: string[]; courseTypes: string[]; authoringTools: string[] }>({
+  const [projectsByYearFilters, setProjectsByYearFilters] = useState<{ reportingYears: string[]; owners: string[]; statuses: string[]; courseTypes: string[]; authoringTools: string[] }>({
+    reportingYears: [],
+    owners: [],
     statuses: [],
     courseTypes: [],
     authoringTools: [],
@@ -73,12 +80,21 @@ export default function Dashboard() {
     owners: [],
     authoringTools: [],
   });
-  const [courseTypeFilters, setCourseTypeFilters] = useState<{ reportingYears: string[]; statuses: string[] }>({
+  const [courseTypeFilters, setCourseTypeFilters] = useState<{ reportingYears: string[]; owners: string[]; authoringTools: string[]; statuses: string[] }>({
     reportingYears: [],
+    owners: [],
+    authoringTools: [],
     statuses: [],
   });
-  const [authoringToolFilters, setAuthoringToolFilters] = useState<{ reportingYears: string[]; statuses: string[] }>({
+  const [activeStatusMixFilters, setActiveStatusMixFilters] = useState<{ reportingYears: string[]; owners: string[]; authoringTools: string[] }>({
     reportingYears: [],
+    owners: [],
+    authoringTools: [],
+  });
+  const [authoringToolFilters, setAuthoringToolFilters] = useState<{ reportingYears: string[]; owners: string[]; authoringTools: string[]; statuses: string[] }>({
+    reportingYears: [],
+    owners: [],
+    authoringTools: [],
     statuses: [],
   });
   const [phaseFilters, setPhaseFilters] = useState<{ reportingYears: string[]; roleGroups: string[]; workScopes: Array<"matched_project_work" | "standalone_work" | "non_project_work"> }>({
@@ -103,6 +119,10 @@ export default function Dashboard() {
   const courseTypeModel = useMemo(
     () => (snapshot ? selectDashboardModel(snapshot, { projectMixByCourseType: courseTypeFilters }) : null),
     [courseTypeFilters, snapshot],
+  );
+  const activeStatusMixModel = useMemo(
+    () => (snapshot ? selectDashboardModel(snapshot, { activeProjectStatusMix: activeStatusMixFilters }) : null),
+    [activeStatusMixFilters, snapshot],
   );
   const authoringToolModel = useMemo(
     () => (snapshot ? selectDashboardModel(snapshot, { projectMixByAuthoringTool: authoringToolFilters }) : null),
@@ -161,7 +181,7 @@ export default function Dashboard() {
     return <div className="text-muted-foreground">Loading analytics snapshot...</div>;
   }
 
-  if (!model || !projectsByYearModel || !activeStatusModel || !courseTypeModel || !authoringToolModel || !phaseModel || !roleModel) {
+  if (!model || !projectsByYearModel || !activeStatusModel || !courseTypeModel || !activeStatusMixModel || !authoringToolModel || !phaseModel || !roleModel) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
@@ -196,9 +216,11 @@ export default function Dashboard() {
           title="Projects by Reporting Year"
           filters={
             <>
-              <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={projectsByYearFilters.statuses} onChange={(statuses) => setProjectsByYearFilters((current) => ({ ...current, statuses }))} />
-              <CompactMultiSelectFilter label="Course Type" options={filterOptions.courseTypes} selected={projectsByYearFilters.courseTypes} onChange={(courseTypes) => setProjectsByYearFilters((current) => ({ ...current, courseTypes }))} />
-              <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTools} selected={projectsByYearFilters.authoringTools} onChange={(authoringTools) => setProjectsByYearFilters((current) => ({ ...current, authoringTools }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Year" options={filterOptions.years} selected={projectsByYearFilters.reportingYears} onChange={(reportingYears) => setProjectsByYearFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Owner" options={filterOptions.owners} selected={projectsByYearFilters.owners} onChange={(owners) => setProjectsByYearFilters((current) => ({ ...current, owners }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Tool" options={filterOptions.authoringTools} selected={projectsByYearFilters.authoringTools} onChange={(authoringTools) => setProjectsByYearFilters((current) => ({ ...current, authoringTools }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Status" options={filterOptions.statuses} selected={projectsByYearFilters.statuses} onChange={(statuses) => setProjectsByYearFilters((current) => ({ ...current, statuses }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Type" options={filterOptions.courseTypes} selected={projectsByYearFilters.courseTypes} onChange={(courseTypes) => setProjectsByYearFilters((current) => ({ ...current, courseTypes }))} />
             </>
           }
         >
@@ -216,6 +238,7 @@ export default function Dashboard() {
                   cursor="pointer"
                   onClick={(payload: unknown) => navigateToProjects({
                     year: getPayloadValue(payload, "year"),
+                    owner: projectsByYearFilters.owners,
                     status: projectsByYearFilters.statuses,
                     type: projectsByYearFilters.courseTypes,
                     tool: projectsByYearFilters.authoringTools,
@@ -230,18 +253,18 @@ export default function Dashboard() {
           title="Active Projects by Status"
           filters={
             <>
-              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={activeStatusFilters.reportingYears} onChange={(reportingYears) => setActiveStatusFilters((current) => ({ ...current, reportingYears }))} />
-              <CompactMultiSelectFilter label="Owner" options={filterOptions.owners} selected={activeStatusFilters.owners} onChange={(owners) => setActiveStatusFilters((current) => ({ ...current, owners }))} />
-              <CompactMultiSelectFilter label="Authoring Tool" options={filterOptions.authoringTools} selected={activeStatusFilters.authoringTools} onChange={(authoringTools) => setActiveStatusFilters((current) => ({ ...current, authoringTools }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Year" options={filterOptions.years} selected={activeStatusFilters.reportingYears} onChange={(reportingYears) => setActiveStatusFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Owner" options={filterOptions.owners} selected={activeStatusFilters.owners} onChange={(owners) => setActiveStatusFilters((current) => ({ ...current, owners }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Tool" options={filterOptions.authoringTools} selected={activeStatusFilters.authoringTools} onChange={(authoringTools) => setActiveStatusFilters((current) => ({ ...current, authoringTools }))} />
             </>
           }
         >
-          <div className="h-[340px]">
+          <div style={{ height: chartHeight(activeStatusModel.activeProjectsByStatus.length) }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={activeStatusModel.activeProjectsByStatus} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="status" width={220} />
+                <YAxis type="category" dataKey="status" width={220} interval={0} />
                 <Tooltip />
                 <Bar
                   dataKey="count"
@@ -266,8 +289,10 @@ export default function Dashboard() {
             title="Project Mix by Course Type"
             filters={
               <>
-                <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={courseTypeFilters.reportingYears} onChange={(reportingYears) => setCourseTypeFilters((current) => ({ ...current, reportingYears }))} />
-                <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={courseTypeFilters.statuses} onChange={(statuses) => setCourseTypeFilters((current) => ({ ...current, statuses }))} />
+                <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Year" options={filterOptions.years} selected={courseTypeFilters.reportingYears} onChange={(reportingYears) => setCourseTypeFilters((current) => ({ ...current, reportingYears }))} />
+                <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Owner" options={filterOptions.owners} selected={courseTypeFilters.owners} onChange={(owners) => setCourseTypeFilters((current) => ({ ...current, owners }))} />
+                <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Tool" options={filterOptions.authoringTools} selected={courseTypeFilters.authoringTools} onChange={(authoringTools) => setCourseTypeFilters((current) => ({ ...current, authoringTools }))} />
+                <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Status" options={filterOptions.statuses} selected={courseTypeFilters.statuses} onChange={(statuses) => setCourseTypeFilters((current) => ({ ...current, statuses }))} />
               </>
             }
           >
@@ -284,6 +309,8 @@ export default function Dashboard() {
                     onClick={(payload: unknown) => navigateToProjects({
                       type: getPayloadValue(payload, "label"),
                       year: courseTypeFilters.reportingYears,
+                      owner: courseTypeFilters.owners,
+                      tool: courseTypeFilters.authoringTools,
                       status: courseTypeFilters.statuses,
                     })}
                   >
@@ -297,12 +324,21 @@ export default function Dashboard() {
             </div>
           </ChartPanel>
 
-          <ChartPanel title="Active Project Status Mix">
+          <ChartPanel
+            title="Active Project Status Mix"
+            filters={
+              <>
+                <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Year" options={filterOptions.years} selected={activeStatusMixFilters.reportingYears} onChange={(reportingYears) => setActiveStatusMixFilters((current) => ({ ...current, reportingYears }))} />
+                <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Owner" options={filterOptions.owners} selected={activeStatusMixFilters.owners} onChange={(owners) => setActiveStatusMixFilters((current) => ({ ...current, owners }))} />
+                <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Tool" options={filterOptions.authoringTools} selected={activeStatusMixFilters.authoringTools} onChange={(authoringTools) => setActiveStatusMixFilters((current) => ({ ...current, authoringTools }))} />
+              </>
+            }
+          >
             <div className="h-[320px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={model.activeProjectStatusMix}
+                    data={activeStatusMixModel.activeProjectStatusMix}
                     dataKey="value"
                     nameKey="label"
                     innerRadius={68}
@@ -312,9 +348,12 @@ export default function Dashboard() {
                     onClick={(payload: unknown) => navigateToProjects({
                       active: "yes",
                       status: getPayloadValue(payload, "label"),
+                      year: activeStatusMixFilters.reportingYears,
+                      owner: activeStatusMixFilters.owners,
+                      tool: activeStatusMixFilters.authoringTools,
                     })}
                   >
-                    {model.activeProjectStatusMix.map((entry, index) => (
+                    {activeStatusMixModel.activeProjectStatusMix.map((entry, index) => (
                       <Cell key={entry.label} fill={PIE_COLORS[index % PIE_COLORS.length]} style={{ cursor: "pointer" }} />
                     ))}
                   </Pie>
@@ -329,8 +368,10 @@ export default function Dashboard() {
           title="Project Mix by Authoring Tool"
           filters={
             <>
-              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={authoringToolFilters.reportingYears} onChange={(reportingYears) => setAuthoringToolFilters((current) => ({ ...current, reportingYears }))} />
-              <CompactMultiSelectFilter label="Status" options={filterOptions.statuses} selected={authoringToolFilters.statuses} onChange={(statuses) => setAuthoringToolFilters((current) => ({ ...current, statuses }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Year" options={filterOptions.years} selected={authoringToolFilters.reportingYears} onChange={(reportingYears) => setAuthoringToolFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Owner" options={filterOptions.owners} selected={authoringToolFilters.owners} onChange={(owners) => setAuthoringToolFilters((current) => ({ ...current, owners }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Tool" options={filterOptions.authoringTools} selected={authoringToolFilters.authoringTools} onChange={(authoringTools) => setAuthoringToolFilters((current) => ({ ...current, authoringTools }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Status" options={filterOptions.statuses} selected={authoringToolFilters.statuses} onChange={(statuses) => setAuthoringToolFilters((current) => ({ ...current, statuses }))} />
             </>
           }
         >
@@ -349,6 +390,7 @@ export default function Dashboard() {
                   onClick={(payload: unknown) => navigateToProjects({
                     tool: getPayloadValue(payload, "label"),
                     year: authoringToolFilters.reportingYears,
+                    owner: authoringToolFilters.owners,
                     status: authoringToolFilters.statuses,
                   })}
                 />
@@ -362,9 +404,9 @@ export default function Dashboard() {
           info={PHASE_EXPLANATION_TOOLTIP}
           filters={
             <>
-              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={phaseFilters.reportingYears} onChange={(reportingYears) => setPhaseFilters((current) => ({ ...current, reportingYears }))} />
-              <CompactMultiSelectFilter label="Role Group" options={filterOptions.roleGroups} selected={phaseFilters.roleGroups} onChange={(roleGroups) => setPhaseFilters((current) => ({ ...current, roleGroups }))} />
-              <CompactMultiSelectFilter label="Work Scope" options={filterOptions.workScopes} selected={phaseFilters.workScopes} onChange={(workScopes) => setPhaseFilters((current) => ({ ...current, workScopes: workScopes as Array<"matched_project_work" | "standalone_work" | "non_project_work"> }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Year" options={filterOptions.years} selected={phaseFilters.reportingYears} onChange={(reportingYears) => setPhaseFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Role" options={filterOptions.roleGroups} selected={phaseFilters.roleGroups} onChange={(roleGroups) => setPhaseFilters((current) => ({ ...current, roleGroups }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Scope" options={filterOptions.workScopes} selected={phaseFilters.workScopes} onChange={(workScopes) => setPhaseFilters((current) => ({ ...current, workScopes: workScopes as Array<"matched_project_work" | "standalone_work" | "non_project_work"> }))} />
             </>
           }
         >
@@ -395,9 +437,9 @@ export default function Dashboard() {
           title="Hours by Role Group"
           filters={
             <>
-              <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.years} selected={roleFilters.reportingYears} onChange={(reportingYears) => setRoleFilters((current) => ({ ...current, reportingYears }))} />
-              <CompactMultiSelectFilter label="Phase" options={filterOptions.phases} selected={roleFilters.phases} onChange={(phases) => setRoleFilters((current) => ({ ...current, phases }))} />
-              <CompactMultiSelectFilter label="Work Scope" options={filterOptions.workScopes} selected={roleFilters.workScopes} onChange={(workScopes) => setRoleFilters((current) => ({ ...current, workScopes: workScopes as Array<"matched_project_work" | "standalone_work" | "non_project_work"> }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Year" options={filterOptions.years} selected={roleFilters.reportingYears} onChange={(reportingYears) => setRoleFilters((current) => ({ ...current, reportingYears }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Phase" options={filterOptions.phases} selected={roleFilters.phases} onChange={(phases) => setRoleFilters((current) => ({ ...current, phases }))} />
+              <CompactMultiSelectFilter variant={DASHBOARD_FILTER_VARIANT} label="Scope" options={filterOptions.workScopes} selected={roleFilters.workScopes} onChange={(workScopes) => setRoleFilters((current) => ({ ...current, workScopes: workScopes as Array<"matched_project_work" | "standalone_work" | "non_project_work"> }))} />
             </>
           }
         >
