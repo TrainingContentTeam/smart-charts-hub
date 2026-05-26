@@ -918,7 +918,16 @@ export function selectProjectsPageRows(snapshot: AnalyticsSnapshot) {
     matchedTimeLogsByProject.set(row.matched_project_key, rows);
   });
 
+  const smeFeedbackByProject = new Map<string, Array<SmeIdFeedbackRow | SmeSmeFeedbackRow>>();
+  [...snapshot.smeFeedbackIdView, ...snapshot.smeFeedbackSmeView].forEach((row) => {
+    if (!row.matched_project_key) return;
+    const rows = smeFeedbackByProject.get(row.matched_project_key) || [];
+    rows.push(row);
+    smeFeedbackByProject.set(row.matched_project_key, rows);
+  });
+
   return snapshot.canonicalProjects.map((project) => ({
+    exactProjectValues: uniqueSorted([project.project_key, project.raw_course_name]),
     projectKey: project.project_key,
     projectName: project.raw_course_name,
     rawCourseName: project.raw_course_name,
@@ -946,6 +955,16 @@ export function selectProjectsPageRows(snapshot: AnalyticsSnapshot) {
     isActive: isProjectActive(project),
     timeLogPhases: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => row.category_phase) || []),
     timeLogRoleGroups: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => row.role_group) || []),
+    timeLogUsers: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => row.canonical_user_name || "Unknown") || []),
+    timeLogWorkScopes: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => getDashboardWorkScope(row)) || []),
+    timeLogExternalClassifications: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => getExternalWorkClassification(row)) || []),
+    timeLogDates: uniqueSorted(matchedTimeLogsByProject.get(project.project_key)?.map((row) => row.log_date) || []),
+    smeFeedbackInstructionalDesigners: uniqueSorted(smeFeedbackByProject.get(project.project_key)?.map((row) => row.instructional_designer) || []),
+    smeFeedbackInternalLabels: uniqueSorted(
+      (smeFeedbackByProject.get(project.project_key) || [])
+        .map((row) => "internal" in row ? getSmeInternalLabel(row.internal) : null),
+    ),
+    smeFeedbackDates: uniqueSorted(smeFeedbackByProject.get(project.project_key)?.map((row) => row.survey_date) || []),
     hasTimeLogs: project.time_log_minutes_sum > 0,
     hasSmeFeedback:
       project.unresolved_sme_feedback_count > 0 ||

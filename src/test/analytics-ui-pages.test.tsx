@@ -29,7 +29,7 @@ vi.mock("recharts", async () => {
   );
   const MockLeaf = () => null;
   const labelFor = (entry: Record<string, unknown>) =>
-    String(entry.status || entry.year || entry.label || entry.phase || entry.roleGroup || entry.owner || entry.user || "unknown");
+    String(entry.status || entry.year || entry.reportingYear || entry.label || entry.phase || entry.roleGroup || entry.owner || entry.user || entry.tool || entry.type || entry.date || "unknown");
   const MockBar = ({ __chartData, onClick }: { __chartData?: Array<Record<string, unknown>>; onClick?: (entry: Record<string, unknown>) => void }) => (
     <div>
       {(__chartData || []).map((entry, index) => (
@@ -54,6 +54,18 @@ vi.mock("recharts", async () => {
       ))}
     </div>
   );
+  const MockLine = ({ __chartData, onClick }: { __chartData?: Array<Record<string, unknown>>; onClick?: (entry: Record<string, unknown>) => void }) => (
+    <div>
+      {(__chartData || []).map((entry, index) => (
+        <button
+          key={`${labelFor(entry)}-${index}`}
+          type="button"
+          aria-label={`chart-line-${labelFor(entry)}`}
+          onClick={() => onClick?.(entry)}
+        />
+      ))}
+    </div>
+  );
 
   return {
     ResponsiveContainer: MockContainer,
@@ -61,7 +73,7 @@ vi.mock("recharts", async () => {
     PieChart: MockContainer,
     LineChart: MockContainer,
     Bar: MockBar,
-    Line: MockLeaf,
+    Line: MockLine,
     Pie: MockPie,
     Cell: MockLeaf,
     CartesianGrid: MockLeaf,
@@ -304,6 +316,41 @@ describe("analytics UI pages", () => {
     expect(screen.queryByRole("link", { name: "Beta Project" })).not.toBeInTheDocument();
   });
 
+  it("filters Projects by chart click-through URL params", () => {
+    const { unmount: unmountProject } = renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?project=beta-project%7C2025"],
+    );
+
+    expect(screen.getByRole("button", { name: /project/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Beta Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Alpha Project" })).not.toBeInTheDocument();
+    unmountProject();
+
+    const { unmount: unmountTime } = renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?timeUser=Casey+SME&workScope=matched_project_work&timeStart=2025-11-12&timeEnd=2025-11-12"],
+    );
+
+    expect(screen.getByRole("link", { name: "Beta Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Alpha Project" })).not.toBeInTheDocument();
+    unmountTime();
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/projects" element={<Projects />} />
+      </Routes>,
+      ["/projects?smeId=Alex+Doe&smeInternal=Internal&smeStart=2026-03-08&smeEnd=2026-03-09"],
+    );
+
+    expect(screen.getByRole("link", { name: "Alpha Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Beta Project" })).not.toBeInTheDocument();
+  });
+
   it("filters Projects by style and length URL params", () => {
     const { unmount: unmountStyle } = renderWithRouter(
       <Routes>
@@ -400,6 +447,84 @@ describe("analytics UI pages", () => {
     expect(screen.getByRole("link", { name: "CQO Project" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Compliance Project" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Published Legal Project" })).not.toBeInTheDocument();
+  });
+
+  it("links non-dashboard graph elements to Projects filters", async () => {
+    const { unmount: unmountDevelopment } = renderWithRouter(
+      <Routes>
+        <Route path="/development" element={<><Development /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/development"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-LP Development" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?active=yes&status=LP+Development");
+    unmountDevelopment();
+
+    const { unmount: unmountExternal } = renderWithRouter(
+      <Routes>
+        <Route path="/external-teams" element={<><ExternalTeams /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/external-teams"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-Other/External" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?timeRole=Other%2FExternal");
+    unmountExternal();
+
+    const { unmount: unmountSme } = renderWithRouter(
+      <Routes>
+        <Route path="/sme-collaboration" element={<><SmeCollaboration /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/sme-collaboration"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-2026" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?smeFeedback=yes&year=2026");
+    unmountSme();
+
+    const { unmount: unmountProject } = renderWithRouter(
+      <Routes>
+        <Route path="/projects/:reportingYear/:projectSlug" element={<><ProjectDetail /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/projects/2026/alpha-project"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-Planning" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?project=alpha-project%7C2026&timePhase=Planning");
+    unmountProject();
+
+    const { unmount: unmountTimeline } = renderWithRouter(
+      <Routes>
+        <Route path="/projects/:reportingYear/:projectSlug" element={<><ProjectDetail /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/projects/2026/alpha-project"],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "chart-line-2026-03-01" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?project=alpha-project%7C2026&timeStart=2026-03-01&timeEnd=2026-03-01");
+    unmountTimeline();
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/people/:personSlug" element={<><PersonDetail /><LocationDisplay /></>} />
+        <Route path="/projects" element={<LocationDisplay />} />
+      </Routes>,
+      ["/people/alex-doe"],
+    );
+
+    const idTab = screen.getByRole("tab", { name: "ID" });
+    fireEvent.pointerDown(idTab, { button: 0, ctrlKey: false });
+    fireEvent.mouseDown(idTab, { button: 0, ctrlKey: false });
+    fireEvent.click(idTab);
+    await waitFor(() => expect(idTab).toHaveAttribute("aria-selected", "true"));
+    fireEvent.click(screen.getByRole("button", { name: "chart-bar-LP Development" }));
+    expect(screen.getByTestId("location-display").textContent).toBe("/projects?owner=Alex+Doe&status=LP+Development");
   });
 
   it("navigates from the project list to detail and back while preserving list state", () => {

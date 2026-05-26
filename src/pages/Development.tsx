@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -12,6 +13,7 @@ import { SortableTableHeader } from "@/components/SortableTableHeader";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { useTableSort } from "@/hooks/use-table-sort";
 import { selectDevelopmentModel } from "@/lib/analytics/selectors";
+import { getChartPayloadValue, navigateToProjectsFromChart } from "@/lib/projects-navigation";
 
 function toOptions(values: string[]): CompactFilterOption[] {
   return values.map((value) => ({ label: value, value }));
@@ -36,6 +38,7 @@ function chartHeight(count: number, minimum = 300, maximum = 560) {
 }
 
 export default function Development() {
+  const navigate = useNavigate();
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
 
   const currentYear = String(new Date().getFullYear());
@@ -73,6 +76,8 @@ export default function Development() {
     key: "latestTimeLogDate",
     direction: "desc",
   });
+  const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
+    navigateToProjectsFromChart(navigate, params);
 
   const model = useMemo(
     () =>
@@ -203,7 +208,21 @@ export default function Development() {
                 <XAxis type="number" allowDecimals={false} />
                 <YAxis type="category" dataKey="status" width={180} interval={0} tick={statusLabels.tick} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} {...statusLabels.barHoverProps} />
+                <Bar
+                  dataKey="count"
+                  fill="hsl(var(--chart-1))"
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    active: "yes",
+                    status: getChartPayloadValue(payload, "status"),
+                    year: statusYears,
+                    owner: statusOwners,
+                    tool: statusTools,
+                    type: statusTypes,
+                  })}
+                  {...statusLabels.barHoverProps}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -251,7 +270,21 @@ export default function Development() {
                 <XAxis type="number" allowDecimals={false} />
                 <YAxis type="category" dataKey="owner" width={180} interval={0} tick={ownerLabels.tick} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} {...ownerLabels.barHoverProps} />
+                <Bar
+                  dataKey="count"
+                  fill="hsl(var(--chart-2))"
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    active: "yes",
+                    owner: getChartPayloadValue(payload, "owner"),
+                    year: ownerYears,
+                    status: ownerStatuses,
+                    tool: ownerTools,
+                    type: ownerTypes,
+                  })}
+                  {...ownerLabels.barHoverProps}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -308,7 +341,22 @@ export default function Development() {
                 <XAxis dataKey="phase" minTickGap={18} tick={phaseLabels.tick} />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
+                <Bar
+                  dataKey="hours"
+                  fill="hsl(var(--chart-3))"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    active: "yes",
+                    timePhase: getChartPayloadValue(payload, "phase"),
+                    year: phaseYears,
+                    owner: phaseOwners,
+                    tool: phaseTools,
+                    type: phaseTypes,
+                    timeRole: phaseRoles,
+                  })}
+                  {...phaseLabels.barHoverProps}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -356,7 +404,21 @@ export default function Development() {
                 <XAxis dataKey="tool" minTickGap={18} tick={toolLabels.tick} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} {...toolLabels.barHoverProps} />
+                <Bar
+                  dataKey="count"
+                  fill="hsl(var(--chart-4))"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    active: "yes",
+                    tool: getChartPayloadValue(payload, "tool"),
+                    year: toolYears,
+                    owner: toolOwners,
+                    status: toolStatuses,
+                    type: toolTypes,
+                  })}
+                  {...toolLabels.barHoverProps}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -404,7 +466,21 @@ export default function Development() {
                 <XAxis dataKey="type" minTickGap={18} tick={typeLabels.tick} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-5))" radius={[4, 4, 0, 0]} {...typeLabels.barHoverProps} />
+                <Bar
+                  dataKey="count"
+                  fill="hsl(var(--chart-5))"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(payload: unknown) => navigateToProjects({
+                    active: "yes",
+                    type: getChartPayloadValue(payload, "type"),
+                    year: typeYears,
+                    owner: typeOwners,
+                    status: typeStatuses,
+                    tool: typeTools,
+                  })}
+                  {...typeLabels.barHoverProps}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>

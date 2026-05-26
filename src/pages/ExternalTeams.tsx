@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,6 +11,7 @@ import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { EXTERNAL_WORK_CLASSIFICATION_LABELS } from "@/lib/analytics/labels";
 import { selectExternalTeamsModel, type ExternalTeamsFilters } from "@/lib/analytics/selectors";
+import { getChartPayloadValue, navigateToProjectsFromChart } from "@/lib/projects-navigation";
 
 function toOptions(values: string[]): CompactFilterOption[] {
   return [...new Set(values.filter(Boolean))]
@@ -54,6 +56,7 @@ function ActiveExternalProjectsCard({
 }
 
 export default function ExternalTeams() {
+  const navigate = useNavigate();
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const [roleChartFilters, setRoleChartFilters] = useState<ExternalTeamsFilters>({});
   const [phaseChartFilters, setPhaseChartFilters] = useState<ExternalTeamsFilters>({});
@@ -61,6 +64,8 @@ export default function ExternalTeams() {
   const [userFilters, setUserFilters] = useState<ExternalTeamsFilters>({});
   const roleLabels = useAnimatedBarLabels({ labelKey: "roleGroup", orientation: "x", barColor: "hsl(var(--chart-1))" });
   const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-2))" });
+  const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
+    navigateToProjectsFromChart(navigate, params);
 
   const model = useMemo(() => (snapshot ? selectExternalTeamsModel(snapshot) : null), [snapshot]);
   const roleChartModel = useMemo(
@@ -147,7 +152,20 @@ export default function ExternalTeams() {
               <XAxis dataKey="roleGroup" interval={0} height={64} tick={roleLabels.tick} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} {...roleLabels.barHoverProps} />
+              <Bar
+                dataKey="hours"
+                fill="hsl(var(--chart-1))"
+                radius={[4, 4, 0, 0]}
+                cursor="pointer"
+                onClick={(payload: unknown) => navigateToProjects({
+                  timeRole: getChartPayloadValue(payload, "roleGroup"),
+                  timePhase: roleChartFilters.phases,
+                  externalClass: roleChartFilters.classifications,
+                  year: roleChartFilters.reportingYears,
+                  timeUser: roleChartFilters.users,
+                })}
+                {...roleLabels.barHoverProps}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -171,7 +189,20 @@ export default function ExternalTeams() {
               <XAxis dataKey="phase" tick={phaseLabels.tick} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
+              <Bar
+                dataKey="hours"
+                fill="hsl(var(--chart-2))"
+                radius={[4, 4, 0, 0]}
+                cursor="pointer"
+                onClick={(payload: unknown) => navigateToProjects({
+                  timePhase: getChartPayloadValue(payload, "phase"),
+                  timeRole: phaseChartFilters.roleGroups,
+                  externalClass: phaseChartFilters.classifications,
+                  year: phaseChartFilters.reportingYears,
+                  timeUser: phaseChartFilters.users,
+                })}
+                {...phaseLabels.barHoverProps}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>

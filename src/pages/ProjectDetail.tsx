@@ -15,6 +15,7 @@ import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { resolveProjectFromRoute } from "@/lib/analytics/project-routing";
 import { selectProjectDetailModel } from "@/lib/analytics/selectors";
+import { getChartPayloadValue, navigateToProjectsFromChart } from "@/lib/projects-navigation";
 import NotFound from "./NotFound";
 
 function SummaryCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -35,6 +36,13 @@ function toOptions(values: string[]): CompactFilterOption[] {
   return values.map((value) => ({ label: value, value }));
 }
 
+function addDaysIso(dateText: string, days: number) {
+  const date = new Date(`${dateText}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return dateText;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 export default function ProjectDetail() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -50,6 +58,8 @@ export default function ProjectDetail() {
   const [timelineStartDate, setTimelineStartDate] = useState("");
   const [timelineEndDate, setTimelineEndDate] = useState("");
   const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-1))" });
+  const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
+    navigateToProjectsFromChart(navigate, params);
 
   const project = useMemo(
     () => (snapshot ? resolveProjectFromRoute(snapshot, params.reportingYear, params.projectSlug) : null),
@@ -217,7 +227,21 @@ export default function ProjectDetail() {
               <XAxis dataKey="phase" tick={phaseLabels.tick} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
+              <Bar
+                dataKey="hours"
+                fill="hsl(var(--chart-1))"
+                radius={[4, 4, 0, 0]}
+                cursor="pointer"
+                onClick={(payload: unknown) => navigateToProjects({
+                  project: project.project_key,
+                  timePhase: getChartPayloadValue(payload, "phase"),
+                  timeRole: phaseRoles,
+                  timeUser: phaseUsers,
+                  timeStart: phaseStartDate,
+                  timeEnd: phaseEndDate,
+                })}
+                {...phaseLabels.barHoverProps}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -241,7 +265,25 @@ export default function ProjectDetail() {
               <XAxis dataKey="label" minTickGap={24} />
               <YAxis />
               <Tooltip />
-              <Line type="monotone" dataKey="hours" stroke="hsl(var(--chart-2))" strokeWidth={2.5} dot={false} />
+              <Line
+                type="monotone"
+                dataKey="hours"
+                stroke="hsl(var(--chart-2))"
+                strokeWidth={2.5}
+                dot={{ r: 4, cursor: "pointer" }}
+                activeDot={{ r: 6, cursor: "pointer" }}
+                onClick={(payload: unknown) => {
+                  const date = getChartPayloadValue(payload, "date");
+                  navigateToProjects({
+                    project: project.project_key,
+                    timePhase: timelinePhases,
+                    timeRole: timelineRoles,
+                    timeUser: timelineUsers,
+                    timeStart: date || timelineStartDate,
+                    timeEnd: date ? (model.timeline.granularity === "weekly" ? addDaysIso(date, 6) : date) : timelineEndDate,
+                  });
+                }}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>

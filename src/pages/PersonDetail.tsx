@@ -16,6 +16,7 @@ import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { resolvePersonNameFromRoute } from "@/lib/analytics/person-routing";
 import { selectPersonDetailModel } from "@/lib/analytics/selectors";
+import { getChartPayloadValue, navigateToProjectsFromChart } from "@/lib/projects-navigation";
 import NotFound from "./NotFound";
 
 function SummaryCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -54,6 +55,8 @@ export default function PersonDetail() {
   const [phaseRoles, setPhaseRoles] = useState<string[]>([]);
   const statusLabels = useAnimatedBarLabels({ labelKey: "status", orientation: "y", barColor: "hsl(var(--chart-1))", maxLength: 16 });
   const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-2))" });
+  const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
+    navigateToProjectsFromChart(navigate, params);
 
   const canonicalName = useMemo(
     () => (snapshot ? resolvePersonNameFromRoute(snapshot, params.personSlug) : null),
@@ -226,7 +229,20 @@ export default function PersonDetail() {
                     <XAxis type="number" allowDecimals={false} />
                     <YAxis type="category" dataKey="status" width={170} interval={0} tick={statusLabels.tick} />
                     <Tooltip />
-                    <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} {...statusLabels.barHoverProps} />
+                    <Bar
+                      dataKey="count"
+                      fill="hsl(var(--chart-1))"
+                      radius={[0, 4, 4, 0]}
+                      cursor="pointer"
+                      onClick={(payload: unknown) => navigateToProjects({
+                        owner: canonicalName,
+                        status: getChartPayloadValue(payload, "status"),
+                        year: statusYears,
+                        tool: statusTools,
+                        type: statusTypes,
+                      })}
+                      {...statusLabels.barHoverProps}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -250,7 +266,21 @@ export default function PersonDetail() {
                     <XAxis dataKey="phase" tick={phaseLabels.tick} />
                     <YAxis />
                     <Tooltip />
-                    <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
+                    <Bar
+                      dataKey="hours"
+                      fill="hsl(var(--chart-2))"
+                      radius={[4, 4, 0, 0]}
+                      cursor="pointer"
+                      onClick={(payload: unknown) => navigateToProjects({
+                        owner: canonicalName,
+                        timePhase: getChartPayloadValue(payload, "phase"),
+                        year: phaseYears,
+                        tool: phaseTools,
+                        type: phaseTypes,
+                        timeRole: phaseRoles,
+                      })}
+                      {...phaseLabels.barHoverProps}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

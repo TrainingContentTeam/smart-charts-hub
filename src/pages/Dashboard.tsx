@@ -20,6 +20,7 @@ import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { PHASE_EXPLANATION_TOOLTIP, WORK_SCOPE_LABELS } from "@/lib/analytics/labels";
 import { selectDashboardModel } from "@/lib/analytics/selectors";
+import { getChartPayloadValue, navigateToProjectsFromChart } from "@/lib/projects-navigation";
 
 const PIE_COLORS = [
   "hsl(var(--chart-1))",
@@ -38,15 +39,8 @@ function toOptions(values: string[]): CompactFilterOption[] {
   return uniqueSorted(values).map((value) => ({ label: value, value }));
 }
 
-type ProjectFilterParams = Record<string, string | string[] | undefined>;
-
 function chartHeight(count: number, minimum = 340, maximum = 620) {
   return Math.max(minimum, Math.min(maximum, count * 38 + 120));
-}
-
-function getPayloadValue(payload: unknown, key: string) {
-  const value = (payload as Record<string, unknown> | null)?.[key];
-  return value === undefined || value === null ? "" : String(value);
 }
 
 function MetricCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -144,15 +138,8 @@ export default function Dashboard() {
     [roleFilters, snapshot],
   );
 
-  const navigateToProjects = (params: ProjectFilterParams) => {
-    const searchParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      const values = Array.isArray(value) ? value : [value];
-      values.filter(Boolean).forEach((entry) => searchParams.append(key, entry));
-    });
-    const search = searchParams.toString();
-    navigate(search ? `/projects?${search}` : "/projects");
-  };
+  const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
+    navigateToProjectsFromChart(navigate, params);
 
   const filterOptions = useMemo(() => {
     if (!snapshot) {
@@ -245,7 +232,7 @@ export default function Dashboard() {
                   cursor="pointer"
                   {...yearLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
-                    year: getPayloadValue(payload, "year"),
+                    year: getChartPayloadValue(payload, "year"),
                     owner: projectsByYearFilters.owners,
                     status: projectsByYearFilters.statuses,
                     type: projectsByYearFilters.courseTypes,
@@ -282,7 +269,7 @@ export default function Dashboard() {
                   {...statusLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
                     active: "yes",
-                    status: getPayloadValue(payload, "status"),
+                    status: getChartPayloadValue(payload, "status"),
                     year: activeStatusFilters.reportingYears,
                     owner: activeStatusFilters.owners,
                     tool: activeStatusFilters.authoringTools,
@@ -316,7 +303,7 @@ export default function Dashboard() {
                     label
                     cursor="pointer"
                     onClick={(payload: unknown) => navigateToProjects({
-                      type: getPayloadValue(payload, "label"),
+                      type: getChartPayloadValue(payload, "label"),
                       year: courseTypeFilters.reportingYears,
                       owner: courseTypeFilters.owners,
                       tool: courseTypeFilters.authoringTools,
@@ -356,7 +343,7 @@ export default function Dashboard() {
                     cursor="pointer"
                     onClick={(payload: unknown) => navigateToProjects({
                       active: "yes",
-                      status: getPayloadValue(payload, "label"),
+                      status: getChartPayloadValue(payload, "label"),
                       year: activeStatusMixFilters.reportingYears,
                       owner: activeStatusMixFilters.owners,
                       tool: activeStatusMixFilters.authoringTools,
@@ -398,7 +385,7 @@ export default function Dashboard() {
                   cursor="pointer"
                   {...toolLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
-                    tool: getPayloadValue(payload, "label"),
+                    tool: getChartPayloadValue(payload, "label"),
                     year: authoringToolFilters.reportingYears,
                     owner: authoringToolFilters.owners,
                     status: authoringToolFilters.statuses,
@@ -434,9 +421,10 @@ export default function Dashboard() {
                   cursor="pointer"
                   {...phaseLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
-                    timePhase: getPayloadValue(payload, "phase"),
+                    timePhase: getChartPayloadValue(payload, "phase"),
                     year: phaseFilters.reportingYears,
                     timeRole: phaseFilters.roleGroups,
+                    workScope: phaseFilters.workScopes,
                   })}
                 />
               </BarChart>
@@ -468,9 +456,10 @@ export default function Dashboard() {
                   cursor="pointer"
                   {...roleLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
-                    timeRole: getPayloadValue(payload, "roleGroup"),
+                    timeRole: getChartPayloadValue(payload, "roleGroup"),
                     year: roleFilters.reportingYears,
                     timePhase: roleFilters.phases,
+                    workScope: roleFilters.workScopes,
                   })}
                 />
               </BarChart>

@@ -4,9 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
+import { ChartDateRangeFilter } from "@/components/ChartFilters";
 import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
+import { EXTERNAL_WORK_CLASSIFICATION_LABELS, WORK_SCOPE_LABELS } from "@/lib/analytics/labels";
 import { selectProjectsPageRows } from "@/lib/analytics/selectors";
 
 function uniqueSorted(values: string[]) {
@@ -20,6 +22,16 @@ function toOptions(values: string[]): CompactFilterOption[] {
 function matchesBooleanFilter(selected: string[], value: boolean) {
   if (!selected.length || selected.length === 2) return true;
   return selected.includes(value ? "yes" : "no");
+}
+
+function hasDateInRange(values: string[], startDate: string, endDate: string) {
+  if (!startDate && !endDate) return true;
+  return values.some((value) => {
+    if (!value) return false;
+    if (startDate && value < startDate) return false;
+    if (endDate && value > endDate) return false;
+    return true;
+  });
 }
 
 export default function Projects() {
@@ -38,11 +50,21 @@ export default function Projects() {
   const verticals = searchParams.getAll("vertical");
   const courseTypes = searchParams.getAll("type");
   const authoringTools = searchParams.getAll("tool");
+  const exactProjects = searchParams.getAll("project");
   const courseStyles = searchParams.getAll("style");
   const courseLengths = searchParams.getAll("length");
   const activeFilters = searchParams.getAll("active");
   const timePhases = searchParams.getAll("timePhase");
   const timeRoles = searchParams.getAll("timeRole");
+  const timeUsers = searchParams.getAll("timeUser");
+  const workScopes = searchParams.getAll("workScope");
+  const externalClasses = searchParams.getAll("externalClass");
+  const timeStart = searchParams.get("timeStart") || "";
+  const timeEnd = searchParams.get("timeEnd") || "";
+  const smeIds = searchParams.getAll("smeId");
+  const smeInternal = searchParams.getAll("smeInternal");
+  const smeStart = searchParams.get("smeStart") || "";
+  const smeEnd = searchParams.get("smeEnd") || "";
   const discrepancyFilters = searchParams.getAll("discrepancy");
   const hasTimeLogFilters = searchParams.getAll("timeLogs");
   const hasSmeFilters = searchParams.getAll("smeFeedback");
@@ -64,7 +86,18 @@ export default function Projects() {
     setSearchParams(next, { replace: true });
   };
 
+  const setSingleParam = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value.trim()) {
+      next.set(key, value);
+    } else {
+      next.delete(key);
+    }
+    setSearchParams(next, { replace: true });
+  };
+
   const filterOptions = useMemo(() => ({
+    exactProject: toOptions(rows.flatMap((row) => row.exactProjectValues)),
     reportingYear: toOptions(rows.map((row) => row.reportingYear)),
     status: toOptions(rows.map((row) => row.status)),
     owner: toOptions(rows.flatMap((row) => row.ownerNames.length ? row.ownerNames : [row.idAssignedRaw || "Unassigned"])),
@@ -77,6 +110,11 @@ export default function Projects() {
     courseLength: toOptions(rows.map((row) => row.courseLengthRaw)),
     timePhase: toOptions(rows.flatMap((row) => row.timeLogPhases)),
     timeRole: toOptions(rows.flatMap((row) => row.timeLogRoleGroups)),
+    timeUser: toOptions(rows.flatMap((row) => row.timeLogUsers)),
+    workScope: Object.entries(WORK_SCOPE_LABELS).map(([value, label]) => ({ value, label })),
+    externalClass: Object.entries(EXTERNAL_WORK_CLASSIFICATION_LABELS).map(([value, label]) => ({ value, label })),
+    smeId: toOptions(rows.flatMap((row) => row.smeFeedbackInstructionalDesigners)),
+    smeInternal: toOptions(rows.flatMap((row) => row.smeFeedbackInternalLabels)),
     yesNo: [
       { label: "Yes", value: "yes" },
       { label: "No", value: "no" },
@@ -89,6 +127,7 @@ export default function Projects() {
     return rows.filter((row) => {
       const searchableText = [
         row.projectName,
+        row.projectKey,
         row.status,
         row.idAssignedRaw,
         row.smeAssignedRaw,
@@ -111,11 +150,19 @@ export default function Projects() {
       if (verticals.length && !row.verticals.some((vertical) => verticals.includes(vertical))) return false;
       if (courseTypes.length && !courseTypes.includes(row.courseType)) return false;
       if (authoringTools.length && !authoringTools.includes(row.authoringTool)) return false;
+      if (exactProjects.length && !row.exactProjectValues.some((project) => exactProjects.includes(project))) return false;
       if (courseStyles.length && !courseStyles.includes(row.courseStyle)) return false;
       if (courseLengths.length && !courseLengths.includes(row.courseLengthRaw)) return false;
       if (!matchesBooleanFilter(activeFilters, row.isActive)) return false;
       if (timePhases.length && !row.timeLogPhases.some((phase) => timePhases.includes(phase))) return false;
       if (timeRoles.length && !row.timeLogRoleGroups.some((role) => timeRoles.includes(role))) return false;
+      if (timeUsers.length && !row.timeLogUsers.some((user) => timeUsers.includes(user))) return false;
+      if (workScopes.length && !row.timeLogWorkScopes.some((scope) => workScopes.includes(scope))) return false;
+      if (externalClasses.length && !row.timeLogExternalClassifications.some((classification) => externalClasses.includes(classification))) return false;
+      if (!hasDateInRange(row.timeLogDates, timeStart, timeEnd)) return false;
+      if (smeIds.length && !row.smeFeedbackInstructionalDesigners.some((id) => smeIds.includes(id))) return false;
+      if (smeInternal.length && !row.smeFeedbackInternalLabels.some((value) => smeInternal.includes(value))) return false;
+      if (!hasDateInRange(row.smeFeedbackDates, smeStart, smeEnd)) return false;
       if (!matchesBooleanFilter(discrepancyFilters, row.hoursDiscrepancyFlag)) return false;
       if (!matchesBooleanFilter(hasTimeLogFilters, row.hasTimeLogs)) return false;
       if (!matchesBooleanFilter(hasSmeFilters, row.hasSmeFeedback)) return false;
@@ -128,6 +175,8 @@ export default function Projects() {
     courseTypes,
     activeFilters,
     discrepancyFilters,
+    exactProjects,
+    externalClasses,
     hasSmeFilters,
     hasTimeLogFilters,
     legalReviewers,
@@ -136,10 +185,18 @@ export default function Projects() {
     rows,
     search,
     smes,
+    smeEnd,
     statuses,
+    smeIds,
+    smeInternal,
+    smeStart,
+    timeEnd,
     timePhases,
     timeRoles,
+    timeStart,
+    timeUsers,
     verticals,
+    workScopes,
   ]);
 
   if (isLoading) {
@@ -166,6 +223,7 @@ export default function Projects() {
             onChange={(event) => setSearchValue(event.target.value)}
           />
           <div className="flex flex-wrap gap-2">
+            <CompactMultiSelectFilter label="Project" options={filterOptions.exactProject} selected={exactProjects} onChange={(values) => setMultiParam("project", values)} />
             <CompactMultiSelectFilter label="Reporting Year" options={filterOptions.reportingYear} selected={reportingYears} onChange={(values) => setMultiParam("year", values)} />
             <CompactMultiSelectFilter label="Status" options={filterOptions.status} selected={statuses} onChange={(values) => setMultiParam("status", values)} />
             <CompactMultiSelectFilter label="Owner" options={filterOptions.owner} selected={owners} onChange={(values) => setMultiParam("owner", values)} />
@@ -179,9 +237,30 @@ export default function Projects() {
             <CompactMultiSelectFilter label="Active" options={filterOptions.yesNo} selected={activeFilters} onChange={(values) => setMultiParam("active", values)} />
             <CompactMultiSelectFilter label="Time Log Phase" options={filterOptions.timePhase} selected={timePhases} onChange={(values) => setMultiParam("timePhase", values)} />
             <CompactMultiSelectFilter label="Time Log Role Group" options={filterOptions.timeRole} selected={timeRoles} onChange={(values) => setMultiParam("timeRole", values)} />
+            <CompactMultiSelectFilter label="Time Log User" options={filterOptions.timeUser} selected={timeUsers} onChange={(values) => setMultiParam("timeUser", values)} />
+            <CompactMultiSelectFilter label="Work Scope" options={filterOptions.workScope} selected={workScopes} onChange={(values) => setMultiParam("workScope", values)} />
+            <CompactMultiSelectFilter label="External Class" options={filterOptions.externalClass} selected={externalClasses} onChange={(values) => setMultiParam("externalClass", values)} />
+            <CompactMultiSelectFilter label="SME ID" options={filterOptions.smeId} selected={smeIds} onChange={(values) => setMultiParam("smeId", values)} />
+            <CompactMultiSelectFilter label="SME Internal" options={filterOptions.smeInternal} selected={smeInternal} onChange={(values) => setMultiParam("smeInternal", values)} />
             <CompactMultiSelectFilter label="Discrepancy" options={filterOptions.yesNo} selected={discrepancyFilters} onChange={(values) => setMultiParam("discrepancy", values)} />
             <CompactMultiSelectFilter label="Has Time Logs" options={filterOptions.yesNo} selected={hasTimeLogFilters} onChange={(values) => setMultiParam("timeLogs", values)} />
             <CompactMultiSelectFilter label="Has SME Feedback" options={filterOptions.yesNo} selected={hasSmeFilters} onChange={(values) => setMultiParam("smeFeedback", values)} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <ChartDateRangeFilter
+              label="Time Log Dates"
+              startDate={timeStart}
+              endDate={timeEnd}
+              onStartDateChange={(value) => setSingleParam("timeStart", value)}
+              onEndDateChange={(value) => setSingleParam("timeEnd", value)}
+            />
+            <ChartDateRangeFilter
+              label="SME Dates"
+              startDate={smeStart}
+              endDate={smeEnd}
+              onStartDateChange={(value) => setSingleParam("smeStart", value)}
+              onEndDateChange={(value) => setSingleParam("smeEnd", value)}
+            />
           </div>
         </CardContent>
       </Card>

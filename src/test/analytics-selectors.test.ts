@@ -7,6 +7,7 @@ import {
   selectGroupedReconciliationModel,
   selectPersonDetailModel,
   selectProjectDetailModel,
+  selectProjectsPageRows,
   selectSmeCollaborationModel,
 } from "@/lib/analytics/selectors";
 import type { AnalyticsPersistenceBundle, RawProjectImportRow, RawTimeLogRow } from "@/lib/analytics/types";
@@ -353,6 +354,21 @@ describe("analytics selectors", () => {
 
     expect(projectModel?.timeline.points).toEqual([{ date: "2026-03-10", label: "2026-03-10", hours: 3 }]);
     expect(personModel?.idView.statusBreakdown).toEqual([{ status: "Testing", count: 1 }]);
+  });
+
+  it("returns project-page metadata for chart click-through filters", () => {
+    const snapshot = createUiSnapshot();
+    const rows = selectProjectsPageRows(snapshot);
+    const alpha = rows.find((row) => row.projectKey === "alpha-project|2026");
+
+    expect(alpha?.exactProjectValues).toEqual(["Alpha Project", "alpha-project|2026"]);
+    expect(alpha?.timeLogUsers).toEqual(["Alex Doe"]);
+    expect(alpha?.timeLogWorkScopes).toEqual(["matched_project_work"]);
+    expect(alpha?.timeLogExternalClassifications).toEqual(["other_external"]);
+    expect(alpha?.timeLogDates).toEqual(["2026-03-01", "2026-03-10"]);
+    expect(alpha?.smeFeedbackInstructionalDesigners).toEqual(["Alex Doe"]);
+    expect(alpha?.smeFeedbackInternalLabels).toEqual(["Internal"]);
+    expect(alpha?.smeFeedbackDates).toEqual(["2026-03-08", "2026-03-09"]);
   });
 
   it("builds grouped reconciliation rows and surfaces shared suggestions", () => {

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,6 +11,7 @@ import { PersonLink } from "@/components/PersonLink";
 import { ProjectLink } from "@/components/ProjectLink";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { getSmeInternalLabel, selectSmeCollaborationModel } from "@/lib/analytics/selectors";
+import { getChartPayloadValue, navigateToProjectsFromChart } from "@/lib/projects-navigation";
 
 function toOptions(values: string[]): CompactFilterOption[] {
   return values.map((value) => ({ label: value, value }));
@@ -48,6 +50,7 @@ function HeatCell({
 }
 
 export default function SmeCollaboration() {
+  const navigate = useNavigate();
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const [matrixInternal, setMatrixInternal] = useState<string[]>([]);
   const [matrixIds, setMatrixIds] = useState<string[]>([]);
@@ -76,6 +79,8 @@ export default function SmeCollaboration() {
   const [matchedStartDate, setMatchedStartDate] = useState("");
   const [matchedEndDate, setMatchedEndDate] = useState("");
   const reportingYearLabels = useAnimatedBarLabels({ labelKey: "reportingYear", orientation: "x", barColor: "hsl(var(--chart-2))" });
+  const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
+    navigateToProjectsFromChart(navigate, params);
 
   const model = useMemo(
     () =>
@@ -255,7 +260,22 @@ export default function SmeCollaboration() {
               <XAxis dataKey="reportingYear" tick={reportingYearLabels.tick} />
               <YAxis allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="responses" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} {...reportingYearLabels.barHoverProps} />
+              <Bar
+                dataKey="responses"
+                fill="hsl(var(--chart-2))"
+                radius={[4, 4, 0, 0]}
+                cursor="pointer"
+                onClick={(payload: unknown) => navigateToProjects({
+                  smeFeedback: "yes",
+                  year: getChartPayloadValue(payload, "reportingYear"),
+                  smeInternal: yearInternal,
+                  smeId: yearIds,
+                  sme: yearSmes,
+                  smeStart: yearStartDate,
+                  smeEnd: yearEndDate,
+                })}
+                {...reportingYearLabels.barHoverProps}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
