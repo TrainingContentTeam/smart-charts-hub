@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
 import { CHART_FILTER_VARIANT, ChartDateRangeFilter, ChartFilterBar } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
@@ -74,6 +75,7 @@ export default function SmeCollaboration() {
   const [matchedInternal, setMatchedInternal] = useState<string[]>([]);
   const [matchedStartDate, setMatchedStartDate] = useState("");
   const [matchedEndDate, setMatchedEndDate] = useState("");
+  const reportingYearLabels = useAnimatedBarLabels({ labelKey: "reportingYear", orientation: "x", barColor: "hsl(var(--chart-2))" });
 
   const model = useMemo(
     () =>
@@ -250,10 +252,10 @@ export default function SmeCollaboration() {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={model.byReportingYear}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="reportingYear" />
+              <XAxis dataKey="reportingYear" tick={reportingYearLabels.tick} />
               <YAxis allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="responses" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="responses" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} {...reportingYearLabels.barHoverProps} />
             </BarChart>
           </ResponsiveContainer>
         </div>

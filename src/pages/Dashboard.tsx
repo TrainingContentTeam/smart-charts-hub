@@ -13,7 +13,9 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
+import { CHART_FILTER_VARIANT } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { PHASE_EXPLANATION_TOOLTIP, WORK_SCOPE_LABELS } from "@/lib/analytics/labels";
@@ -26,7 +28,7 @@ const PIE_COLORS = [
   "hsl(var(--chart-4))",
   "hsl(var(--chart-5))",
 ];
-const DASHBOARD_FILTER_VARIANT = "chip" as const;
+const DASHBOARD_FILTER_VARIANT = CHART_FILTER_VARIANT;
 
 function uniqueSorted(values: string[]) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -107,6 +109,11 @@ export default function Dashboard() {
     phases: [],
     workScopes: [],
   });
+  const yearLabels = useAnimatedBarLabels({ labelKey: "year", orientation: "x", barColor: "hsl(var(--chart-1))" });
+  const statusLabels = useAnimatedBarLabels({ labelKey: "status", orientation: "y", barColor: "hsl(var(--chart-2))", maxLength: 16 });
+  const toolLabels = useAnimatedBarLabels({ labelKey: "label", orientation: "y", barColor: "hsl(var(--chart-3))", maxLength: 16 });
+  const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-4))", contrastColor: "hsl(var(--foreground))" });
+  const roleLabels = useAnimatedBarLabels({ labelKey: "roleGroup", orientation: "x", barColor: "hsl(var(--chart-5))" });
 
   const projectsByYearModel = useMemo(
     () => (snapshot ? selectDashboardModel(snapshot, { projectsByReportingYear: projectsByYearFilters }) : null),
@@ -228,7 +235,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={projectsByYearModel.projectsByReportingYear}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="year" />
+                <XAxis dataKey="year" tick={yearLabels.tick} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Bar
@@ -236,6 +243,7 @@ export default function Dashboard() {
                   fill="hsl(var(--chart-1))"
                   radius={[4, 4, 0, 0]}
                   cursor="pointer"
+                  {...yearLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
                     year: getPayloadValue(payload, "year"),
                     owner: projectsByYearFilters.owners,
@@ -264,13 +272,14 @@ export default function Dashboard() {
               <BarChart data={activeStatusModel.activeProjectsByStatus} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="status" width={220} interval={0} />
+                <YAxis type="category" dataKey="status" width={220} interval={0} tick={statusLabels.tick} />
                 <Tooltip />
                 <Bar
                   dataKey="count"
                   fill="hsl(var(--chart-2))"
                   radius={[0, 4, 4, 0]}
                   cursor="pointer"
+                  {...statusLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
                     active: "yes",
                     status: getPayloadValue(payload, "status"),
@@ -380,13 +389,14 @@ export default function Dashboard() {
               <BarChart data={authoringToolModel.projectMixByAuthoringTool} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="label" width={180} />
+                <YAxis type="category" dataKey="label" width={180} tick={toolLabels.tick} />
                 <Tooltip />
                 <Bar
                   dataKey="value"
                   fill="hsl(var(--chart-3))"
                   radius={[0, 4, 4, 0]}
                   cursor="pointer"
+                  {...toolLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
                     tool: getPayloadValue(payload, "label"),
                     year: authoringToolFilters.reportingYears,
@@ -414,7 +424,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={phaseModel.hoursByTimeLogPhase}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="phase" />
+                <XAxis dataKey="phase" tick={phaseLabels.tick} />
                 <YAxis />
                 <Tooltip />
                 <Bar
@@ -422,6 +432,7 @@ export default function Dashboard() {
                   fill="hsl(var(--chart-4))"
                   radius={[4, 4, 0, 0]}
                   cursor="pointer"
+                  {...phaseLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
                     timePhase: getPayloadValue(payload, "phase"),
                     year: phaseFilters.reportingYears,
@@ -447,7 +458,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={roleModel.hoursByRoleGroup}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="roleGroup" />
+                <XAxis dataKey="roleGroup" tick={roleLabels.tick} />
                 <YAxis />
                 <Tooltip />
                 <Bar
@@ -455,6 +466,7 @@ export default function Dashboard() {
                   fill="hsl(var(--chart-5))"
                   radius={[4, 4, 0, 0]}
                   cursor="pointer"
+                  {...roleLabels.barHoverProps}
                   onClick={(payload: unknown) => navigateToProjects({
                     timeRole: getPayloadValue(payload, "roleGroup"),
                     year: roleFilters.reportingYears,

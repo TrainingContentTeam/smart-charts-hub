@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
 import { CHART_FILTER_VARIANT, ChartFilterBar } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
@@ -58,6 +59,8 @@ export default function ExternalTeams() {
   const [phaseChartFilters, setPhaseChartFilters] = useState<ExternalTeamsFilters>({});
   const [workItemFilters, setWorkItemFilters] = useState<ExternalTeamsFilters>({});
   const [userFilters, setUserFilters] = useState<ExternalTeamsFilters>({});
+  const roleLabels = useAnimatedBarLabels({ labelKey: "roleGroup", orientation: "x", barColor: "hsl(var(--chart-1))" });
+  const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-2))" });
 
   const model = useMemo(() => (snapshot ? selectExternalTeamsModel(snapshot) : null), [snapshot]);
   const roleChartModel = useMemo(
@@ -141,10 +144,10 @@ export default function ExternalTeams() {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={roleChartModel.hoursByExternalRoleGroup}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="roleGroup" interval={0} angle={-10} textAnchor="end" height={64} />
+              <XAxis dataKey="roleGroup" interval={0} height={64} tick={roleLabels.tick} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} {...roleLabels.barHoverProps} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -165,10 +168,10 @@ export default function ExternalTeams() {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={phaseChartModel.hoursByCategoryPhase}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="phase" />
+              <XAxis dataKey="phase" tick={phaseLabels.tick} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
             </BarChart>
           </ResponsiveContainer>
         </div>

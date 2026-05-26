@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
 import { CHART_FILTER_VARIANT, ChartFilterBar } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
@@ -62,6 +63,11 @@ export default function Development() {
   const [activitySearch, setActivitySearch] = useState("");
   const [activityStatuses, setActivityStatuses] = useState<string[]>([]);
   const [activityOwners, setActivityOwners] = useState<string[]>([]);
+  const statusLabels = useAnimatedBarLabels({ labelKey: "status", orientation: "y", barColor: "hsl(var(--chart-1))", maxLength: 16 });
+  const ownerLabels = useAnimatedBarLabels({ labelKey: "owner", orientation: "y", barColor: "hsl(var(--chart-2))", maxLength: 16 });
+  const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-3))" });
+  const toolLabels = useAnimatedBarLabels({ labelKey: "tool", orientation: "x", barColor: "hsl(var(--chart-4))", contrastColor: "hsl(var(--foreground))" });
+  const typeLabels = useAnimatedBarLabels({ labelKey: "type", orientation: "x", barColor: "hsl(var(--chart-5))" });
 
   const { sort, toggleSort } = useTableSort<"projectName" | "status" | "owner" | "latestTimeLogDate">({
     key: "latestTimeLogDate",
@@ -195,9 +201,9 @@ export default function Development() {
               <BarChart data={model.activeProjectsByStatus} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="status" width={180} interval={0} />
+                <YAxis type="category" dataKey="status" width={180} interval={0} tick={statusLabels.tick} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} {...statusLabels.barHoverProps} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -243,9 +249,9 @@ export default function Development() {
               <BarChart data={model.activeProjectsByIdOwner} layout="vertical" margin={{ left: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="owner" width={180} interval={0} />
+                <YAxis type="category" dataKey="owner" width={180} interval={0} tick={ownerLabels.tick} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} {...ownerLabels.barHoverProps} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -299,10 +305,10 @@ export default function Development() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={model.developmentHoursByPhase}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="phase" minTickGap={18} />
+                <XAxis dataKey="phase" minTickGap={18} tick={phaseLabels.tick} />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -347,10 +353,10 @@ export default function Development() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={model.activeProjectsByAuthoringTool}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="tool" minTickGap={18} />
+                <XAxis dataKey="tool" minTickGap={18} tick={toolLabels.tick} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} {...toolLabels.barHoverProps} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -395,10 +401,10 @@ export default function Development() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={model.activeProjectsByCourseType}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="type" minTickGap={18} />
+                <XAxis dataKey="type" minTickGap={18} tick={typeLabels.tick} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--chart-5))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill="hsl(var(--chart-5))" radius={[4, 4, 0, 0]} {...typeLabels.barHoverProps} />
               </BarChart>
             </ResponsiveContainer>
           </div>

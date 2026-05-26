@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
 import { CHART_FILTER_VARIANT, ChartDateRangeFilter, ChartFilterBar } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
@@ -48,6 +49,7 @@ export default function ProjectDetail() {
   const [timelineUsers, setTimelineUsers] = useState<string[]>([]);
   const [timelineStartDate, setTimelineStartDate] = useState("");
   const [timelineEndDate, setTimelineEndDate] = useState("");
+  const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-1))" });
 
   const project = useMemo(
     () => (snapshot ? resolveProjectFromRoute(snapshot, params.reportingYear, params.projectSlug) : null),
@@ -212,10 +214,10 @@ export default function ProjectDetail() {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={model.phaseBreakdown}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="phase" />
+              <XAxis dataKey="phase" tick={phaseLabels.tick} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="hours" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
             </BarChart>
           </ResponsiveContainer>
         </div>

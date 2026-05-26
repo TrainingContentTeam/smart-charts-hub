@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
 import { CHART_FILTER_VARIANT, ChartFilterBar } from "@/components/ChartFilters";
 import { CompactMultiSelectFilter, type CompactFilterOption } from "@/components/CompactMultiSelectFilter";
@@ -51,6 +52,8 @@ export default function PersonDetail() {
   const [phaseTools, setPhaseTools] = useState<string[]>([]);
   const [phaseTypes, setPhaseTypes] = useState<string[]>([]);
   const [phaseRoles, setPhaseRoles] = useState<string[]>([]);
+  const statusLabels = useAnimatedBarLabels({ labelKey: "status", orientation: "y", barColor: "hsl(var(--chart-1))", maxLength: 16 });
+  const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-2))" });
 
   const canonicalName = useMemo(
     () => (snapshot ? resolvePersonNameFromRoute(snapshot, params.personSlug) : null),
@@ -221,9 +224,9 @@ export default function PersonDetail() {
                   <BarChart data={model.idView.statusBreakdown} layout="vertical" margin={{ left: 24 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" allowDecimals={false} />
-                    <YAxis type="category" dataKey="status" width={170} interval={0} />
+                    <YAxis type="category" dataKey="status" width={170} interval={0} tick={statusLabels.tick} />
                     <Tooltip />
-                    <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} {...statusLabels.barHoverProps} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -244,10 +247,10 @@ export default function PersonDetail() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={model.idView.phaseBreakdown}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="phase" />
+                    <XAxis dataKey="phase" tick={phaseLabels.tick} />
                     <YAxis />
                     <Tooltip />
-                    <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="hours" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} {...phaseLabels.barHoverProps} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
