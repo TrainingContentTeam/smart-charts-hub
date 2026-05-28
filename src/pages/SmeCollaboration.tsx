@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Maximize2 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
@@ -44,6 +47,114 @@ function CoverageTooltip({ active, payload, label }: { active?: boolean; payload
       <p className="text-muted-foreground">Completed surveys: {completedSurveys}</p>
       <p className="text-muted-foreground">Average rating: {averageRating > 0 ? averageRating : "-"}</p>
     </div>
+  );
+}
+
+type CourseCoverageDatum = {
+  assignedCourses: number;
+  completedSurveys: number;
+  averageRating: number;
+};
+
+function mutedChartColor(color: string) {
+  return color.replace(/\)$/, " / 0.24)");
+}
+
+function ExpandChartButton({ chartTitle, onClick }: { chartTitle: string; onClick: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+      aria-label={`Expand ${chartTitle}`}
+      onClick={onClick}
+    >
+      <Maximize2 className="h-4 w-4" />
+    </Button>
+  );
+}
+
+function CourseCoverageChart<TData extends CourseCoverageDatum>({
+  data,
+  labelKey,
+  color,
+  layout,
+}: {
+  data: TData[];
+  labelKey: Extract<keyof TData, string>;
+  color: string;
+  layout: "vertical-summary" | "horizontal-expanded";
+}) {
+  const isExpanded = layout === "horizontal-expanded";
+  const labels = useAnimatedBarLabels({
+    labelKey,
+    orientation: isExpanded ? "y" : "x",
+    barColor: color,
+    maxLength: isExpanded ? 24 : 12,
+  });
+  const chartHeight = isExpanded ? Math.max(420, data.length * 38 + 40) : 360;
+
+  if (isExpanded) {
+    return (
+      <div style={{ height: chartHeight, minWidth: 760 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} layout="vertical" margin={{ left: 132, right: 24 }} barGap={-28} barCategoryGap="24%">
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis type="number" allowDecimals={false} />
+            <YAxis type="category" dataKey={labelKey} tick={labels.tick} width={132} interval={0} />
+            <Tooltip content={<CoverageTooltip />} />
+            <Bar dataKey="assignedCourses" name="Assigned Courses" fill={mutedChartColor(color)} radius={[0, 4, 4, 0]} barSize={28} />
+            <Bar dataKey="completedSurveys" name="Completed Surveys" fill={color} radius={[0, 4, 4, 0]} barSize={16} {...labels.barHoverProps} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-[360px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} barGap={-28} barCategoryGap="32%" margin={{ left: 8, right: 8, bottom: 8 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey={labelKey} tick={labels.tick} interval={0} height={58} />
+          <YAxis allowDecimals={false} />
+          <Tooltip content={<CoverageTooltip />} />
+          <Bar dataKey="assignedCourses" name="Assigned Courses" fill={mutedChartColor(color)} radius={[4, 4, 0, 0]} barSize={34} />
+          <Bar dataKey="completedSurveys" name="Completed Surveys" fill={color} radius={[4, 4, 0, 0]} barSize={18} {...labels.barHoverProps} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function CourseCoverageLightbox<TData extends CourseCoverageDatum>({
+  open,
+  onOpenChange,
+  title,
+  data,
+  labelKey,
+  color,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  data: TData[];
+  labelKey: Extract<keyof TData, string>;
+  color: string;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[88vh] max-w-[95vw] flex-col gap-4">
+        <DialogHeader>
+          <DialogTitle>Full {title}</DialogTitle>
+          <DialogDescription>All names are shown with assigned courses, completed surveys, and average rating available on hover.</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-auto pr-2">
+          <CourseCoverageChart data={data} labelKey={labelKey} color={color} layout="horizontal-expanded" />
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -95,9 +206,9 @@ export default function SmeCollaboration() {
   const [matchedInternal, setMatchedInternal] = useState<string[]>([]);
   const [matchedStartDate, setMatchedStartDate] = useState("");
   const [matchedEndDate, setMatchedEndDate] = useState("");
+  const [smeCoverageOpen, setSmeCoverageOpen] = useState(false);
+  const [idCoverageOpen, setIdCoverageOpen] = useState(false);
   const reportingYearLabels = useAnimatedBarLabels({ labelKey: "reportingYear", orientation: "x", barColor: "hsl(var(--chart-2))" });
-  const smeCoverageLabels = useAnimatedBarLabels({ labelKey: "sme", orientation: "x", barColor: "hsl(var(--chart-1))", maxLength: 12 });
-  const idCoverageLabels = useAnimatedBarLabels({ labelKey: "instructionalDesigner", orientation: "x", barColor: "hsl(var(--chart-3))", maxLength: 12 });
   const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
     navigateToProjectsFromChart(navigate, params);
 
@@ -203,6 +314,9 @@ export default function SmeCollaboration() {
     );
   }
 
+  const topSmeCourseSurveyCoverage = model.smeCourseSurveyCoverage.slice(0, 10);
+  const topIdCourseSurveyCoverage = model.idCourseSurveyCoverage.slice(0, 10);
+
   return (
     <div className="space-y-6">
       <div>
@@ -219,43 +333,38 @@ export default function SmeCollaboration() {
         <SummaryCard label="Unresolved / Ambiguous Rows" value={model.cards.unresolvedRowsCount} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartPanel
-          title="SME Course Coverage"
-          info="Assigned courses come from the LCT SME field. Completed surveys and average ratings come from ID survey responses about each SME."
-        >
-          <div className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={model.smeCourseSurveyCoverage} barGap={-28} barCategoryGap="28%">
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="sme" tick={smeCoverageLabels.tick} interval={0} height={54} />
-                <YAxis allowDecimals={false} />
-                <Tooltip content={<CoverageTooltip />} />
-                <Bar dataKey="assignedCourses" name="Assigned Courses" fill="hsl(var(--chart-1) / 0.24)" radius={[4, 4, 0, 0]} barSize={34} />
-                <Bar dataKey="completedSurveys" name="Completed Surveys" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} barSize={18} {...smeCoverageLabels.barHoverProps} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartPanel>
+      <ChartPanel
+        title="SME Course Coverage"
+        info="Assigned courses come from the LCT SME field. Completed surveys and average ratings come from ID survey responses about each SME."
+        actions={<ExpandChartButton chartTitle="SME Course Coverage" onClick={() => setSmeCoverageOpen(true)} />}
+      >
+        <CourseCoverageChart data={topSmeCourseSurveyCoverage} labelKey="sme" color="hsl(var(--chart-1))" layout="vertical-summary" />
+      </ChartPanel>
 
-        <ChartPanel
-          title="ID Course Coverage"
-          info="Assigned courses come from the LCT ID Assigned field. Completed surveys and average ratings come from SME survey responses about each ID."
-        >
-          <div className="h-[320px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={model.idCourseSurveyCoverage} barGap={-28} barCategoryGap="28%">
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="instructionalDesigner" tick={idCoverageLabels.tick} interval={0} height={54} />
-                <YAxis allowDecimals={false} />
-                <Tooltip content={<CoverageTooltip />} />
-                <Bar dataKey="assignedCourses" name="Assigned Courses" fill="hsl(var(--chart-3) / 0.24)" radius={[4, 4, 0, 0]} barSize={34} />
-                <Bar dataKey="completedSurveys" name="Completed Surveys" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} barSize={18} {...idCoverageLabels.barHoverProps} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartPanel>
-      </div>
+      <ChartPanel
+        title="ID Course Coverage"
+        info="Assigned courses come from the LCT ID Assigned field. Completed surveys and average ratings come from SME survey responses about each ID."
+        actions={<ExpandChartButton chartTitle="ID Course Coverage" onClick={() => setIdCoverageOpen(true)} />}
+      >
+        <CourseCoverageChart data={topIdCourseSurveyCoverage} labelKey="instructionalDesigner" color="hsl(var(--chart-3))" layout="vertical-summary" />
+      </ChartPanel>
+
+      <CourseCoverageLightbox
+        open={smeCoverageOpen}
+        onOpenChange={setSmeCoverageOpen}
+        title="SME Course Coverage"
+        data={model.smeCourseSurveyCoverage}
+        labelKey="sme"
+        color="hsl(var(--chart-1))"
+      />
+      <CourseCoverageLightbox
+        open={idCoverageOpen}
+        onOpenChange={setIdCoverageOpen}
+        title="ID Course Coverage"
+        data={model.idCourseSurveyCoverage}
+        labelKey="instructionalDesigner"
+        color="hsl(var(--chart-3))"
+      />
 
       <ChartPanel
         title="SME Satisfaction by Question (SME View)"

@@ -7,13 +7,14 @@ import { cn } from "@/lib/utils";
 type ChartPanelProps = {
   title: string;
   info?: string;
+  actions?: ReactNode;
   filters?: ReactNode;
   children: ReactNode;
   className?: string;
   contentClassName?: string;
 };
 
-export function ChartPanel({ title, info, filters, children, className, contentClassName }: ChartPanelProps) {
+export function ChartPanel({ title, info, actions, filters, children, className, contentClassName }: ChartPanelProps) {
   return (
     <Card className={className}>
       <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
@@ -34,6 +35,7 @@ export function ChartPanel({ title, info, filters, children, className, contentC
                 <TooltipContent className="max-w-xs">{info}</TooltipContent>
               </Tooltip>
             ) : null}
+            {actions}
           </div>
         </div>
         {filters ? <div className="flex flex-wrap gap-2">{filters}</div> : null}
@@ -42,4 +44,3 @@ export function ChartPanel({ title, info, filters, children, className, contentC
     </Card>
   );
 }
-

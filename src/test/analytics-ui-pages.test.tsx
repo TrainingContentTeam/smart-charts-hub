@@ -665,6 +665,13 @@ describe("analytics UI pages", () => {
 
     expect(screen.getByText("SME Course Coverage")).toBeInTheDocument();
     expect(screen.getByText("ID Course Coverage")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand SME Course Coverage" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Full SME Course Coverage" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand ID Course Coverage" }));
+    expect(screen.getByRole("heading", { name: "Full ID Course Coverage" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByText("SME Ratings From ID Surveys")).toBeInTheDocument();
     expect(screen.getByText("ID Ratings From SME Surveys")).toBeInTheDocument();
     expect(screen.getByText("Overall Experience with Lexipol")).toBeInTheDocument();
