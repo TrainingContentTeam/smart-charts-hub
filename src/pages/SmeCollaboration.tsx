@@ -30,6 +30,23 @@ function SummaryCard({ label, value }: { label: string; value: string | number }
   );
 }
 
+function CoverageTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: Record<string, unknown> }>; label?: string }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
+  const assignedCourses = Number(row.assignedCourses || 0);
+  const completedSurveys = Number(row.completedSurveys || 0);
+  const averageRating = Number(row.averageRating || 0);
+
+  return (
+    <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
+      <p className="font-medium">{label}</p>
+      <p className="text-muted-foreground">Assigned courses: {assignedCourses}</p>
+      <p className="text-muted-foreground">Completed surveys: {completedSurveys}</p>
+      <p className="text-muted-foreground">Average rating: {averageRating > 0 ? averageRating : "-"}</p>
+    </div>
+  );
+}
+
 function HeatCell({
   value,
   maxValue,
@@ -79,6 +96,8 @@ export default function SmeCollaboration() {
   const [matchedStartDate, setMatchedStartDate] = useState("");
   const [matchedEndDate, setMatchedEndDate] = useState("");
   const reportingYearLabels = useAnimatedBarLabels({ labelKey: "reportingYear", orientation: "x", barColor: "hsl(var(--chart-2))" });
+  const smeCoverageLabels = useAnimatedBarLabels({ labelKey: "sme", orientation: "x", barColor: "hsl(var(--chart-1))", maxLength: 12 });
+  const idCoverageLabels = useAnimatedBarLabels({ labelKey: "instructionalDesigner", orientation: "x", barColor: "hsl(var(--chart-3))", maxLength: 12 });
   const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
     navigateToProjectsFromChart(navigate, params);
 
@@ -200,6 +219,44 @@ export default function SmeCollaboration() {
         <SummaryCard label="Unresolved / Ambiguous Rows" value={model.cards.unresolvedRowsCount} />
       </div>
 
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ChartPanel
+          title="SME Course Coverage"
+          info="Assigned courses come from the LCT SME field. Completed surveys and average ratings come from ID survey responses about each SME."
+        >
+          <div className="h-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={model.smeCourseSurveyCoverage} barGap={-28} barCategoryGap="28%">
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="sme" tick={smeCoverageLabels.tick} interval={0} height={54} />
+                <YAxis allowDecimals={false} />
+                <Tooltip content={<CoverageTooltip />} />
+                <Bar dataKey="assignedCourses" name="Assigned Courses" fill="hsl(var(--chart-1) / 0.24)" radius={[4, 4, 0, 0]} barSize={34} />
+                <Bar dataKey="completedSurveys" name="Completed Surveys" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} barSize={18} {...smeCoverageLabels.barHoverProps} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartPanel>
+
+        <ChartPanel
+          title="ID Course Coverage"
+          info="Assigned courses come from the LCT ID Assigned field. Completed surveys and average ratings come from SME survey responses about each ID."
+        >
+          <div className="h-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={model.idCourseSurveyCoverage} barGap={-28} barCategoryGap="28%">
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="instructionalDesigner" tick={idCoverageLabels.tick} interval={0} height={54} />
+                <YAxis allowDecimals={false} />
+                <Tooltip content={<CoverageTooltip />} />
+                <Bar dataKey="assignedCourses" name="Assigned Courses" fill="hsl(var(--chart-3) / 0.24)" radius={[4, 4, 0, 0]} barSize={34} />
+                <Bar dataKey="completedSurveys" name="Completed Surveys" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} barSize={18} {...idCoverageLabels.barHoverProps} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartPanel>
+      </div>
+
       <ChartPanel
         title="SME Satisfaction by Question (SME View)"
         filters={
@@ -283,8 +340,8 @@ export default function SmeCollaboration() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartPanel
-          title="ID → SME Evaluation Breakdown"
-          info="These scores come from the instructional designer survey and reflect the ID’s evaluation of the SME."
+          title="SME Ratings From ID Surveys"
+          info="These scores come from the instructional designer survey and reflect ID evaluations of each SME."
           filters={
             <ChartFilterBar>
               <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="SME" options={toOptions(model.chartFilterOptions.smes)} selected={idBreakdownSmes} onChange={setIdBreakdownSmes} />
@@ -296,21 +353,19 @@ export default function SmeCollaboration() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Instructional Designer</TableHead>
+                <TableHead>SME</TableHead>
                 <TableHead>Responses</TableHead>
                 <TableHead>Avg Rating</TableHead>
-                <TableHead>Avg Promoter</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {model.byInstructionalDesigner.map((row) => (
-                <TableRow key={row.instructionalDesigner}>
+                <TableRow key={row.sme}>
                   <TableCell>
-                    <PersonLink personName={row.instructionalDesigner}>{row.instructionalDesigner}</PersonLink>
+                    <PersonLink personName={row.sme}>{row.sme}</PersonLink>
                   </TableCell>
                   <TableCell>{row.responses}</TableCell>
                   <TableCell>{row.averageRating || "-"}</TableCell>
-                  <TableCell>{row.averagePromoter || "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -318,8 +373,8 @@ export default function SmeCollaboration() {
         </ChartPanel>
 
         <ChartPanel
-          title="SME → Lexipol Experience Breakdown"
-          info="These scores come from the SME-facing survey and reflect the SME’s review of the Lexipol experience."
+          title="ID Ratings From SME Surveys"
+          info="These scores come from the SME-facing survey and reflect SME ratings of each instructional designer."
           filters={
             <ChartFilterBar>
               <CompactMultiSelectFilter variant={CHART_FILTER_VARIANT} label="Internal" options={internalOptions} selected={smeBreakdownInternal} onChange={setSmeBreakdownInternal} />
@@ -332,16 +387,16 @@ export default function SmeCollaboration() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SME</TableHead>
+                <TableHead>Instructional Designer</TableHead>
                 <TableHead>Responses</TableHead>
                 <TableHead>Avg Score</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {model.bySme.map((row) => (
-                <TableRow key={row.sme}>
+                <TableRow key={row.instructionalDesigner}>
                   <TableCell>
-                    <PersonLink personName={row.sme}>{row.sme}</PersonLink>
+                    <PersonLink personName={row.instructionalDesigner}>{row.instructionalDesigner}</PersonLink>
                   </TableCell>
                   <TableCell>{row.responses}</TableCell>
                   <TableCell>{row.averageScore || "-"}</TableCell>

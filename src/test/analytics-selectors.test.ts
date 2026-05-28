@@ -333,7 +333,7 @@ describe("analytics selectors", () => {
     });
 
     expect(model.smeQuestionMatrix[0].responseCount).toBe(1);
-    expect(model.bySme.map((row) => row.sme)).toEqual(["Casey SME"]);
+    expect(model.bySme.map((row) => row.instructionalDesigner)).toEqual(["Jordan Lee"]);
     expect(model.matchedResponses.map((row) => row.sme)).toEqual(["Taylor SME"]);
   });
 
@@ -411,7 +411,7 @@ describe("analytics selectors", () => {
     expect(idWindow.cards.responseCount).toBe(1);
     expect(idWindow.matchedResponses[0].projectName).toBe("Alpha Project");
     expect(smeWindow.cards.responseCount).toBe(1);
-    expect(smeWindow.bySme[0].sme).toBe("Taylor SME");
+    expect(smeWindow.bySme[0].instructionalDesigner).toBe("Alex Doe");
   });
 
   it("keeps SME matrix rows on SME-view data only and locks source verification metadata", () => {
@@ -426,6 +426,31 @@ describe("analytics selectors", () => {
     expect(model.sourceVerification.instructionalDesignerBreakdown).toBe("smeFeedbackIdView");
   });
 
+  it("attributes SME collaboration ratings to the rated person and builds course coverage bars", () => {
+    const snapshot = createUiSnapshot();
+    snapshot.canonicalProjects[0].sme_assigned_raw = "Taylor SME, Casey SME";
+    snapshot.canonicalProjects[0].owner_names = ["Alex Doe", "Jordan Lee"];
+
+    const model = selectSmeCollaborationModel(snapshot);
+
+    expect(model.smeCourseSurveyCoverage).toEqual([
+      { sme: "Casey SME", assignedCourses: 2, completedSurveys: 1, averageRating: 4 },
+      { sme: "Taylor SME", assignedCourses: 1, completedSurveys: 1, averageRating: 4.67 },
+    ]);
+    expect(model.idCourseSurveyCoverage).toEqual([
+      { instructionalDesigner: "Jordan Lee", assignedCourses: 2, completedSurveys: 1, averageRating: 4 },
+      { instructionalDesigner: "Alex Doe", assignedCourses: 1, completedSurveys: 1, averageRating: 4.6 },
+    ]);
+    expect(model.byInstructionalDesigner).toEqual([
+      { sme: "Casey SME", responses: 1, averageRating: 4 },
+      { sme: "Taylor SME", responses: 1, averageRating: 4.67 },
+    ]);
+    expect(model.bySme).toEqual([
+      { instructionalDesigner: "Alex Doe", responses: 1, averageScore: 4.6 },
+      { instructionalDesigner: "Jordan Lee", responses: 1, averageScore: 4 },
+    ]);
+  });
+
   it("excludes SMEs without averageable scores from the SME experience breakdown", () => {
     const snapshot = createUiSnapshot();
     snapshot.smeFeedbackSmeView.push({
@@ -438,7 +463,7 @@ describe("analytics selectors", () => {
       survey_date: "2026-04-01",
       course_name_raw: "Unmatched Course",
       course_key_raw: "Unmatched Course",
-      instructional_designer: "Alex Doe",
+      instructional_designer: "No Score ID",
       sme: "No Score SME",
       sme_email: "noscore@example.com",
       internal: "No",
@@ -458,7 +483,7 @@ describe("analytics selectors", () => {
     });
 
     const model = selectSmeCollaborationModel(snapshot);
-    expect(model.bySme.some((row) => row.sme === "No Score SME")).toBe(false);
+    expect(model.bySme.some((row) => row.instructionalDesigner === "No Score ID")).toBe(false);
   });
 
   it("builds a person detail model from the correct survey and project relationships", () => {

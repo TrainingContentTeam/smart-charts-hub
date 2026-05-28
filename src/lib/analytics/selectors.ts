@@ -80,6 +80,8 @@ export type SmeCollaborationFilters = {
   endDate?: string | null;
   matrix?: SmeSurveyChartFilters;
   responsesByReportingYear?: SmeSurveyChartFilters;
+  smeCourseSurveyCoverage?: SmeSurveyChartFilters;
+  idCourseSurveyCoverage?: SmeSurveyChartFilters;
   byInstructionalDesigner?: {
     smes?: string[];
     reportingYears?: string[];
@@ -167,6 +169,35 @@ function round(value: number, digits = 1) {
 function average(values: number[]) {
   if (values.length === 0) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function averageableSmeExperienceScores(row: SmeSmeFeedbackRow) {
+  return [
+    row.overall_experience_with_lexipol,
+    row.clarity_of_goals_and_objectives,
+    row.staff_responsiveness,
+    row.adequacy_of_tools_and_resources,
+    row.training_and_support_provided,
+    row.use_of_my_expertise,
+    row.incorporation_of_my_feedback,
+    row.autonomy_in_course_design,
+    row.feeling_valued_as_an_sme,
+    row.likelihood_to_recommend_lexipol,
+  ].filter((value): value is number => value !== null);
+}
+
+function averageableIdEvaluationScores(row: SmeIdFeedbackRow) {
+  return [
+    row.overall_collaboration_rating,
+    row.sme_knowledge_and_expertise,
+    row.responsiveness,
+    row.instructional_design_knowledge,
+    row.contribution_to_development,
+    row.openness_to_suggestions,
+    row.deadlines_and_schedule,
+    row.overall_quality_end_product,
+    row.sme_assistance_in_interactions,
+  ].filter((value): value is number => value !== null);
 }
 
 function labelOrUnknown(value: string | null | undefined) {
@@ -639,6 +670,16 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
     snapshot.smeFeedbackIdView.filter((row) => matchesIdRow(row, chartFilters));
   const filterSmeRows = (chartFilters: SmeSurveyChartFilters | undefined) =>
     allSmeRows.filter((row) => matchesSmeRow(row, chartFilters));
+  const projectMatchesCoverageFilters = (
+    project: CanonicalProject,
+    chartFilters: SmeSurveyChartFilters | undefined,
+    personType: "sme" | "id",
+    personName: string,
+  ) =>
+    matchesSelected(chartFilters?.reportingYears, project.reporting_year || "Unknown") &&
+    (personType === "sme"
+      ? matchesSelected(chartFilters?.smes, personName)
+      : matchesSelected(chartFilters?.instructionalDesigners, personName));
   const relevantJoinRowsFor = (idRows: SmeIdFeedbackRow[], smeRows: SmeSmeFeedbackRow[]) => {
     const relevantIds = new Set([...idRows, ...smeRows].map((row) => row.raw_sme_feedback_row_id));
     return snapshot.smeJoinAudit.filter((row) => relevantIds.has(row.raw_sme_feedback_row_id));
@@ -699,19 +740,8 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
 
   const bySmeRows = filterSmeRows(filters.bySme ?? baseFilters);
   const bySme = bySmeRows.reduce<Record<string, { responses: number; scores: number[] }>>((acc, row) => {
-    const key = row.sme || "Unknown SME";
-    const scores = [
-      row.overall_experience_with_lexipol,
-      row.clarity_of_goals_and_objectives,
-      row.staff_responsiveness,
-      row.adequacy_of_tools_and_resources,
-      row.training_and_support_provided,
-      row.use_of_my_expertise,
-      row.incorporation_of_my_feedback,
-      row.autonomy_in_course_design,
-      row.feeling_valued_as_an_sme,
-      row.likelihood_to_recommend_lexipol,
-    ].filter((value): value is number => value !== null);
+    const key = row.instructional_designer || "Unknown ID";
+    const scores = averageableSmeExperienceScores(row);
     if (!acc[key]) acc[key] = { responses: 0, scores: [] };
     acc[key].responses += 1;
     acc[key].scores.push(...scores);
@@ -719,14 +749,45 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
   }, {});
 
   const byIdRows = filterIdRows(filters.byInstructionalDesigner ?? baseFilters);
-  const byInstructionalDesigner = byIdRows.reduce<Record<string, { responses: number; ratings: number[]; promoters: number[] }>>((acc, row) => {
-    const key = row.instructional_designer || "Unknown ID";
-    if (!acc[key]) acc[key] = { responses: 0, ratings: [], promoters: [] };
+  const byInstructionalDesigner = byIdRows.reduce<Record<string, { responses: number; ratings: number[] }>>((acc, row) => {
+    const key = row.sme || "Unknown SME";
+    if (!acc[key]) acc[key] = { responses: 0, ratings: [] };
     acc[key].responses += 1;
-    if (row.overall_collaboration_rating !== null) acc[key].ratings.push(row.overall_collaboration_rating);
-    if (row.promoter_score !== null) acc[key].promoters.push(row.promoter_score);
+    acc[key].ratings.push(...averageableIdEvaluationScores(row));
     return acc;
   }, {});
+
+  const smeCoverageFilters = filters.smeCourseSurveyCoverage ?? baseFilters;
+  const idCoverageFilters = filters.idCourseSurveyCoverage ?? baseFilters;
+  const smeCourseSurveyCoverageMap = snapshot.canonicalProjects.reduce<Record<string, { assignedCourses: number; completedSurveys: number; ratings: number[] }>>((acc, project) => {
+    splitMultiValueField(project.sme_assigned_raw).forEach((sme) => {
+      if (!projectMatchesCoverageFilters(project, smeCoverageFilters, "sme", sme)) return;
+      if (!acc[sme]) acc[sme] = { assignedCourses: 0, completedSurveys: 0, ratings: [] };
+      acc[sme].assignedCourses += 1;
+    });
+    return acc;
+  }, {});
+  filterIdRows(smeCoverageFilters).forEach((row) => {
+    const sme = row.sme || "Unknown SME";
+    if (!smeCourseSurveyCoverageMap[sme]) smeCourseSurveyCoverageMap[sme] = { assignedCourses: 0, completedSurveys: 0, ratings: [] };
+    smeCourseSurveyCoverageMap[sme].completedSurveys += 1;
+    smeCourseSurveyCoverageMap[sme].ratings.push(...averageableIdEvaluationScores(row));
+  });
+
+  const idCourseSurveyCoverageMap = snapshot.canonicalProjects.reduce<Record<string, { assignedCourses: number; completedSurveys: number; ratings: number[] }>>((acc, project) => {
+    project.owner_names.forEach((instructionalDesigner) => {
+      if (!projectMatchesCoverageFilters(project, idCoverageFilters, "id", instructionalDesigner)) return;
+      if (!acc[instructionalDesigner]) acc[instructionalDesigner] = { assignedCourses: 0, completedSurveys: 0, ratings: [] };
+      acc[instructionalDesigner].assignedCourses += 1;
+    });
+    return acc;
+  }, {});
+  filterSmeRows(idCoverageFilters).forEach((row) => {
+    const instructionalDesigner = row.instructional_designer || "Unknown ID";
+    if (!idCourseSurveyCoverageMap[instructionalDesigner]) idCourseSurveyCoverageMap[instructionalDesigner] = { assignedCourses: 0, completedSurveys: 0, ratings: [] };
+    idCourseSurveyCoverageMap[instructionalDesigner].completedSurveys += 1;
+    idCourseSurveyCoverageMap[instructionalDesigner].ratings.push(...averageableSmeExperienceScores(row));
+  });
 
   const yearFilters = filters.responsesByReportingYear ?? baseFilters;
   const byReportingYear = relevantJoinRowsFor(filterIdRows(yearFilters), filterSmeRows(yearFilters)).reduce<Record<string, number>>((acc, row) => {
@@ -805,18 +866,33 @@ export function selectSmeCollaborationModel(snapshot: AnalyticsSnapshot, filters
     },
     smeQuestionMatrix,
     averageSmeQuestionScores,
-    bySme: Object.entries(bySme)
-      .map(([sme, data]) => ({ sme, responses: data.responses, averageScore: round(average(data.scores), 2) }))
-      .filter((row) => Number.isFinite(row.averageScore) && row.averageScore > 0)
-      .sort((a, b) => b.responses - a.responses || a.sme.localeCompare(b.sme)),
-    byInstructionalDesigner: Object.entries(byInstructionalDesigner)
+    smeCourseSurveyCoverage: Object.entries(smeCourseSurveyCoverageMap)
+      .map(([sme, data]) => ({
+        sme,
+        assignedCourses: data.assignedCourses,
+        completedSurveys: data.completedSurveys,
+        averageRating: round(average(data.ratings), 2),
+      }))
+      .sort((a, b) => b.assignedCourses - a.assignedCourses || b.completedSurveys - a.completedSurveys || a.sme.localeCompare(b.sme)),
+    idCourseSurveyCoverage: Object.entries(idCourseSurveyCoverageMap)
       .map(([instructionalDesigner, data]) => ({
         instructionalDesigner,
+        assignedCourses: data.assignedCourses,
+        completedSurveys: data.completedSurveys,
+        averageRating: round(average(data.ratings), 2),
+      }))
+      .sort((a, b) => b.assignedCourses - a.assignedCourses || b.completedSurveys - a.completedSurveys || a.instructionalDesigner.localeCompare(b.instructionalDesigner)),
+    bySme: Object.entries(bySme)
+      .map(([instructionalDesigner, data]) => ({ instructionalDesigner, responses: data.responses, averageScore: round(average(data.scores), 2) }))
+      .filter((row) => Number.isFinite(row.averageScore) && row.averageScore > 0)
+      .sort((a, b) => b.responses - a.responses || a.instructionalDesigner.localeCompare(b.instructionalDesigner)),
+    byInstructionalDesigner: Object.entries(byInstructionalDesigner)
+      .map(([sme, data]) => ({
+        sme,
         responses: data.responses,
         averageRating: round(average(data.ratings), 2),
-        averagePromoter: round(average(data.promoters), 2),
       }))
-      .sort((a, b) => b.responses - a.responses || a.instructionalDesigner.localeCompare(b.instructionalDesigner)),
+      .sort((a, b) => b.responses - a.responses || a.sme.localeCompare(b.sme)),
     byReportingYear: Object.entries(byReportingYear)
       .map(([reportingYear, responses]) => ({ reportingYear, responses }))
       .sort((a, b) => compareYearLabel(a.reportingYear, b.reportingYear)),

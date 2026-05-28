@@ -663,6 +663,10 @@ describe("analytics UI pages", () => {
       ["/sme-collaboration"],
     );
 
+    expect(screen.getByText("SME Course Coverage")).toBeInTheDocument();
+    expect(screen.getByText("ID Course Coverage")).toBeInTheDocument();
+    expect(screen.getByText("SME Ratings From ID Surveys")).toBeInTheDocument();
+    expect(screen.getByText("ID Ratings From SME Surveys")).toBeInTheDocument();
     expect(screen.getByText("Overall Experience with Lexipol")).toBeInTheDocument();
     expect(screen.getByText("Matched Responses")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Taylor SME" })[0]).toBeInTheDocument();
