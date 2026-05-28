@@ -1,5 +1,5 @@
 import { format, parseISO, startOfWeek } from "date-fns";
-import { FINALIZED_PROJECT_STATUSES } from "@/lib/analytics/constants";
+import { FINALIZED_PROJECT_STATUSES, PROJECT_STATUS_RANKS } from "@/lib/analytics/constants";
 import { EXTERNAL_WORK_CLASSIFICATION_LABELS, SME_QUESTION_LABELS, WORK_SCOPE_LABELS } from "@/lib/analytics/labels";
 import { compactCourseName, normalizePersonName, parseDurationToMinutes, splitMultiValueField } from "@/lib/analytics/normalization";
 import { buildProjectDetailPath } from "@/lib/analytics/project-routing";
@@ -131,6 +131,13 @@ export type DevelopmentModelOptions = {
   currentYear?: string;
   chartFilters?: DevelopmentChartFilters;
   latestActivity?: DevelopmentLatestActivityFilters;
+};
+
+export type AdminDevelopmentAnalyticsFilters = {
+  reportingYears?: string[];
+  assignedIds?: string[];
+  rawCategories?: string[];
+  statuses?: string[];
 };
 
 export type SmeMatchedResponseFilters = {
@@ -635,6 +642,200 @@ export function selectDevelopmentModel(snapshot: AnalyticsSnapshot, options: Dev
     latestActivityRows,
     latestActivityFilterOptions,
     chartFilterOptions,
+  };
+}
+
+function getProjectProgressWeight(project: CanonicalProject) {
+  if (FINALIZED_PROJECT_STATUSES.has(project.status)) return 1;
+  if (project.status === "Cancelled") return 0;
+  return Math.max(0, Math.min(1, project.status_rank / PROJECT_STATUS_RANKS.Completed));
+}
+
+export function selectAdminDevelopmentAnalyticsModel(snapshot: AnalyticsSnapshot, filters: AdminDevelopmentAnalyticsFilters = {}) {
+  const projectMap = buildProjectMap(snapshot);
+  const assignedProjectRows = snapshot.canonicalProjects.flatMap((project) =>
+    project.owner_names.map((assignedId) => ({
+      project,
+      assignedId,
+      reportingYear: project.reporting_year || "Unknown",
+      status: project.status,
+      courseLengthHours: round(parseDurationToMinutes(project.course_length_raw) / 60, 2),
+    })),
+  );
+
+  const baseAssignedRows = assignedProjectRows.filter((row) =>
+    matchesSelected(filters.reportingYears, row.reportingYear) &&
+    matchesSelected(filters.assignedIds, row.assignedId) &&
+    matchesSelected(filters.statuses, row.status),
+  );
+  const assignedProjectByKey = new Map(baseAssignedRows.map((row) => [`${row.project.project_key}|${normalizePersonLookup(row.assignedId)}`, row]));
+
+  const matchingIdLogs = snapshot.timeLogs
+    .filter((row) => row.role_group === "ID" && row.matched_project_key)
+    .map((row) => {
+      const project = row.matched_project_key ? projectMap.get(row.matched_project_key) : null;
+      if (!project) return null;
+      const assignedId = project.owner_names.find((owner) => matchesCanonicalPerson(owner, row.canonical_user_name));
+      if (!assignedId) return null;
+      const assignedRow = assignedProjectByKey.get(`${project.project_key}|${normalizePersonLookup(assignedId)}`);
+      if (!assignedRow) return null;
+      if (!matchesSelected(filters.rawCategories, row.raw_category || "Unknown")) return null;
+      return { log: row, assignedId, project: assignedRow.project, courseLengthHours: assignedRow.courseLengthHours };
+    })
+    .filter((row): row is { log: TimeLogRow; assignedId: string; project: CanonicalProject; courseLengthHours: number } => Boolean(row));
+
+  const totalDevelopmentHours = round(matchingIdLogs.reduce((sum, row) => sum + (row.log.minutes ?? 0) / 60, 0), 2);
+
+  const developmentTimeByCategory = buildHoursSeries(
+    matchingIdLogs.map((row) => ({ key: row.log.raw_category || "Unknown", minutes: row.log.minutes })),
+  ).map(([category, hours]) => ({
+    category,
+    hours: round(hours, 2),
+    percentOfTotal: totalDevelopmentHours > 0 ? round((hours / totalDevelopmentHours) * 100, 1) : 0,
+  }));
+
+  const assignedIds = uniqueSorted(baseAssignedRows.map((row) => row.assignedId));
+  const projectHoursMap = new Map<string, Record<string, string | number>>();
+  matchingIdLogs.forEach(({ log, assignedId, project }) => {
+    const key = project.project_key;
+    if (!projectHoursMap.has(key)) {
+      projectHoursMap.set(key, {
+        projectKey: project.project_key,
+        projectName: project.raw_course_name,
+        reportingYear: project.reporting_year || "Unknown",
+        status: project.status,
+        courseLengthHours: round(parseDurationToMinutes(project.course_length_raw) / 60, 2),
+        totalHours: 0,
+      });
+    }
+    const row = projectHoursMap.get(key)!;
+    const hours = (log.minutes ?? 0) / 60;
+    row[assignedId] = round(Number(row[assignedId] || 0) + hours, 2);
+    row.totalHours = round(Number(row.totalHours || 0) + hours, 2);
+  });
+
+  const idProjectHours = matchingIdLogs.reduce<Record<string, { project: CanonicalProject; assignedId: string; hours: number; courseLengthHours: number }>>(
+    (acc, { log, assignedId, project }) => {
+      const key = `${project.project_key}|${assignedId}`;
+      if (!acc[key]) {
+        acc[key] = {
+          project,
+          assignedId,
+          hours: 0,
+          courseLengthHours: round(parseDurationToMinutes(project.course_length_raw) / 60, 2),
+        };
+      }
+      acc[key].hours += (log.minutes ?? 0) / 60;
+      return acc;
+    },
+    {},
+  );
+
+  const completionById = baseAssignedRows.reduce<Record<string, {
+    assignedId: string;
+    totalDevelopmentHours: number;
+    progressWeightedCompleted: number;
+    completedCourseCount: number;
+    completedCourseLengthHours: number;
+  }>>((acc, row) => {
+    if (!acc[row.assignedId]) {
+      acc[row.assignedId] = {
+        assignedId: row.assignedId,
+        totalDevelopmentHours: 0,
+        progressWeightedCompleted: 0,
+        completedCourseCount: 0,
+        completedCourseLengthHours: 0,
+      };
+    }
+    acc[row.assignedId].progressWeightedCompleted += getProjectProgressWeight(row.project);
+    if (FINALIZED_PROJECT_STATUSES.has(row.status)) {
+      acc[row.assignedId].completedCourseCount += 1;
+      acc[row.assignedId].completedCourseLengthHours += row.courseLengthHours;
+    }
+    return acc;
+  }, {});
+
+  matchingIdLogs.forEach(({ log, assignedId }) => {
+    if (!completionById[assignedId]) {
+      completionById[assignedId] = {
+        assignedId,
+        totalDevelopmentHours: 0,
+        progressWeightedCompleted: 0,
+        completedCourseCount: 0,
+        completedCourseLengthHours: 0,
+      };
+    }
+    completionById[assignedId].totalDevelopmentHours += (log.minutes ?? 0) / 60;
+  });
+
+  const efficiencyBaseRows = Object.values(completionById)
+    .map((row) => ({
+      ...row,
+      totalDevelopmentHours: round(row.totalDevelopmentHours, 2),
+      progressWeightedCompleted: round(row.progressWeightedCompleted, 2),
+      completedCourseLengthHours: round(row.completedCourseLengthHours, 2),
+      efficiency: row.totalDevelopmentHours > 0 ? round(row.completedCourseLengthHours / row.totalDevelopmentHours, 2) : null,
+    }))
+    .sort((a, b) => {
+      if (a.efficiency === null && b.efficiency === null) return a.assignedId.localeCompare(b.assignedId);
+      if (a.efficiency === null) return 1;
+      if (b.efficiency === null) return -1;
+      return b.efficiency - a.efficiency || b.completedCourseLengthHours - a.completedCourseLengthHours || a.assignedId.localeCompare(b.assignedId);
+    });
+
+  const rankedCount = efficiencyBaseRows.filter((row) => row.efficiency !== null).length;
+  const efficiencyById = efficiencyBaseRows.map((row, index) => {
+    const rank = index + 1;
+    let tier = "Low";
+    if (row.efficiency === null) {
+      tier = "Unranked";
+    } else if (rank <= Math.ceil(rankedCount / 3)) {
+      tier = "High";
+    } else if (rank <= Math.ceil((rankedCount * 2) / 3)) {
+      tier = "Medium";
+    }
+    return { ...row, rank, tier };
+  });
+
+  const hoursByProject = [...projectHoursMap.values()]
+    .map((row) => ({
+      ...row,
+      assignedIds: assignedIds.filter((assignedId) => Number(row[assignedId] || 0) > 0),
+    }))
+    .sort((a, b) => Number(b.totalHours) - Number(a.totalHours) || String(a.projectName).localeCompare(String(b.projectName)));
+
+  return {
+    cards: {
+      totalDevelopmentHours,
+      categoryCount: developmentTimeByCategory.length,
+      topCategory: developmentTimeByCategory[0]?.category || "-",
+      assignedIdCount: assignedIds.length,
+    },
+    developmentTimeByCategory,
+    hoursByProject,
+    idProjectHours: Object.values(idProjectHours)
+      .map((row) => ({
+        projectKey: row.project.project_key,
+        projectName: row.project.raw_course_name,
+        assignedId: row.assignedId,
+        hours: round(row.hours, 2),
+        reportingYear: row.project.reporting_year || "Unknown",
+        status: row.project.status,
+        courseLengthHours: row.courseLengthHours,
+      }))
+      .sort((a, b) => b.hours - a.hours || a.projectName.localeCompare(b.projectName) || a.assignedId.localeCompare(b.assignedId)),
+    efficiencyById,
+    stackedAssignedIds: assignedIds,
+    filterOptions: {
+      reportingYears: uniqueSorted(assignedProjectRows.map((row) => row.reportingYear)),
+      assignedIds: uniqueSorted(assignedProjectRows.map((row) => row.assignedId)),
+      rawCategories: uniqueSorted(
+        snapshot.timeLogs
+          .filter((row) => row.role_group === "ID" && row.matched_project_key)
+          .map((row) => row.raw_category || "Unknown"),
+      ),
+      statuses: uniqueSorted(assignedProjectRows.map((row) => row.status)),
+    },
   };
 }
 

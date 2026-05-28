@@ -6,6 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppLayout } from "@/components/AppLayout";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import AdminDevelopmentAnalytics from "@/pages/AdminDevelopmentAnalytics";
 import Dashboard from "@/pages/Dashboard";
 import Development from "@/pages/Development";
 import ExternalTeams from "@/pages/ExternalTeams";
@@ -91,6 +94,10 @@ vi.mock("@/hooks/use-auth", () => ({
   useAuth: vi.fn(),
 }));
 
+vi.mock("@/hooks/use-user-role", () => ({
+  useUserRole: vi.fn(),
+}));
+
 vi.mock("@/lib/analytics/persistence", () => ({
   upsertLocalCourseAlias: vi.fn().mockResolvedValue(undefined),
   upsertLocalSmeManualJoin: vi.fn().mockResolvedValue(undefined),
@@ -109,6 +116,7 @@ vi.mock("sonner", () => ({
 
 import { useAnalyticsSnapshot } from "@/hooks/use-analytics-snapshot";
 import { useAuth } from "@/hooks/use-auth";
+import { useUserRole } from "@/hooks/use-user-role";
 import {
   upsertLocalCourseAlias,
   upsertLocalWorkEntityDecision,
@@ -121,6 +129,7 @@ import { toast } from "sonner";
 
 const mockedUseAnalyticsSnapshot = vi.mocked(useAnalyticsSnapshot);
 const mockedUseAuth = vi.mocked(useAuth);
+const mockedUseUserRole = vi.mocked(useUserRole);
 const mockedUpsertLocalCourseAlias = vi.mocked(upsertLocalCourseAlias);
 const mockedUpsertLocalWorkEntityDecision = vi.mocked(upsertLocalWorkEntityDecision);
 const mockedUpsertSharedCourseAlias = vi.mocked(upsertSharedCourseAlias);
@@ -163,6 +172,11 @@ beforeEach(() => {
     loading: false,
     signOut: vi.fn(),
   } as unknown as ReturnType<typeof useAuth>);
+  mockedUseUserRole.mockReturnValue({
+    role: "admin",
+    isAdmin: true,
+    loading: false,
+  } as ReturnType<typeof useUserRole>);
   mockedUpsertSharedCourseAlias.mockResolvedValue(undefined);
   mockedUpsertSharedWorkEntityDecision.mockResolvedValue(undefined);
   mockedUpsertSharedSmeManualJoin.mockResolvedValue(undefined);
@@ -653,6 +667,48 @@ describe("analytics UI pages", () => {
 
     const projectLinks = screen.getAllByRole("link", { name: /project/i });
     expect(projectLinks[0]).toHaveTextContent("Beta Project");
+  });
+
+  it("renders the admin development analytics page and admin sidebar link", () => {
+    renderWithRouter(
+      <Routes>
+        <Route path="/development-analytics" element={<AdminDevelopmentAnalytics />} />
+      </Routes>,
+      ["/development-analytics"],
+    );
+
+    expect(screen.getByRole("heading", { name: "Admin Development Analytics" })).toBeInTheDocument();
+    expect(screen.getByText("Development Time by Category")).toBeInTheDocument();
+    expect(screen.getByText("Total Hours by Individual ID and Project")).toBeInTheDocument();
+    expect(screen.getByText("Efficiency by Individual ID")).toBeInTheDocument();
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/" element={<AppLayout><div>Admin shell</div></AppLayout>} />
+      </Routes>,
+      ["/"],
+    );
+
+    expect(screen.getByRole("link", { name: /Development Analytics/i })).toBeInTheDocument();
+  });
+
+  it("protects the admin development analytics route for non-admin users", async () => {
+    mockedUseUserRole.mockReturnValue({
+      role: "user",
+      isAdmin: false,
+      loading: false,
+    } as ReturnType<typeof useUserRole>);
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/" element={<div>Home</div>} />
+        <Route path="/development-analytics" element={<ProtectedRoute requiredRole="admin"><AdminDevelopmentAnalytics /></ProtectedRoute>} />
+      </Routes>,
+      ["/development-analytics"],
+    );
+
+    await waitFor(() => expect(screen.getByText("Home")).toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Admin Development Analytics" })).not.toBeInTheDocument();
   });
 
   it("renders the SME matrix and matched-response person links", () => {

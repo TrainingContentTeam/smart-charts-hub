@@ -28,6 +28,7 @@ const projectNavItems = [
 ];
 
 const adminNavItems = [
+  { title: "Development Analytics", url: "/development-analytics", icon: BarChart3 },
   { title: "Upload Data", url: "/upload", icon: Upload },
   { title: "Reconciliation", url: "/reconciliation", icon: Unplug },
   { title: "User Management", url: "/user-management", icon: Shield },

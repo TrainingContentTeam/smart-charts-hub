@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildAnalyticsSnapshot } from "@/lib/analytics/snapshot";
 import {
+  selectAdminDevelopmentAnalyticsModel,
   selectDashboardModel,
   selectDevelopmentModel,
   selectExternalTeamsModel,
@@ -68,7 +69,14 @@ function project(
   };
 }
 
-function timeLog(id: string, courseName: string, category: string, minutes: number | null, date = "2026-04-10"): RawTimeLogRow {
+function timeLog(
+  id: string,
+  courseName: string,
+  category: string,
+  minutes: number | null,
+  date = "2026-04-10",
+  overrides: Partial<RawTimeLogRow> = {},
+): RawTimeLogRow {
   return {
     id,
     upload_id: null,
@@ -87,6 +95,7 @@ function timeLog(id: string, courseName: string, category: string, minutes: numb
     raw_user: "Alex Doe",
     parse_warnings: [],
     created_at: "2026-04-17T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -207,6 +216,42 @@ describe("analytics selectors", () => {
 
     expect(dashboard.cards.totalLoggedHours).toBe(1.5);
     expect(development.developmentHoursByPhase).toEqual([{ phase: "Planning", hours: 1.5 }]);
+  });
+
+  it("builds admin development analytics from assigned IDs and direct ID-role project logs", () => {
+    const snapshot = buildAnalyticsSnapshot(bundleWithRows({
+      projects: [
+        project("A", "Completed", 120, "2026", { id_assigned_raw: "Alex Doe", course_length_raw: "2 hr" }),
+        project("B", "LP Development", 120, "2026", { id_assigned_raw: "Alex Doe", course_length_raw: "1 hr" }),
+        project("C", "Published", 120, "2026", { id_assigned_raw: "Jordan Lee", course_length_raw: "3 hr" }),
+        project("D", "Completed", 120, "2026", { id_assigned_raw: "Zero ID", course_length_raw: "1 hr" }),
+      ],
+      timeLogs: [
+        timeLog("1", "Project A", "LP Development LC", 60, "2026-04-01", { raw_user: "Alex Doe" }),
+        timeLog("2", "Project A", "Rise Development LC", 30, "2026-04-02", { raw_user: "Alex Doe" }),
+        timeLog("3", "Project A", "LP Development LC", 120, "2026-04-03", { raw_user: "Jordan Lee" }),
+        timeLog("4", "Project B", "LP Development LC", 90, "2026-04-04", { raw_user: "Alex Doe" }),
+        timeLog("5", "Project C", "Rise Development LC", 60, "2026-04-05", { raw_user: "Jordan Lee" }),
+        timeLog("6", "Project C", "Rise Development LC", 300, "2026-04-06", { raw_user: "Taylor SME" }),
+      ],
+    }));
+
+    const model = selectAdminDevelopmentAnalyticsModel(snapshot);
+
+    expect(model.developmentTimeByCategory).toEqual([
+      { category: "LP Development LC", hours: 2.5, percentOfTotal: 62.5 },
+      { category: "Rise Development LC", hours: 1.5, percentOfTotal: 37.5 },
+    ]);
+    expect(model.idProjectHours).toEqual([
+      expect.objectContaining({ projectName: "Project A", assignedId: "Alex Doe", hours: 1.5 }),
+      expect.objectContaining({ projectName: "Project B", assignedId: "Alex Doe", hours: 1.5 }),
+      expect.objectContaining({ projectName: "Project C", assignedId: "Jordan Lee", hours: 1 }),
+    ]);
+    expect(model.efficiencyById).toEqual([
+      expect.objectContaining({ assignedId: "Jordan Lee", completedCourseCount: 1, completedCourseLengthHours: 3, totalDevelopmentHours: 1, efficiency: 3, tier: "High" }),
+      expect.objectContaining({ assignedId: "Alex Doe", completedCourseCount: 1, completedCourseLengthHours: 2, totalDevelopmentHours: 3, efficiency: 0.67, progressWeightedCompleted: 1.11 }),
+      expect.objectContaining({ assignedId: "Zero ID", completedCourseCount: 1, completedCourseLengthHours: 1, totalDevelopmentHours: 0, efficiency: null, tier: "Unranked" }),
+    ]);
   });
 
   it("keeps dashboard chart filters local to the chart being requested", () => {
