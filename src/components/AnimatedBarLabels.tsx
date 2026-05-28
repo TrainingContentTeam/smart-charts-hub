@@ -8,10 +8,7 @@ type AnimatedAxisTickProps = {
   y?: number;
   payload?: { value?: unknown };
   orientation: TickOrientation;
-  activeLabel: string | null;
   onActiveChange: (label: string | null) => void;
-  barColor: string;
-  contrastColor?: string;
   maxLength?: number;
 };
 
@@ -33,7 +30,7 @@ export function abbreviateChartLabel(value: unknown, maxLength = 14) {
     if (initialism.length >= 2 && initialism.length <= maxLength) return initialism;
   }
 
-  return `${label.slice(0, Math.max(1, maxLength - 1))}…`;
+  return `${label.slice(0, Math.max(1, maxLength - 3))}...`;
 }
 
 function getPayloadLabel(payload: unknown, labelKey: string) {
@@ -46,23 +43,14 @@ function AnimatedAxisTick({
   y = 0,
   payload,
   orientation,
-  activeLabel,
   onActiveChange,
-  barColor,
-  contrastColor = "hsl(var(--primary-foreground))",
   maxLength,
 }: AnimatedAxisTickProps) {
   const label = String(payload?.value ?? "");
   const abbreviated = abbreviateChartLabel(label, maxLength);
-  const isActive = activeLabel === label;
   const textAnchor = orientation === "y" ? "end" : "middle";
   const labelX = orientation === "y" ? -8 : 0;
   const labelY = orientation === "y" ? 4 : 16;
-  const pillX = orientation === "y" ? 8 : 0;
-  const pillY = orientation === "y" ? -12 : -18;
-  const pillWidth = Math.max(72, Math.min(260, label.length * 7.2 + 24));
-  const pillTextX = orientation === "y" ? pillX + 12 : 0;
-  const pillRectX = orientation === "y" ? pillX : -pillWidth / 2;
 
   return (
     <g
@@ -72,6 +60,7 @@ function AnimatedAxisTick({
       className="chart-abbrev-label"
       style={{ cursor: label === abbreviated ? "default" : "help" }}
     >
+      {label !== abbreviated ? <title>{label}</title> : null}
       <text
         x={labelX}
         y={labelY}
@@ -81,31 +70,6 @@ function AnimatedAxisTick({
       >
         {abbreviated}
       </text>
-      <g
-        className={isActive ? "chart-abbrev-label__full chart-abbrev-label__full--active" : "chart-abbrev-label__full"}
-        pointerEvents="none"
-      >
-        <rect
-          x={pillRectX}
-          y={pillY}
-          width={pillWidth}
-          height={24}
-          rx={5}
-          fill={barColor}
-          stroke="hsl(var(--background))"
-          strokeWidth={1}
-        />
-        <text
-          x={pillTextX}
-          y={pillY + 16}
-          textAnchor={orientation === "y" ? "start" : "middle"}
-          fill={contrastColor}
-          fontSize={12}
-          fontWeight={600}
-        >
-          {label}
-        </text>
-      </g>
     </g>
   );
 }
@@ -113,25 +77,20 @@ function AnimatedAxisTick({
 export function useAnimatedBarLabels({
   labelKey,
   orientation,
-  barColor,
-  contrastColor,
   maxLength,
 }: UseAnimatedBarLabelsOptions) {
-  const [activeLabel, setActiveLabel] = useState<string | null>(null);
+  const [, setActiveLabel] = useState<string | null>(null);
 
   const tick = useCallback(
     (props: Record<string, unknown>) => (
       <AnimatedAxisTick
         {...props}
         orientation={orientation}
-        activeLabel={activeLabel}
         onActiveChange={setActiveLabel}
-        barColor={barColor}
-        contrastColor={contrastColor}
         maxLength={maxLength}
       />
     ),
-    [activeLabel, barColor, contrastColor, maxLength, orientation],
+    [maxLength, orientation],
   );
 
   const barHoverProps = useMemo(

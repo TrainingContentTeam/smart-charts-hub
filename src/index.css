@@ -96,26 +96,6 @@
   }
 }
 
-@layer components {
-  .chart-abbrev-label__full {
-    opacity: 0;
-    transform: translateY(5px) scale(0.96);
-    transform-box: fill-box;
-    transform-origin: center;
-    transition:
-      opacity 150ms ease,
-      transform 150ms ease;
-  }
-
-  .chart-abbrev-label__full--active {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    transition:
-      opacity 170ms ease-out,
-      transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-}
-
 @layer base {
   * {
     @apply border-border;

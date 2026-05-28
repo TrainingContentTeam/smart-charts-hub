@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
+import { Maximize2 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAnimatedBarLabels } from "@/components/AnimatedBarLabels";
 import { ChartPanel } from "@/components/ChartPanel";
@@ -54,14 +57,104 @@ function CategoryTooltip({ active, payload, label }: { active?: boolean; payload
   );
 }
 
+type ProjectHoursRow = Record<string, string | number | string[]> & {
+  projectName: string;
+  totalHours: number;
+};
+
+function fullChartHeight(count: number) {
+  return Math.max(420, count * 38 + 120);
+}
+
+function ExpandChartButton({ chartTitle, onClick }: { chartTitle: string; onClick: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+      aria-label={`Expand ${chartTitle}`}
+      onClick={onClick}
+    >
+      <Maximize2 className="h-4 w-4" />
+    </Button>
+  );
+}
+
+function ProjectHoursChart({
+  data,
+  assignedIds,
+  full = false,
+}: {
+  data: ProjectHoursRow[];
+  assignedIds: string[];
+  full?: boolean;
+}) {
+  const projectLabels = useAnimatedBarLabels({
+    labelKey: "projectName",
+    orientation: "y",
+    barColor: "hsl(var(--chart-2))",
+    maxLength: full ? 30 : 24,
+  });
+
+  return (
+    <div style={{ height: full ? fullChartHeight(data.length) : chartHeight(data.length, 360, 560), minWidth: full ? 820 : undefined }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} layout="vertical" margin={{ left: full ? 80 : 40, right: 24 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis type="number" />
+          <YAxis type="category" dataKey="projectName" width={full ? 300 : 240} interval={0} tick={projectLabels.tick} />
+          <Tooltip />
+          {assignedIds.map((assignedId, index) => (
+            <Bar
+              key={assignedId}
+              dataKey={assignedId}
+              stackId="hours"
+              fill={STACK_COLORS[index % STACK_COLORS.length]}
+              radius={[0, 4, 4, 0]}
+              {...projectLabels.barHoverProps}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function ProjectHoursDialog({
+  open,
+  onOpenChange,
+  data,
+  assignedIds,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  data: ProjectHoursRow[];
+  assignedIds: string[];
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[88vh] max-w-[95vw] flex-col gap-4">
+        <DialogHeader>
+          <DialogTitle>Full Total Hours by Individual ID and Project</DialogTitle>
+          <DialogDescription>All projects are shown here. Use the page filters to narrow the full list.</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-auto pr-2">
+          <ProjectHoursChart data={data} assignedIds={assignedIds} full />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AdminDevelopmentAnalytics() {
   const { data: snapshot, isLoading } = useAnalyticsSnapshot();
   const [reportingYears, setReportingYears] = useState<string[]>([]);
   const [assignedIds, setAssignedIds] = useState<string[]>([]);
   const [rawCategories, setRawCategories] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
+  const [projectHoursOpen, setProjectHoursOpen] = useState(false);
   const categoryLabels = useAnimatedBarLabels({ labelKey: "category", orientation: "y", barColor: "hsl(var(--chart-1))", maxLength: 22 });
-  const projectLabels = useAnimatedBarLabels({ labelKey: "projectName", orientation: "y", barColor: "hsl(var(--chart-2))", maxLength: 24 });
   const efficiencyLabels = useAnimatedBarLabels({ labelKey: "assignedId", orientation: "y", barColor: "hsl(var(--chart-3))", maxLength: 18 });
 
   const model = useMemo(
@@ -95,6 +188,8 @@ export default function AdminDevelopmentAnalytics() {
     ...row,
     efficiencyForChart: row.efficiency ?? 0,
   }));
+  const topProjectHours = model.hoursByProject.slice(0, 10) as ProjectHoursRow[];
+  const allProjectHours = model.hoursByProject as ProjectHoursRow[];
 
   const filters = (
     <ChartFilterBar>
@@ -114,6 +209,13 @@ export default function AdminDevelopmentAnalytics() {
         </p>
       </div>
 
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Page Filters</CardTitle>
+        </CardHeader>
+        <CardContent>{filters}</CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="ID Development Hours" value={model.cards.totalDevelopmentHours} />
         <SummaryCard label="Development Categories" value={model.cards.categoryCount} />
@@ -124,7 +226,6 @@ export default function AdminDevelopmentAnalytics() {
       <ChartPanel
         title="Development Time by Category"
         info="Uses raw time-log categories and only ID-role hours logged by the assigned ID on their assigned projects."
-        filters={filters}
       >
         <div style={{ height: chartHeight(model.developmentTimeByCategory.length) }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -141,29 +242,17 @@ export default function AdminDevelopmentAnalytics() {
 
       <ChartPanel
         title="Total Hours by Individual ID and Project"
-        info="Stacked bars compare direct ID-role hours by assigned ID across projects."
+        info="The page chart shows the top 10 projects by direct ID-role hours. Expand to inspect the full project list."
+        actions={<ExpandChartButton chartTitle="Total Hours by Individual ID and Project" onClick={() => setProjectHoursOpen(true)} />}
       >
-        <div style={{ height: chartHeight(model.hoursByProject.length, 360) }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={model.hoursByProject} layout="vertical" margin={{ left: 40, right: 24 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis type="category" dataKey="projectName" width={240} interval={0} tick={projectLabels.tick} />
-              <Tooltip />
-              {model.stackedAssignedIds.map((assignedId, index) => (
-                <Bar
-                  key={assignedId}
-                  dataKey={assignedId}
-                  stackId="hours"
-                  fill={STACK_COLORS[index % STACK_COLORS.length]}
-                  radius={[0, 4, 4, 0]}
-                  {...projectLabels.barHoverProps}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <ProjectHoursChart data={topProjectHours} assignedIds={model.stackedAssignedIds} />
       </ChartPanel>
+      <ProjectHoursDialog
+        open={projectHoursOpen}
+        onOpenChange={setProjectHoursOpen}
+        data={allProjectHours}
+        assignedIds={model.stackedAssignedIds}
+      />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1.2fr]">
         <ChartPanel

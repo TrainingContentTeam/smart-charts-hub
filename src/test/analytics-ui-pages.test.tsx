@@ -32,7 +32,7 @@ vi.mock("recharts", async () => {
   );
   const MockLeaf = () => null;
   const labelFor = (entry: Record<string, unknown>) =>
-    String(entry.status || entry.year || entry.reportingYear || entry.label || entry.phase || entry.roleGroup || entry.owner || entry.user || entry.tool || entry.type || entry.date || "unknown");
+    String(entry.projectName || entry.assignedId || entry.category || entry.status || entry.year || entry.reportingYear || entry.label || entry.phase || entry.roleGroup || entry.owner || entry.user || entry.tool || entry.type || entry.date || "unknown");
   const MockBar = ({ __chartData, onClick }: { __chartData?: Array<Record<string, unknown>>; onClick?: (entry: Record<string, unknown>) => void }) => (
     <div>
       {(__chartData || []).map((entry, index) => (
@@ -107,6 +107,10 @@ vi.mock("@/lib/analytics/persistence", () => ({
   upsertSharedWorkEntityDecision: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/chart-snapshot", () => ({
+  saveChartSnapshot: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
@@ -125,6 +129,7 @@ import {
   upsertSharedSmeManualJoin,
   upsertSharedWorkEntityDecision,
 } from "@/lib/analytics/persistence";
+import { saveChartSnapshot } from "@/lib/chart-snapshot";
 import { toast } from "sonner";
 
 const mockedUseAnalyticsSnapshot = vi.mocked(useAnalyticsSnapshot);
@@ -136,6 +141,7 @@ const mockedUpsertSharedCourseAlias = vi.mocked(upsertSharedCourseAlias);
 const mockedUpsertLocalSmeManualJoin = vi.mocked(upsertLocalSmeManualJoin);
 const mockedUpsertSharedWorkEntityDecision = vi.mocked(upsertSharedWorkEntityDecision);
 const mockedUpsertSharedSmeManualJoin = vi.mocked(upsertSharedSmeManualJoin);
+const mockedSaveChartSnapshot = vi.mocked(saveChartSnapshot);
 const mockedToast = vi.mocked(toast);
 
 function LocationDisplay() {
@@ -183,6 +189,7 @@ beforeEach(() => {
   mockedUpsertLocalCourseAlias.mockResolvedValue(undefined);
   mockedUpsertLocalWorkEntityDecision.mockResolvedValue(undefined);
   mockedUpsertLocalSmeManualJoin.mockResolvedValue(undefined);
+  mockedSaveChartSnapshot.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -678,8 +685,17 @@ describe("analytics UI pages", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Admin Development Analytics" })).toBeInTheDocument();
+    expect(screen.getByText("Page Filters")).toBeInTheDocument();
     expect(screen.getByText("Development Time by Category")).toBeInTheDocument();
     expect(screen.getByText("Total Hours by Individual ID and Project")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download Development Time by Category image" }));
+    expect(mockedSaveChartSnapshot).toHaveBeenCalledWith(
+      expect.stringMatching(/^chart-panel-development-time-by-category-/),
+      "development-time-by-category",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Expand Total Hours by Individual ID and Project" }));
+    expect(screen.getByRole("heading", { name: "Full Total Hours by Individual ID and Project" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByText("Efficiency by Individual ID")).toBeInTheDocument();
 
     renderWithRouter(

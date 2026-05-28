@@ -43,6 +43,7 @@ export async function saveChartSnapshot(containerId: string, filenameBase: strin
       useCORS: true,
       allowTaint: true,
       logging: false,
+      ignoreElements: (element) => element.hasAttribute("data-html2canvas-ignore"),
     });
     const pngDataUrl = canvas.toDataURL("image/png");
     downloadDataUrl(`${filenameBase}.png`, pngDataUrl);
