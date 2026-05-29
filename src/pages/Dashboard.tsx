@@ -5,6 +5,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -56,6 +58,21 @@ function MetricCard({ label, value, hint }: { label: string; value: string | num
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function AverageDevelopmentTimeTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: { averageHours?: number; courseCount?: number; totalHours?: number } }>; label?: string }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+
+  return (
+    <div className="rounded-md border bg-background/95 p-3 text-sm shadow-md">
+      <p className="font-medium">{label}</p>
+      <p>Average: {row.averageHours ?? 0} hours</p>
+      <p>Courses: {row.courseCount ?? 0}</p>
+      <p>Total: {row.totalHours ?? 0} hours</p>
+    </div>
   );
 }
 
@@ -206,6 +223,31 @@ export default function Dashboard() {
       </div>
 
       <div className="space-y-4">
+        <ChartPanel
+          title="Average Course Development Time by Year"
+          info="Average recorded project development hours per course, grouped by reporting year."
+        >
+          <div className="h-[360px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={model.averageDevelopmentTimeByYear} margin={{ left: 12, right: 24, top: 16, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="year" />
+                <YAxis label={{ value: "Average hours", angle: -90, position: "insideLeft" }} />
+                <Tooltip content={<AverageDevelopmentTimeTooltip />} />
+                <Line
+                  type="monotone"
+                  dataKey="averageHours"
+                  name="Average hours"
+                  stroke="hsl(var(--chart-2))"
+                  strokeWidth={3}
+                  dot={{ r: 4, fill: "hsl(var(--chart-2))" }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartPanel>
+
         <ChartPanel
           title="Projects by Reporting Year"
           filters={

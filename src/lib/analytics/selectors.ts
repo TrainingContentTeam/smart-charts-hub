@@ -461,6 +461,27 @@ export function selectDashboardModel(snapshot: AnalyticsSnapshot, filters: Dashb
     matchesSelected(filters.hoursByRoleGroup?.workScopes, getDashboardWorkScope(row)),
   );
 
+  const averageDevelopmentTimeByYear = Array.from(
+    snapshot.canonicalProjects
+      .filter((project) => project.project_total_minutes > 0)
+      .reduce<Map<string, { totalMinutes: number; courseCount: number }>>((groups, project) => {
+        const year = project.reporting_year || "Unknown";
+        const current = groups.get(year) || { totalMinutes: 0, courseCount: 0 };
+        current.totalMinutes += project.project_total_minutes;
+        current.courseCount += 1;
+        groups.set(year, current);
+        return groups;
+      }, new Map())
+      .entries(),
+  )
+    .map(([year, value]) => ({
+      year,
+      averageHours: round(value.totalMinutes / 60 / value.courseCount, 1),
+      courseCount: value.courseCount,
+      totalHours: round(value.totalMinutes / 60, 1),
+    }))
+    .sort((a, b) => compareYearLabel(a.year, b.year));
+
   return {
     cards: {
       totalProjects,
@@ -500,6 +521,7 @@ export function selectDashboardModel(snapshot: AnalyticsSnapshot, filters: Dashb
     )
       .map(([year, count]) => ({ year, count }))
       .sort((a, b) => compareYearLabel(a.year, b.year)),
+    averageDevelopmentTimeByYear,
     activeProjectsByStatus: buildCountSeries(activeProjectsByStatusSource.map((project) => project.status))
       .map(([status, count]) => ({ status, count })),
     activeProjectStatusMix: buildCountSeries(activeProjectStatusMixSource.map((project) => project.status))

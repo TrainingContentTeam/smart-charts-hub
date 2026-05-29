@@ -207,6 +207,7 @@ describe("analytics UI pages", () => {
 
     expect(screen.getByText("Project Mix by Course Type")).toBeInTheDocument();
     expect(screen.getByText("Active Project Status Mix")).toBeInTheDocument();
+    expect(screen.getByText("Average Course Development Time by Year")).toBeInTheDocument();
   });
 
   it("removes the dashboard hours comparison chart and links active status bars to Projects", () => {

@@ -122,6 +122,25 @@ describe("analytics selectors", () => {
     expect(model.hoursByTimeLogPhase.find((row) => row.phase === "Planning")?.hours).toBe(1.5);
   });
 
+  it("builds dashboard average course development time across reporting years", () => {
+    const snapshot = buildAnalyticsSnapshot(bundleWithRows({
+      projects: [
+        project("A", "Published", 180, "2026"),
+        project("B", "Published", 120, "2026"),
+        project("C", "Published", 60, "2025"),
+        project("D", "Published", 0, "2025"),
+      ],
+      timeLogs: [],
+    }));
+
+    const model = selectDashboardModel(snapshot);
+
+    expect(model.averageDevelopmentTimeByYear).toEqual([
+      { year: "2025", averageHours: 1, courseCount: 1, totalHours: 1 },
+      { year: "2026", averageHours: 2.5, courseCount: 2, totalHours: 5 },
+    ]);
+  });
+
   it("builds active project status mix from project statuses instead of derived time-log phases", () => {
     const snapshot = buildAnalyticsSnapshot(bundleWithRows({
       projects: [

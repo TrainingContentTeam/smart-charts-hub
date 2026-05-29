@@ -198,11 +198,11 @@ export default function ProjectDetail() {
       </div>
 
       {model.hoursSummary.discrepancyFlag ? (
-        <Card className="border-amber-300 bg-amber-50/60">
+        <Card className="border-amber-300 bg-amber-50/60 dark:border-amber-400/30 dark:bg-amber-400/10">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
             <div>
-              <p className="font-medium text-amber-900">Logged hours and project-record hours do not fully line up.</p>
-              <p className="text-sm text-amber-900/80">
+              <p className="font-medium text-amber-900 dark:text-amber-100">Logged hours and project-record hours do not fully line up.</p>
+              <p className="text-sm text-amber-900/80 dark:text-amber-100/80">
                 Project records show {model.hoursSummary.projectHours}h while matched time logs show {model.hoursSummary.loggedHours}h.
               </p>
             </div>

@@ -138,8 +138,8 @@ export function AppSidebar() {
           <div
             className={`text-[11px] inline-flex px-2 py-1 rounded-full border ${
               isBypass
-                ? "bg-amber-100 text-amber-800 border-amber-300"
-                : "bg-emerald-100 text-emerald-800 border-emerald-300"
+                ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-400/10 dark:text-amber-200 dark:border-amber-400/30"
+                : "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-400/10 dark:text-emerald-200 dark:border-emerald-400/30"
             }`}
           >
             {isBypass ? "Local Bypass Data" : "Supabase Data"}

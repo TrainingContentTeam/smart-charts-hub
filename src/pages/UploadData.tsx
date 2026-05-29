@@ -220,7 +220,7 @@ export default function UploadData() {
           </div>
 
           {warnings.length > 0 ? (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-400/30 dark:bg-amber-400/10">
               <p className="mb-2 text-sm font-medium">Parse Warnings</p>
               <ul className="list-disc pl-5 text-sm text-muted-foreground">
                 {warnings.map((warning) => (
