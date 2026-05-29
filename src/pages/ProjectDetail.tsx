@@ -43,6 +43,32 @@ function addDaysIso(dateText: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function ReviewContributorList({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ name: string; hours: number }>;
+}) {
+  return (
+    <div className="rounded-md border p-3">
+      <p className="text-sm font-medium">{title}</p>
+      {rows.length ? (
+        <div className="mt-3 space-y-2">
+          {rows.map((row) => (
+            <div key={row.name} className="flex items-center justify-between gap-3 text-sm">
+              <PersonLink personName={row.name}>{row.name}</PersonLink>
+              <span className="font-medium">{row.hours}h</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-muted-foreground">No logged hours</p>
+      )}
+    </div>
+  );
+}
+
 export default function ProjectDetail() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -58,6 +84,7 @@ export default function ProjectDetail() {
   const [timelineStartDate, setTimelineStartDate] = useState("");
   const [timelineEndDate, setTimelineEndDate] = useState("");
   const phaseLabels = useAnimatedBarLabels({ labelKey: "phase", orientation: "x", barColor: "hsl(var(--chart-1))" });
+  const reviewLabels = useAnimatedBarLabels({ labelKey: "bucket", orientation: "x", barColor: "hsl(var(--chart-3))" });
   const navigateToProjects = (params: Parameters<typeof navigateToProjectsFromChart>[1]) =>
     navigateToProjectsFromChart(navigate, params);
 
@@ -209,6 +236,27 @@ export default function ProjectDetail() {
           </CardContent>
         </Card>
       ) : null}
+
+      <ChartPanel title="Review Hours by Category and Assigned ID">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr]">
+          <div className="h-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={model.reviewHours.chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="bucket" interval={0} height={64} tick={reviewLabels.tick} />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="hours" fill="hsl(var(--chart-3))" radius={[4, 4, 0, 0]} {...reviewLabels.barHoverProps} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            <ReviewContributorList title="Legal Review Contributors" rows={model.reviewHours.contributors.legalReview} />
+            <ReviewContributorList title="CQO Review Contributors" rows={model.reviewHours.contributors.cqoReview} />
+            <ReviewContributorList title="Team Review Contributors" rows={model.reviewHours.contributors.teamReview} />
+          </div>
+        </div>
+      </ChartPanel>
 
       <ChartPanel
         title="Phase Breakdown"

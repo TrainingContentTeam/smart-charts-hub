@@ -459,6 +459,59 @@ describe("analytics selectors", () => {
     expect(model?.comparison.percentileRank).toBeGreaterThan(0);
   });
 
+  it("builds project detail review hours by fixed category buckets and assigned ID owners", () => {
+    const snapshot = createUiSnapshot();
+    const alpha = snapshot.canonicalProjects[0];
+    alpha.owner_names = ["Alex Doe", "Sam Roe"];
+    alpha.id_assigned_raw = "Alex Doe, Sam Roe";
+    const baseLog = snapshot.timeLogs[0];
+    snapshot.timeLogs = [
+      { ...baseLog, raw_time_log_row_id: "legal-1", raw_category: "Process Legal Review LC", category_phase: "Review", minutes: 60, raw_user: "Lee Legal", canonical_user_name: "Lee Legal" },
+      { ...baseLog, raw_time_log_row_id: "legal-2", raw_category: "Legal Review LC", category_phase: "Review", minutes: 30, raw_user: "Pat Legal", canonical_user_name: "Pat Legal" },
+      { ...baseLog, raw_time_log_row_id: "cqo-1", raw_category: "CQO Review LC", category_phase: "Review", minutes: 60, raw_user: "Casey CQO", canonical_user_name: "Casey CQO" },
+      { ...baseLog, raw_time_log_row_id: "team-1", raw_category: "SME Review LC", category_phase: "Review", minutes: 120, raw_user: "Taylor SME", canonical_user_name: "Taylor SME" },
+      { ...baseLog, raw_time_log_row_id: "team-2", raw_category: "LP Peer Review LC", category_phase: "Review", minutes: 30, raw_user: "Quinn Reviewer", canonical_user_name: "Quinn Reviewer" },
+      { ...baseLog, raw_time_log_row_id: "assigned-1", raw_category: "Rise Development LC", category_phase: "Production", minutes: 30, raw_user: "Alex Doe", canonical_user_name: "Alex Doe" },
+      { ...baseLog, raw_time_log_row_id: "assigned-2", raw_category: "Testing LC", category_phase: "QA/Release", minutes: 30, raw_user: "Sam Roe", canonical_user_name: "Sam Roe" },
+    ];
+
+    const model = selectProjectDetailModel(snapshot, alpha.project_key);
+
+    expect(model?.reviewHours.chartData).toEqual([
+      { bucket: "Legal Review", hours: 1.5 },
+      { bucket: "CQO Review", hours: 1 },
+      { bucket: "Team Review", hours: 2.5 },
+      { bucket: "Assigned ID", hours: 1 },
+    ]);
+    expect(model?.reviewHours.contributors.legalReview).toEqual([
+      { name: "Lee Legal", hours: 1 },
+      { name: "Pat Legal", hours: 0.5 },
+    ]);
+    expect(model?.reviewHours.contributors.cqoReview).toEqual([{ name: "Casey CQO", hours: 1 }]);
+    expect(model?.reviewHours.contributors.teamReview).toEqual([
+      { name: "Taylor SME", hours: 2 },
+      { name: "Quinn Reviewer", hours: 0.5 },
+    ]);
+  });
+
+  it("returns zero review-hour buckets when a project has no matching categories or assigned ID logs", () => {
+    const snapshot = createUiSnapshot();
+
+    const model = selectProjectDetailModel(snapshot, "beta-project|2025");
+
+    expect(model?.reviewHours.chartData).toEqual([
+      { bucket: "Legal Review", hours: 0 },
+      { bucket: "CQO Review", hours: 0 },
+      { bucket: "Team Review", hours: 0 },
+      { bucket: "Assigned ID", hours: 0 },
+    ]);
+    expect(model?.reviewHours.contributors).toEqual({
+      legalReview: [],
+      cqoReview: [],
+      teamReview: [],
+    });
+  });
+
   it("uses instrument-specific dates when filtering SME collaboration data", () => {
     const snapshot = createUiSnapshot();
 

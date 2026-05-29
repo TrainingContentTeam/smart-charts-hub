@@ -32,7 +32,7 @@ vi.mock("recharts", async () => {
   );
   const MockLeaf = () => null;
   const labelFor = (entry: Record<string, unknown>) =>
-    String(entry.projectName || entry.assignedId || entry.category || entry.status || entry.year || entry.reportingYear || entry.label || entry.phase || entry.roleGroup || entry.owner || entry.user || entry.tool || entry.type || entry.date || "unknown");
+    String(entry.projectName || entry.assignedId || entry.category || entry.status || entry.year || entry.reportingYear || entry.label || entry.bucket || entry.phase || entry.roleGroup || entry.owner || entry.user || entry.tool || entry.type || entry.date || "unknown");
   const MockBar = ({ __chartData, onClick }: { __chartData?: Array<Record<string, unknown>>; onClick?: (entry: Record<string, unknown>) => void }) => (
     <div>
       {(__chartData || []).map((entry, index) => (
@@ -547,6 +547,42 @@ describe("analytics UI pages", () => {
     await waitFor(() => expect(idTab).toHaveAttribute("aria-selected", "true"));
     fireEvent.click(screen.getByRole("button", { name: "chart-bar-LP Development" }));
     expect(screen.getByTestId("location-display").textContent).toBe("/projects?owner=Alex+Doe&status=LP+Development");
+  });
+
+  it("renders project detail review-hour buckets and contributor lists", () => {
+    const snapshot = createUiSnapshot();
+    const baseLog = snapshot.timeLogs[0];
+    snapshot.timeLogs = [
+      { ...baseLog, raw_time_log_row_id: "legal-1", raw_category: "Process Legal Review LC", category_phase: "Review", minutes: 60, raw_user: "Lee Legal", canonical_user_name: "Lee Legal" },
+      { ...baseLog, raw_time_log_row_id: "cqo-1", raw_category: "CQO Review LC", category_phase: "Review", minutes: 45, raw_user: "Casey CQO", canonical_user_name: "Casey CQO" },
+      { ...baseLog, raw_time_log_row_id: "team-1", raw_category: "SME Review LC", category_phase: "Review", minutes: 30, raw_user: "Taylor SME", canonical_user_name: "Taylor SME" },
+      { ...baseLog, raw_time_log_row_id: "assigned-1", raw_category: "Rise Development LC", category_phase: "Production", minutes: 90, raw_user: "Alex Doe", canonical_user_name: "Alex Doe" },
+    ];
+    mockedUseAnalyticsSnapshot.mockReturnValue({
+      data: snapshot,
+      isLoading: false,
+    } as ReturnType<typeof useAnalyticsSnapshot>);
+
+    renderWithRouter(
+      <Routes>
+        <Route path="/projects/:reportingYear/:projectSlug" element={<ProjectDetail />} />
+      </Routes>,
+      ["/projects/2026/alpha-project"],
+    );
+
+    expect(screen.getByText("Review Hours by Category and Assigned ID")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chart-bar-Legal Review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chart-bar-CQO Review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chart-bar-Team Review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chart-bar-Assigned ID" })).toBeInTheDocument();
+    expect(screen.getByText("Legal Review Contributors")).toBeInTheDocument();
+    expect(screen.getByText("CQO Review Contributors")).toBeInTheDocument();
+    expect(screen.getByText("Team Review Contributors")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Lee Legal" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Casey CQO" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Taylor SME" })[0]).toBeInTheDocument();
+    expect(screen.getByText("0.8h")).toBeInTheDocument();
+    expect(screen.getByText("0.5h")).toBeInTheDocument();
   });
 
   it("navigates from the project list to detail and back while preserving list state", () => {

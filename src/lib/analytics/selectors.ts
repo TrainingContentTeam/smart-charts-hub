@@ -32,6 +32,24 @@ type TimeLogChartFilters = {
   endDate?: string | null;
 };
 
+const LEGAL_REVIEW_CATEGORIES = new Set(["Process Legal Review LC", "Legal Review LC"]);
+const CQO_REVIEW_CATEGORIES = new Set(["CQO Review LC"]);
+const TEAM_REVIEW_CATEGORIES = new Set([
+  "ID Review of LP LC",
+  "LP Peer Review LC",
+  "SME Review LC",
+  "Compliance Review LC",
+  "Rise Review LC",
+  "Storyline Review LC",
+  "LMS Review LC",
+]);
+const REVIEW_HOUR_BUCKETS = [
+  { key: "legalReview", label: "Legal Review" },
+  { key: "cqoReview", label: "CQO Review" },
+  { key: "teamReview", label: "Team Review" },
+  { key: "assignedId", label: "Assigned ID" },
+] as const;
+
 export type DashboardChartFilters = {
   projectsByReportingYear?: {
     reportingYears?: string[];
@@ -1356,6 +1374,59 @@ export function selectProjectDetailModel(snapshot: AnalyticsSnapshot, projectKey
       projectTotalHours: round(entry.project_total_minutes / 60, 1),
     }));
 
+  const assignedIdLookups = new Set(project.owner_names.map(normalizePersonLookup).filter(Boolean));
+  const reviewBucketMinutes = {
+    legalReview: 0,
+    cqoReview: 0,
+    teamReview: 0,
+    assignedId: 0,
+  };
+  const reviewContributorMinutes = {
+    legalReview: new Map<string, number>(),
+    cqoReview: new Map<string, number>(),
+    teamReview: new Map<string, number>(),
+  };
+  const addContributorMinutes = (bucket: keyof typeof reviewContributorMinutes, row: TimeLogRow) => {
+    const name = row.canonical_user_name || row.raw_user || "Unknown";
+    reviewContributorMinutes[bucket].set(name, (reviewContributorMinutes[bucket].get(name) || 0) + (row.minutes ?? 0));
+  };
+
+  matchedTimeLogs.forEach((row) => {
+    const minutes = row.minutes ?? 0;
+    if (LEGAL_REVIEW_CATEGORIES.has(row.raw_category)) {
+      reviewBucketMinutes.legalReview += minutes;
+      addContributorMinutes("legalReview", row);
+    }
+    if (CQO_REVIEW_CATEGORIES.has(row.raw_category)) {
+      reviewBucketMinutes.cqoReview += minutes;
+      addContributorMinutes("cqoReview", row);
+    }
+    if (TEAM_REVIEW_CATEGORIES.has(row.raw_category)) {
+      reviewBucketMinutes.teamReview += minutes;
+      addContributorMinutes("teamReview", row);
+    }
+    if (assignedIdLookups.has(normalizePersonLookup(row.canonical_user_name || row.raw_user))) {
+      reviewBucketMinutes.assignedId += minutes;
+    }
+  });
+
+  const toContributorRows = (bucket: keyof typeof reviewContributorMinutes) =>
+    [...reviewContributorMinutes[bucket].entries()]
+      .map(([name, minutes]) => ({ name, hours: round(minutes / 60, 1) }))
+      .sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name));
+
+  const reviewHours = {
+    chartData: REVIEW_HOUR_BUCKETS.map((bucket) => ({
+      bucket: bucket.label,
+      hours: round(reviewBucketMinutes[bucket.key] / 60, 1),
+    })),
+    contributors: {
+      legalReview: toContributorRows("legalReview"),
+      cqoReview: toContributorRows("cqoReview"),
+      teamReview: toContributorRows("teamReview"),
+    },
+  };
+
   return {
     projectKey,
     projectName: project.raw_course_name,
@@ -1385,6 +1456,7 @@ export function selectProjectDetailModel(snapshot: AnalyticsSnapshot, projectKey
       granularity: dailyTimeline.length > 45 ? "weekly" : "daily",
       points: timelinePoints,
     },
+    reviewHours,
     chartFilterOptions: {
       phases: uniqueSorted(matchedTimeLogs.map((row) => row.category_phase)),
       roleGroups: uniqueSorted(matchedTimeLogs.map((row) => row.role_group)),
