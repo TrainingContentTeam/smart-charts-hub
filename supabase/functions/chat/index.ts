@@ -29,22 +29,47 @@ Deno.serve(async (req) => {
     });
 
     const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
+    const { data: userData, error: userError } = await userClient.auth.getUser(token);
+    if (userError || !userData?.user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const userId = claimsData.claims.sub;
+    const userId = userData.user.id;
+
+    const MAX_MESSAGE_LENGTH = 4000;
+    const MAX_HISTORY_ITEMS = 20;
+    const MAX_HISTORY_ITEM_LENGTH = 4000;
 
     const { message, history = [] } = await req.json();
-    if (!message) {
-      return new Response(JSON.stringify({ error: "No message provided" }), {
+    if (!message || typeof message !== "string" || message.length === 0 || message.length > MAX_MESSAGE_LENGTH) {
+      return new Response(JSON.stringify({ error: "Invalid message" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+    if (!Array.isArray(history) || history.length > MAX_HISTORY_ITEMS) {
+      return new Response(JSON.stringify({ error: "Invalid history" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    for (const h of history) {
+      if (
+        !h ||
+        typeof h !== "object" ||
+        typeof h.role !== "string" ||
+        typeof h.content !== "string" ||
+        h.content.length > MAX_HISTORY_ITEM_LENGTH ||
+        (h.role !== "user" && h.role !== "assistant" && h.role !== "model")
+      ) {
+        return new Response(JSON.stringify({ error: "Invalid history item" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const geminiKey = Deno.env.get("GOOGLE_GEMINI_KEY");

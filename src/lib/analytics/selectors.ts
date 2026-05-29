@@ -839,10 +839,10 @@ export function selectAdminDevelopmentAnalyticsModel(snapshot: AnalyticsSnapshot
 
   const hoursByProject = [...projectHoursMap.values()]
     .map((row) => ({
-      ...row,
-      assignedIds: assignedIds.filter((assignedId) => Number(row[assignedId] || 0) > 0),
+      ...(row as Record<string, any>),
+      assignedIds: assignedIds.filter((assignedId) => Number((row as Record<string, any>)[assignedId] || 0) > 0),
     }))
-    .sort((a, b) => Number(b.totalHours) - Number(a.totalHours) || String(a.projectName).localeCompare(String(b.projectName)));
+    .sort((a: any, b: any) => Number(b.totalHours) - Number(a.totalHours) || String(a.projectName).localeCompare(String(b.projectName)));
 
   return {
     cards: {
