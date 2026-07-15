@@ -39,8 +39,8 @@ export default function AiInsights() {
     setLoading(true);
 
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      const url = `https://${projectId}.supabase.co/functions/v1/chat`;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const url = `${supabaseUrl}/functions/v1/chat`;
 
       const res = await fetch(url, {
         method: "POST",
@@ -106,10 +106,11 @@ export default function AiInsights() {
           return updated;
         });
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
       setMessages((prev) => [
         ...prev.filter((m) => m.content !== ""),
-        { role: "assistant", content: `Error: ${err.message}` },
+        { role: "assistant", content: `Error: ${message}` },
       ]);
     } finally {
       setLoading(false);
