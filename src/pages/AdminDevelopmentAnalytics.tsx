@@ -188,8 +188,8 @@ export default function AdminDevelopmentAnalytics() {
     ...row,
     efficiencyForChart: row.efficiency ?? 0,
   }));
-  const topProjectHours = model.hoursByProject.slice(0, 10) as ProjectHoursRow[];
-  const allProjectHours = model.hoursByProject as ProjectHoursRow[];
+  const topProjectHours = model.hoursByProject.slice(0, 10) as unknown as ProjectHoursRow[];
+  const allProjectHours = model.hoursByProject as unknown as ProjectHoursRow[];
 
   const filters = (
     <ChartFilterBar>
