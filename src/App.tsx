@@ -20,6 +20,7 @@ import AiInsights from "@/pages/AiInsights";
 import UserManagement from "@/pages/UserManagement";
 import Reconciliation from "@/pages/Reconciliation";
 import AdminDevelopmentAnalytics from "@/pages/AdminDevelopmentAnalytics";
+import Integrations from "@/pages/Integrations";
 import Auth from "@/pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -59,6 +60,7 @@ function ProtectedRoutes() {
         <Route path="/development-analytics" element={<ProtectedRoute requiredRole="admin"><AdminDevelopmentAnalytics /></ProtectedRoute>} />
         <Route path="/reconciliation" element={<ProtectedRoute requiredRole="admin"><Reconciliation /></ProtectedRoute>} />
         <Route path="/user-management" element={<ProtectedRoute requiredRole="admin"><UserManagement /></ProtectedRoute>} />
+        <Route path="/integrations" element={<ProtectedRoute requiredRole="admin"><Integrations /></ProtectedRoute>} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:reportingYear/:projectSlug" element={<ProjectDetail />} />
         <Route path="/people/:personSlug" element={<PersonDetail />} />

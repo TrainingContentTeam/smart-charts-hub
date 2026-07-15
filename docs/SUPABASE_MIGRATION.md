@@ -86,3 +86,51 @@ npx supabase secrets set GOOGLE_GEMINI_KEY=... --project-ref pvxqgtazxmvbnneuaab
 ```
 
 The tracked `vercel.json` provides the SPA rewrite needed for direct navigation to `/auth` and other React Router paths.
+
+## 5. Wrike OAuth Setup
+
+Apply the Wrike foundation migration:
+
+```powershell
+npx supabase db push
+```
+
+Add these server-only environment variables in Vercel:
+
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `WRIKE_CLIENT_ID`
+- `WRIKE_CLIENT_SECRET`
+- `WRIKE_REDIRECT_URI`
+- `WRIKE_TOKEN_ENCRYPTION_KEY`
+- `APP_URL`
+
+Generate the Wrike token encryption key with:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+For the current production deployment, configure the Wrike OAuth application's callback URL as:
+
+```text
+https://team-analytics-app.vercel.app/api/wrike/callback
+```
+
+Use that exact same URI in Wrike and in `WRIKE_REDIRECT_URI`. Set `APP_URL` to:
+
+```text
+https://team-analytics-app.vercel.app
+```
+
+After the Vercel variables are saved, redeploy the app. Then open `/integrations` as an administrator and select **Connect Wrike**. The app requests the read-only `wsReadOnly` scope and stores encrypted OAuth tokens only in server-accessed Supabase tables.
+
+Wrike's OAuth reference is available at: https://developers.wrike.com/docs/oauth-20-authorization
+
+### Wrike Source Transition Plan
+
+- Wrike will replace the project/course and time-spent upload inputs.
+- Raw Wrike records land in dedicated Wrike tables first.
+- A later analytics adapter will map Wrike records into the app's existing analytics model.
+- Upload Data remains available for SME feedback and other datasets without APIs.
+- Manual non-Wrike uploads must not overwrite Wrike records.
