@@ -1,20 +1,25 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { BarChart3, LogIn, Mail } from "lucide-react";
+import { BarChart3, KeyRound, Mail } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+type AuthMode = "sign-in" | "sign-up" | "forgot-password" | "update-password";
 
 const DEV_BYPASS_AUTH =
   import.meta.env.DEV && import.meta.env.MODE !== "test" && import.meta.env.VITE_BYPASS_AUTH === "true";
 
 export default function Auth() {
   const navigate = useNavigate();
+  const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState<"google" | "email" | null>(null);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -24,10 +29,13 @@ export default function Auth() {
       return;
     }
 
-    const params = new URLSearchParams(
-      window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.search,
-    );
-    const authError = params.get("error_description");
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const queryParams = new URLSearchParams(window.location.search);
+    const recoveryRequested =
+      hashParams.get("type") === "recovery" || queryParams.get("mode") === "reset";
+    const authError = hashParams.get("error_description") ?? queryParams.get("error_description");
+
+    if (recoveryRequested) setMode("update-password");
     if (authError) {
       setError(authError);
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -35,41 +43,35 @@ export default function Auth() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) navigate("/", { replace: true });
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setMode("update-password");
+        setError(null);
+        return;
+      }
+      if (session && !recoveryRequested) navigate("/", { replace: true });
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) navigate("/", { replace: true });
+      if (session && !recoveryRequested) navigate("/", { replace: true });
     });
 
     return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const signInWithGoogle = async () => {
-    if (DEV_BYPASS_AUTH) {
-      navigate("/", { replace: true });
-      return;
-    }
-
-    setLoading("google");
+  const resetMessages = () => {
     setError(null);
     setNotice(null);
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth`,
-      },
-    });
-
-    if (error) {
-      setError(error.message || "Google sign-in failed");
-      setLoading(null);
-    }
   };
 
-  const signInWithMagicLink = async (event: FormEvent<HTMLFormElement>) => {
+  const changeMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setPassword("");
+    setConfirmPassword("");
+    resetMessages();
+  };
+
+  const submitCredentials = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (DEV_BYPASS_AUTH) {
       navigate("/", { replace: true });
@@ -77,36 +79,102 @@ export default function Auth() {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) return;
+    if (mode === "sign-up" && password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    resetMessages();
+
+    if (mode === "sign-up") {
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: { emailRedirectTo: `${window.location.origin}/auth` },
+      });
+
+      if (error) {
+        setError(error.message || "Unable to create the account");
+      } else if (data.session) {
+        navigate("/", { replace: true });
+      } else {
+        setNotice(`Check ${normalizedEmail} to confirm your account, then sign in.`);
+      }
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+      if (error) setError(error.message || "Email or password is incorrect");
+    }
+
+    setLoading(false);
+  };
+
+  const requestPasswordReset = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) return;
 
-    setLoading("email");
-    setError(null);
-    setNotice(null);
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email: normalizedEmail,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth`,
-      },
+    setLoading(true);
+    resetMessages();
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo: `${window.location.origin}/auth?mode=reset`,
     });
 
     if (error) {
-      setError(error.message || "Unable to send the sign-in link");
+      setError(error.message || "Unable to send the reset link");
     } else {
-      setNotice(`A sign-in link was sent to ${normalizedEmail}.`);
+      setNotice(`A password reset link was sent to ${normalizedEmail}.`);
     }
-    setLoading(null);
+    setLoading(false);
   };
+
+  const updatePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!password) return;
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    resetMessages();
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      setError(error.message || "Unable to update the password");
+      setLoading(false);
+      return;
+    }
+
+    window.history.replaceState({}, document.title, "/auth");
+    navigate("/", { replace: true });
+  };
+
+  const isCredentialMode = mode === "sign-in" || mode === "sign-up";
+  const heading = mode === "update-password" ? "Choose a new password" : "Team Analytics";
+  const description =
+    mode === "forgot-password"
+      ? "Enter your email to receive a password reset link"
+      : mode === "update-password"
+        ? "Use at least eight characters for your new password"
+        : "Sign in to access the shared analytics workspace";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-2">
-            <BarChart3 className="h-10 w-10 text-primary" />
+            {mode === "update-password" ? (
+              <KeyRound className="h-10 w-10 text-primary" />
+            ) : (
+              <BarChart3 className="h-10 w-10 text-primary" />
+            )}
           </div>
-          <CardTitle className="text-2xl">Team Analytics</CardTitle>
-          <p className="text-sm text-muted-foreground">Sign in to access the shared analytics workspace</p>
+          <CardTitle className="text-2xl">{heading}</CardTitle>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
@@ -120,42 +188,132 @@ export default function Auth() {
             </p>
           )}
 
-          <Button
-            onClick={signInWithGoogle}
-            disabled={loading !== null}
-            className="w-full"
-            size="lg"
-          >
-            <LogIn className="h-4 w-4" />
-            {loading === "google" ? "Connecting..." : "Continue with Google"}
-          </Button>
+          {isCredentialMode && (
+            <Tabs value={mode} onValueChange={(value) => changeMode(value as AuthMode)}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="sign-in">Sign in</TabsTrigger>
+                <TabsTrigger value="sign-up">Create account</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
 
-          <div className="flex items-center gap-3" aria-hidden="true">
-            <Separator className="flex-1" />
-            <span className="text-xs text-muted-foreground">or</span>
-            <Separator className="flex-1" />
-          </div>
-
-          <form onSubmit={signInWithMagicLink} className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="email">Work email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                placeholder="name@company.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
+          {isCredentialMode && (
+            <form onSubmit={submitCredentials} className="space-y-4">
+              <EmailField email={email} setEmail={setEmail} />
+              <PasswordField
+                id="password"
+                label="Password"
+                value={password}
+                setValue={setPassword}
+                autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
               />
-            </div>
-            <Button type="submit" variant="outline" disabled={loading !== null} className="w-full">
-              <Mail className="h-4 w-4" />
-              {loading === "email" ? "Sending..." : "Email me a sign-in link"}
-            </Button>
-          </form>
+              {mode === "sign-up" && (
+                <PasswordField
+                  id="confirm-password"
+                  label="Confirm password"
+                  value={confirmPassword}
+                  setValue={setConfirmPassword}
+                  autoComplete="new-password"
+                />
+              )}
+              <Button type="submit" disabled={loading} className="w-full" size="lg">
+                <Mail className="h-4 w-4" />
+                {loading ? "Please wait..." : mode === "sign-up" ? "Create account" : "Sign in"}
+              </Button>
+              {mode === "sign-in" && (
+                <Button
+                  type="button"
+                  variant="link"
+                  className="w-full"
+                  onClick={() => changeMode("forgot-password")}
+                >
+                  Forgot password?
+                </Button>
+              )}
+            </form>
+          )}
+
+          {mode === "forgot-password" && (
+            <form onSubmit={requestPasswordReset} className="space-y-4">
+              <EmailField email={email} setEmail={setEmail} />
+              <Button type="submit" disabled={loading} className="w-full" size="lg">
+                {loading ? "Sending..." : "Send reset link"}
+              </Button>
+              <Button type="button" variant="outline" className="w-full" onClick={() => changeMode("sign-in")}>
+                Back to sign in
+              </Button>
+            </form>
+          )}
+
+          {mode === "update-password" && (
+            <form onSubmit={updatePassword} className="space-y-4">
+              <PasswordField
+                id="new-password"
+                label="New password"
+                value={password}
+                setValue={setPassword}
+                autoComplete="new-password"
+              />
+              <PasswordField
+                id="confirm-new-password"
+                label="Confirm new password"
+                value={confirmPassword}
+                setValue={setConfirmPassword}
+                autoComplete="new-password"
+              />
+              <Button type="submit" disabled={loading} className="w-full" size="lg">
+                {loading ? "Updating..." : "Update password"}
+              </Button>
+            </form>
+          )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function EmailField({ email, setEmail }: { email: string; setEmail: (value: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="email">Work email</Label>
+      <Input
+        id="email"
+        type="email"
+        autoComplete="email"
+        placeholder="name@company.com"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        required
+      />
+    </div>
+  );
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  setValue,
+  autoComplete,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  setValue: (value: string) => void;
+  autoComplete: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="password"
+        minLength={8}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        required
+      />
     </div>
   );
 }

@@ -8,9 +8,11 @@ import Auth from "@/pages/Auth";
 const authMocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   onAuthStateChange: vi.fn(),
-  signInWithOAuth: vi.fn(),
-  signInWithOtp: vi.fn(),
+  resetPasswordForEmail: vi.fn(),
+  signInWithPassword: vi.fn(),
+  signUp: vi.fn(),
   unsubscribe: vi.fn(),
+  updateUser: vi.fn(),
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
@@ -18,11 +20,26 @@ vi.mock("@/integrations/supabase/client", () => ({
     auth: {
       getSession: authMocks.getSession,
       onAuthStateChange: authMocks.onAuthStateChange,
-      signInWithOAuth: authMocks.signInWithOAuth,
-      signInWithOtp: authMocks.signInWithOtp,
+      resetPasswordForEmail: authMocks.resetPasswordForEmail,
+      signInWithPassword: authMocks.signInWithPassword,
+      signUp: authMocks.signUp,
+      updateUser: authMocks.updateUser,
     },
   },
 }));
+
+function renderAuth() {
+  return render(
+    <MemoryRouter>
+      <Auth />
+    </MemoryRouter>,
+  );
+}
+
+function enterCredentials(email = "Person@Example.com", password = "password123") {
+  fireEvent.change(screen.getByLabelText("Work email"), { target: { value: email } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: password } });
+}
 
 describe("Auth", () => {
   beforeEach(() => {
@@ -32,47 +49,78 @@ describe("Auth", () => {
     authMocks.onAuthStateChange.mockReturnValue({
       data: { subscription: { unsubscribe: authMocks.unsubscribe } },
     });
-    authMocks.signInWithOAuth.mockResolvedValue({ error: null });
-    authMocks.signInWithOtp.mockResolvedValue({ error: null });
+    authMocks.resetPasswordForEmail.mockResolvedValue({ error: null });
+    authMocks.signInWithPassword.mockResolvedValue({ error: null });
+    authMocks.signUp.mockResolvedValue({ data: { session: null }, error: null });
+    authMocks.updateUser.mockResolvedValue({ error: null });
   });
 
-  it("starts Google OAuth through the configured Supabase client", async () => {
-    render(
-      <MemoryRouter>
-        <Auth />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
+  it("signs in with normalized email and password", async () => {
+    renderAuth();
+    enterCredentials();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     await waitFor(() => {
-      expect(authMocks.signInWithOAuth).toHaveBeenCalledWith({
-        provider: "google",
-        options: { redirectTo: `${window.location.origin}/auth` },
+      expect(authMocks.signInWithPassword).toHaveBeenCalledWith({
+        email: "person@example.com",
+        password: "password123",
       });
     });
   });
 
-  it("sends a normalized email magic link and confirms delivery", async () => {
-    render(
-      <MemoryRouter>
-        <Auth />
-      </MemoryRouter>,
-    );
-
-    fireEvent.change(screen.getByLabelText("Work email"), {
-      target: { value: "  Person@Example.com  " },
+  it("creates an account and requests email confirmation", async () => {
+    renderAuth();
+    const createAccountTab = screen.getByRole("tab", { name: "Create account" });
+    fireEvent.pointerDown(createAccountTab, { button: 0, ctrlKey: false });
+    fireEvent.mouseDown(createAccountTab, { button: 0, ctrlKey: false });
+    fireEvent.click(createAccountTab);
+    enterCredentials();
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
+      target: { value: "password123" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     await waitFor(() => {
-      expect(authMocks.signInWithOtp).toHaveBeenCalledWith({
+      expect(authMocks.signUp).toHaveBeenCalledWith({
         email: "person@example.com",
+        password: "password123",
         options: { emailRedirectTo: `${window.location.origin}/auth` },
       });
     });
     expect(screen.getByRole("status")).toHaveTextContent(
-      "A sign-in link was sent to person@example.com.",
+      "Check person@example.com to confirm your account, then sign in.",
     );
+  });
+
+  it("sends a password reset email", async () => {
+    renderAuth();
+    fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
+    fireEvent.change(screen.getByLabelText("Work email"), {
+      target: { value: "Person@Example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send reset link" }));
+
+    await waitFor(() => {
+      expect(authMocks.resetPasswordForEmail).toHaveBeenCalledWith("person@example.com", {
+        redirectTo: `${window.location.origin}/auth?mode=reset`,
+      });
+    });
+  });
+
+  it("updates the password after following a recovery link", async () => {
+    window.history.replaceState({}, "", "/auth?mode=reset");
+    renderAuth();
+
+    fireEvent.change(screen.getByLabelText("New password"), {
+      target: { value: "replacement123" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
+      target: { value: "replacement123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Update password" }));
+
+    await waitFor(() => {
+      expect(authMocks.updateUser).toHaveBeenCalledWith({ password: "replacement123" });
+    });
   });
 });
